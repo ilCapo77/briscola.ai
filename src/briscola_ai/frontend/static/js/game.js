@@ -8,6 +8,17 @@
  */
 
 document.addEventListener('DOMContentLoaded', () => {
+    /**
+     * Durata (ms) dell'evidenziazione "reveal" prima di applicare gli update UI.
+     *
+     * Obiettivo didattico/UX:
+     * - rendere percepibile la sequenza degli eventi (carta scelta -> carta sul tavolo)
+     * - mantenere la stessa durata per player e IA (coerenza visiva)
+     *
+     * Nota: la vera sorgente di verità resta il backend; qui "tratteniamo" solo il rendering.
+     */
+    const REVEAL_DURATION_MS = 600;
+
     // Game state - minimal, derived from backend
     const store = Store.create({
         gameId: null,
@@ -25,6 +36,65 @@ document.addEventListener('DOMContentLoaded', () => {
     // Track last known table state to detect changes
     let lastTableCardsCount = 0;
     let lastTrickWinner = null;
+
+    // UI hold: quando evidenziamo una carta, rinviamo il rendering dello snapshot
+    // finché non è passato il tempo di reveal (evita che la carta appaia sul tavolo
+    // mentre è ancora "in mano").
+    let uiHoldUntilMs = 0;
+    let pendingObservation = null;
+    let pendingTrickResult = null;
+    let flushTimeoutId = null;
+
+    const _scheduleFlush = () => {
+        if (flushTimeoutId) {
+            clearTimeout(flushTimeoutId);
+            flushTimeoutId = null;
+        }
+        const delay = Math.max(0, uiHoldUntilMs - Date.now());
+        flushTimeoutId = setTimeout(_flushPending, delay);
+    };
+
+    const _holdUiForReveal = () => {
+        uiHoldUntilMs = Math.max(uiHoldUntilMs, Date.now() + REVEAL_DURATION_MS);
+        _scheduleFlush();
+    };
+
+    const _applyObservation = (obs) => {
+        store.setState({
+            observation: obs,
+            gameOver: !!obs.game_over,
+            // La UI è guidata dallo stato server: quando applichiamo uno snapshot valido,
+            // possiamo considerare "chiusa" l'azione locale (lock click).
+            actionInFlight: false
+        });
+
+        updateUI(obs);
+
+        if (obs.game_over) {
+            handleGameOver();
+        }
+    };
+
+    const _flushPending = () => {
+        flushTimeoutId = null;
+
+        if (Date.now() < uiHoldUntilMs) {
+            _scheduleFlush();
+            return;
+        }
+
+        if (pendingObservation) {
+            const obs = pendingObservation;
+            pendingObservation = null;
+            _applyObservation(obs);
+        }
+
+        if (pendingTrickResult) {
+            const msg = pendingTrickResult;
+            pendingTrickResult = null;
+            handleTrickResult(msg);
+        }
+    };
 
     /**
      * Update the entire UI from observation
@@ -82,6 +152,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Handle trick result message - shows both cards with winner
         if (data?.type === 'trick_result') {
+            // Se siamo nel mezzo di un reveal, rimandiamo il risultato per rispettare la sequenza.
+            if (Date.now() < uiHoldUntilMs) {
+                pendingTrickResult = data;
+                _scheduleFlush();
+                return;
+            }
             handleTrickResult(data);
             return;
         }
@@ -90,6 +166,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (data?.type === 'ai_card_reveal') {
             console.log('AI card reveal:', data.card_index, data.card);
             UI.revealOpponentCard(data.card_index, data.card);
+            _holdUiForReveal();
             return;
         }
 
@@ -99,20 +176,14 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        store.setState({
-            observation: data,
-            gameOver: !!data.game_over,
-            // Dopo qualunque snapshot valido consideriamo "chiusa" l'azione locale:
-            // la UI è guidata dallo stato server, quindi non serve mantenere il lock oltre.
-            actionInFlight: false
-        });
-
-        updateUI(data);
-
-        // Check game over
-        if (data.game_over) {
-            handleGameOver();
+        // Se stiamo mostrando un reveal, memorizziamo lo snapshot e lo applichiamo dopo.
+        if (Date.now() < uiHoldUntilMs) {
+            pendingObservation = data;
+            _scheduleFlush();
+            return;
         }
+
+        _applyObservation(data);
     };
 
     /**
@@ -189,15 +260,15 @@ document.addEventListener('DOMContentLoaded', () => {
             // sul tavolo tramite update WebSocket (effetto simile al reveal dell'IA).
             store.setState({ actionInFlight: true });
             UI.revealPlayerCard(cardIndex);
-
-            // Piccola pausa per rendere percepibile lo step (didattico/leggibilità).
-            await new Promise((resolve) => setTimeout(resolve, 350));
+            _holdUiForReveal();
 
             await API.playCard(state.gameId, state.playerIndex, cardIndex);
             // UI update will come via WebSocket
         } catch (error) {
             // In caso di errore, sblocchiamo la UI: lo snapshot potrebbe non arrivare.
             store.setState({ actionInFlight: false });
+            // Ripristina la mano "normale" (rimuove highlight/disabled) ri-renderizzando dallo stato corrente.
+            if (state.observation) updateUI(state.observation);
             alert(`Errore: ${error.message}`);
         }
     };
