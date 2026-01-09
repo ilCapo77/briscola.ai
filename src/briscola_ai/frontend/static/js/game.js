@@ -17,7 +17,7 @@ document.addEventListener('DOMContentLoaded', () => {
      *
      * Nota: la vera sorgente di verità resta il backend; qui "tratteniamo" solo il rendering.
      */
-    const REVEAL_DURATION_MS = 600;
+    const REVEAL_DURATION_MS = 1400;
 
     // Game state - minimal, derived from backend
     const store = Store.create({

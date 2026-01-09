@@ -246,7 +246,7 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
     In una partita a 2 giocatori: l'avversario gioca automaticamente.
     Il delay rende visibile il turno IA nel frontend.
     """
-    AI_DELAY_SECONDS = 1.2
+    AI_DELAY_SECONDS = 1.5
     SHOW_AI_CARD_SECONDS = 1.5  # Tempo per mostrare la carta IA prima di pulire il tavolo
 
     await asyncio.sleep(AI_DELAY_SECONDS)
@@ -271,7 +271,7 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
     card_index = random.choice(valid_actions)
 
     # Mostra la carta selezionata dall'IA nella sua mano prima di giocarla
-    AI_REVEAL_DELAY = 1.5  # Tempo per mostrare la carta nella mano IA
+    AI_REVEAL_DELAY = 1.4  # Tempo per mostrare la carta nella mano IA
     selected_card = game.players[ai_player_index].hand[card_index]
 
     # Invia messaggio per rivelare la carta nella mano IA
