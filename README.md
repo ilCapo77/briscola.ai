@@ -37,6 +37,23 @@ Nota didattica: lo sviluppo “step-by-step” verso l’addestramento ML è att
 
 Il sistema usa un'architettura ibrida HTTP + WebSocket:
 
+### Perché ibrida?
+
+**Perché non solo REST (polling)?**
+- Il polling richiede chiamate continue al server → inefficiente e ad alta latenza
+- Non adatto a un gioco in tempo reale dove lo stato cambia frequentemente
+
+**Perché non solo WebSocket?**
+- Le azioni del giocatore (giocare carta, creare partita) sono operazioni puntuali
+- REST offre semantica chiara (POST = azione, GET = lettura)
+- Più facile da testare e debuggare con strumenti standard (curl, Postman)
+- Gestione errori più semplice (status code HTTP)
+
+**Scelta ibrida:**
+- **REST** per le *azioni* del client → semantica chiara, stateless, facile debug
+- **WebSocket** per gli *aggiornamenti* dal server → tempo reale, push, efficiente
+
+
 ### Endpoint HTTP (REST)
 
 | Metodo | Endpoint | Descrizione |
