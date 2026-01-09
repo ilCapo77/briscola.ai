@@ -1,0 +1,187 @@
+import pytest
+from fastapi.testclient import TestClient
+from starlette.websockets import WebSocketDisconnect
+
+from briscola_ai.backend import server
+from briscola_ai.main import app as main_app
+
+
+@pytest.fixture(autouse=True)
+def _clean_server_state() -> None:
+    """
+    I test d'integrazione usano stato globale in `briscola_ai.backend.server`.
+
+    Per evitare interferenze tra test, puliamo le strutture in memoria
+    prima/dopo ogni test.
+    """
+    server.active_games.clear()
+    server.game_timestamps.clear()
+    server.game_data.clear()
+    server.connected_clients.clear()
+    yield
+    server.active_games.clear()
+    server.game_timestamps.clear()
+    server.game_data.clear()
+    server.connected_clients.clear()
+
+
+def test_backend_root_healthcheck() -> None:
+    client = TestClient(server.app)
+    r = client.get("/")
+    assert r.status_code == 200
+    assert r.json()["message"]
+
+
+def test_create_game_get_state_and_play_action_happy_path() -> None:
+    client = TestClient(server.app)
+
+    create = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["Alice", "Bob"]},
+    )
+    assert create.status_code == 200
+    payload = create.json()
+    game_id = payload["game_id"]
+    assert payload["status"] == "created"
+    assert payload["num_players"] == 2
+    assert payload["player_names"] == ["Alice", "Bob"]
+
+    state_p0 = client.get(f"/games/{game_id}", params={"player_index": 0})
+    assert state_p0.status_code == 200
+    obs = state_p0.json()
+    assert obs["my_index"] == 0
+    assert obs["my_turn"] is True
+    assert obs["valid_actions"]
+
+    action = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},
+    )
+    assert action.status_code == 200
+    result = action.json()
+    assert "played_card" in result or "error" in result
+    assert "error" not in result
+
+    state_p0_after = client.get(f"/games/{game_id}", params={"player_index": 0})
+    assert state_p0_after.status_code == 200
+    assert state_p0_after.json()["my_turn"] is False
+
+
+def test_play_action_rejects_wrong_turn() -> None:
+    client = TestClient(server.app)
+
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    # A inizia (player_index=0). B prova a giocare: deve fallire.
+    r = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 1, "card_index": 0},
+    )
+    assert r.status_code == 400
+    assert r.json()["detail"] == "Non è il tuo turno"
+
+
+def test_main_app_serves_ui_and_mounts_api() -> None:
+    client = TestClient(main_app)
+
+    root = client.get("/")
+    assert root.status_code == 200
+    assert "text/html" in root.headers.get("content-type", "")
+
+    card_asset = client.get("/static/assets/cards/clubs_1.png")
+    assert card_asset.status_code == 200
+    assert "image" in card_asset.headers.get("content-type", "")
+
+    api_root = client.get("/api/")
+    assert api_root.status_code == 200
+    assert api_root.json()["message"]
+
+
+def test_get_game_state_returns_404_for_unknown_game() -> None:
+    client = TestClient(server.app)
+    r = client.get("/games/not-a-real-game-id")
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Partita non trovata"
+
+
+def test_get_game_state_rejects_invalid_player_index() -> None:
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    r = client.get(f"/games/{game_id}", params={"player_index": 999})
+    assert r.status_code == 400
+    assert "indice giocatore" in r.json()["detail"].lower()
+
+
+def test_get_game_result_returns_404_for_unknown_game() -> None:
+    client = TestClient(server.app)
+    r = client.get("/games/not-a-real-game-id/result")
+    assert r.status_code == 404
+    assert r.json()["detail"] == "Partita non trovata"
+
+
+def test_get_game_result_returns_in_progress_when_game_not_finished() -> None:
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    r = client.get(f"/games/{game_id}/result")
+    assert r.status_code == 200
+    assert r.json() == {"game_in_progress": True}
+
+
+def test_websocket_rejects_unknown_game() -> None:
+    client = TestClient(server.app)
+    with pytest.raises(WebSocketDisconnect) as excinfo:
+        with client.websocket_connect("/ws/not-a-real-game-id/0"):
+            pass
+    assert excinfo.value.code == 1000
+
+
+def test_websocket_ping_pong_and_receives_update_after_action() -> None:
+    client = TestClient(server.app)
+
+    create = client.post("/games", json={"num_players": 2, "player_names": ["Alice", "Bob"]})
+    game_id = create.json()["game_id"]
+
+    with client.websocket_connect(f"/ws/{game_id}/0") as ws:
+        initial = ws.receive_json()
+        assert initial["my_index"] == 0
+        assert initial["my_turn"] is True
+        assert initial["valid_actions"]
+
+        ws.send_json({"type": "ping"})
+        pong = ws.receive_json()
+        assert pong == {"type": "pong"}
+
+        play = client.post(
+            f"/games/{game_id}/actions",
+            json={"game_id": game_id, "player_index": 0, "card_index": initial["valid_actions"][0]},
+        )
+        assert play.status_code == 200
+
+        updated = ws.receive_json()
+        assert updated["my_index"] == 0
+        assert updated["my_turn"] is False
+        assert updated["valid_actions"] == []
+
+
+def test_server_lifespan_cancels_cleanup_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    cancelled = {"value": False}
+
+    async def fake_cleanup_inactive_games():  # type: ignore[no-untyped-def]
+        try:
+            while True:
+                await server.asyncio.sleep(3600)
+        except server.asyncio.CancelledError:
+            cancelled["value"] = True
+            raise
+
+    monkeypatch.setattr(server, "cleanup_inactive_games", fake_cleanup_inactive_games)
+
+    with TestClient(server.app):
+        pass
+
+    assert cancelled["value"] is True

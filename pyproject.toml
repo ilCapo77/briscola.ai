@@ -1,0 +1,50 @@
+[project]
+name = "briscola-ai"
+version = "0.1.0"
+description = "A Briscola card game with AI capabilities"
+authors = []
+requires-python = ">=3.14"
+dependencies = [
+    "fastapi>=0.128.0",
+    "uvicorn[standard]>=0.40.0",
+    "pydantic>=2.12.0",
+    "numpy>=2.4.0",
+    "jinja2>=3.1.6",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=9.0.0",
+    "pytest-cov>=7.0.0",
+    "coverage>=7.13.0",
+    "ruff>=0.9.0",
+    "mypy>=1.14.0",
+]
+
+[project.scripts]
+briscola-server = "briscola_ai.main:run_server"
+
+[tool.ruff]
+target-version = "py314"
+line-length = 120
+extend-exclude = ["src/briscola_ai.egg-info"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I"]
+
+[tool.mypy]
+python_version = "3.14"
+warn_unused_ignores = true
+warn_redundant_casts = true
+warn_unreachable = true
+no_implicit_optional = true
+check_untyped_defs = false
+disallow_untyped_defs = false
+ignore_missing_imports = true
+exclude = [
+  "^src/briscola_ai\\.egg-info/",
+]
+
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"

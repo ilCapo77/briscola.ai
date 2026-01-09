@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="it">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Briscola AI</title>
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Briscola AI</h1>
+            <div id="game-info">
+                <span id="game-id"></span>
+                <span id="game-status">Non connesso</span>
+            </div>
+        </header>
+
+        <!-- Setup screen -->
+        <div id="game-setup" class="panel">
+            <h2>Inizia una nuova partita</h2>
+            <form id="game-form">
+                <div class="form-group">
+                    <label for="player-name-input">Il tuo nome:</label>
+                    <input type="text" id="player-name-input" placeholder="Inserisci il tuo nome" value="Giocatore" required>
+                </div>
+                <div class="form-group">
+                    <button type="submit" id="start-game">Avvia partita</button>
+                </div>
+            </form>
+        </div>
+
+        <!-- Game board -->
+        <div id="game-board" class="panel hidden">
+            <!-- Opponent area (top) -->
+            <div id="opponent-area" class="player-area opponent">
+                <div class="player-info">
+                    <span class="player-name" id="opponent-name">Avversario IA</span>
+                    <span class="player-points" id="opponent-points">0 punti</span>
+                </div>
+                <div class="hand" id="opponent-hand"></div>
+            </div>
+
+            <!-- Table area (center) -->
+            <div id="table-area">
+                <div id="deck-area">
+                    <div id="deck" class="card card-back">
+                        <span id="deck-count">0</span>
+                    </div>
+                    <div id="trump-card" class="card-slot"></div>
+                </div>
+
+                <div id="table-center">
+                    <div id="table-cards"></div>
+                    <div id="turn-message" class="turn-message"></div>
+                </div>
+
+                <div id="trick-result" class="trick-result hidden"></div>
+            </div>
+
+            <!-- Player area (bottom) -->
+            <div id="player-area" class="player-area player">
+                <div class="player-info">
+                    <span class="player-name" id="player-name-display">Tu</span>
+                    <span class="player-points" id="player-points">0 punti</span>
+                    <span class="turn-indicator" id="turn-indicator">Tocca a te!</span>
+                </div>
+                <div class="hand" id="player-hand"></div>
+            </div>
+        </div>
+
+        <!-- Game result screen -->
+        <div id="game-result" class="panel hidden">
+            <h2>Partita terminata</h2>
+            <div id="result-content"></div>
+            <button id="new-game">Nuova partita</button>
+        </div>
+
+        <footer>
+            <p>Briscola AI - Un progetto di studio per imparare le reti neurali tramite il gioco</p>
+        </footer>
+    </div>
+
+    <script src="/static/js/store.js"></script>
+    <script src="/static/js/api.js"></script>
+    <script src="/static/js/ui.js"></script>
+    <script src="/static/js/game.js"></script>
+</body>
+</html>
