@@ -210,12 +210,14 @@ const UI = (() => {
     };
 
     /**
-     * Remove any revealed card from the opponent's hand.
+     * Remove any revealed card from both player's and opponent's hands.
      * Use this when the card moves to the table.
      */
     const removeRevealedCard = () => {
-        const revealedCards = elements.opponentHand.querySelectorAll('.revealed');
-        revealedCards.forEach(card => card.remove());
+        // Rimuovi carte evidenziate dalla mano avversario
+        elements.opponentHand.querySelectorAll('.revealed').forEach(card => card.remove());
+        // Rimuovi carte evidenziate dalla mano del giocatore
+        elements.playerHand.querySelectorAll('.revealed').forEach(card => card.remove());
     };
 
     const renderTableCards = (tableCards) => {
