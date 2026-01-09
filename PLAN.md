@@ -122,6 +122,16 @@ Step suggeriti (focus 2-player):
   - [ ] smoke test manuale documentato (passi + expected)
   - [ ] (opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS
 
+> [!IMPORTANT]
+> **Debito tecnico (timing IA nel backend)**: Attualmente i delay per le animazioni IA (`AI_DELAY_SECONDS`, `AI_REVEAL_DELAY`) sono gestiti nel backend con `asyncio.sleep`. Questo mescola logica di presentazione con logica di gioco e spreca risorse server.
+> 
+> **Refactor previsto**: Spostare il controllo del timing nel frontend usando un modello "trigger":
+> 1. Backend processa la mossa e aggiorna stato ("tocca all'IA") senza delay
+> 2. Frontend mostra animazioni e, quando pronto, invia un trigger per la mossa IA
+> 3. Backend esegue la mossa IA immediatamente
+> 
+> Questo separa le responsabilità e rende l'architettura più scalabile.
+
 Deliverable minimo:
 - la UI permette di avviare una partita 2-player, giocare carte e vedere fine partita senza errori in console.
 
