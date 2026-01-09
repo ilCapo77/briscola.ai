@@ -33,6 +33,73 @@ Nota didattica: lo sviluppo “step-by-step” verso l’addestramento ML è att
   - `simulate_games.py` – simulazioni headless (self‑play casuale)
 - `PLAN.md` – piano di refactoring e roadmap didattica (sempre aggiornato)
 
+## Architettura comunicazione Backend ↔ Frontend
+
+Il sistema usa un'architettura ibrida HTTP + WebSocket:
+
+### Endpoint HTTP (REST)
+
+| Metodo | Endpoint | Descrizione |
+|--------|----------|-------------|
+| `POST` | `/api/games` | Crea una nuova partita |
+| `GET` | `/api/games/{id}` | Ottiene lo stato della partita |
+| `POST` | `/api/games/{id}/actions` | Il giocatore gioca una carta |
+| `POST` | `/api/games/{id}/ai-turn` | Triggera la mossa dell'IA |
+| `GET` | `/api/games/{id}/result` | Ottiene il risultato finale |
+
+### WebSocket (tempo reale)
+
+Connessione: `ws://host/api/ws/{game_id}/{player_index}`
+
+**Messaggi dal server:**
+
+| Tipo | Descrizione |
+|------|-------------|
+| `observation` | Stato completo della partita (mano, tavolo, punti, turno) |
+| `ai_card_reveal` | L'IA mostra quale carta sta per giocare |
+| `trick_result` | Risultato della presa (vincitore, punti) |
+
+### Flusso di gioco tipico
+
+```
+┌─────────────┐                              ┌─────────────┐
+│   Frontend  │                              │   Backend   │
+└──────┬──────┘                              └──────┬──────┘
+       │  POST /games                               │
+       │ ──────────────────────────────────────────>│
+       │                              game_id       │
+       │ <──────────────────────────────────────────│
+       │                                            │
+       │  WS connect /ws/{id}/0                     │
+       │ ──────────────────────────────────────────>│
+       │                          observation (WS)  │
+       │ <──────────────────────────────────────────│
+       │                                            │
+       │  POST /actions (gioca carta)               │
+       │ ──────────────────────────────────────────>│
+       │                          observation (WS)  │
+       │ <──────────────────────────────────────────│
+       │                                            │
+       │  POST /ai-turn (trigger IA)                │
+       │ ──────────────────────────────────────────>│
+       │                       ai_card_reveal (WS)  │
+       │ <──────────────────────────────────────────│
+       │                          observation (WS)  │
+       │ <──────────────────────────────────────────│
+       │                                            │
+```
+
+### Modello "Trigger" per l'IA
+
+A differenza di un'architettura tradizionale dove il server decide quando l'IA gioca, qui il **frontend controlla il timing**:
+
+1. Il giocatore gioca → backend aggiorna stato → frontend riceve update
+2. Frontend mostra animazione (1.4s)
+3. Frontend chiama `POST /ai-turn` quando pronto
+4. Backend esegue mossa IA → invia `ai_card_reveal` → attende → invia update
+
+Questo separa la **logica di presentazione** (frontend) dalla **logica di gioco** (backend).
+
 ## Installazione
 
 Questo progetto usa [uv](https://github.com/astral-sh/uv) come package manager, per una gestione dell’ambiente e delle dipendenze più veloce e affidabile rispetto agli strumenti tradizionali.
