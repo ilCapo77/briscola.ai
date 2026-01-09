@@ -312,7 +312,12 @@ button:disabled {
     box-shadow: 0 8px 20px rgba(0, 0, 0, 0.4);
 }
 
-.card.disabled {
+/*
+ * La classe `.disabled` viene usata dal renderer anche per carte "non interattive"
+ * fuori dalla mano (es. carte sul tavolo). Per mantenere l'area tavolo sempre ben
+ * leggibile, applichiamo l'effetto "disabilitato" solo alle carte nella mano del player.
+ */
+#player-hand .card.disabled {
     opacity: 0.6;
     cursor: not-allowed;
 }

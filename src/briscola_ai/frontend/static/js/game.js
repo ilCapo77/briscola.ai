@@ -16,7 +16,8 @@ document.addEventListener('DOMContentLoaded', () => {
         opponentIndex: 1,     // AI is always player 1
         connected: false,
         observation: null,
-        gameOver: false
+        gameOver: false,
+        actionInFlight: false
     });
 
     const getState = () => store.getState();
@@ -100,7 +101,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         store.setState({
             observation: data,
-            gameOver: !!data.game_over
+            gameOver: !!data.game_over,
+            // Dopo qualunque snapshot valido consideriamo "chiusa" l'azione locale:
+            // la UI è guidata dallo stato server, quindi non serve mantenere il lock oltre.
+            actionInFlight: false
         });
 
         updateUI(data);
@@ -178,12 +182,22 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const playCard = async (cardIndex) => {
         const state = getState();
-        if (!state.observation?.my_turn || state.gameOver) return;
+        if (!state.observation?.my_turn || state.gameOver || state.actionInFlight) return;
 
         try {
+            // Feedback immediato: evidenziamo la carta scelta prima che venga "spostata"
+            // sul tavolo tramite update WebSocket (effetto simile al reveal dell'IA).
+            store.setState({ actionInFlight: true });
+            UI.revealPlayerCard(cardIndex);
+
+            // Piccola pausa per rendere percepibile lo step (didattico/leggibilità).
+            await new Promise((resolve) => setTimeout(resolve, 350));
+
             await API.playCard(state.gameId, state.playerIndex, cardIndex);
             // UI update will come via WebSocket
         } catch (error) {
+            // In caso di errore, sblocchiamo la UI: lo snapshot potrebbe non arrivare.
+            store.setState({ actionInFlight: false });
             alert(`Errore: ${error.message}`);
         }
     };

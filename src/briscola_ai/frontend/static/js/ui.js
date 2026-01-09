@@ -187,6 +187,29 @@ const UI = (() => {
     };
 
     /**
+     * Evidenzia (lampeggia) la carta scelta dal giocatore nella sua mano.
+     *
+     * Nota didattica:
+     * - il backend è la "single source of truth": questa è solo una micro-animazione
+     *   locale per rendere chiaro quale carta è stata selezionata PRIMA che venga
+     *   renderizzata sul tavolo tramite l'update WebSocket.
+     * - non rimuove la carta dalla mano: la rimozione/aggiornamento arriva dallo snapshot.
+     *
+     * @param {number} cardIndex - indice della carta nella mano del player
+     */
+    const revealPlayerCard = (cardIndex) => {
+        const cards = elements.playerHand.children;
+        if (cardIndex < 0 || cardIndex >= cards.length) return;
+
+        // Metti in evidenza la carta scelta e disabilita visivamente le altre
+        // durante l'azione (evita confusione/doppi click).
+        Array.from(cards).forEach((cardEl, idx) => {
+            cardEl.classList.toggle('revealed', idx === cardIndex);
+            cardEl.classList.toggle('disabled', idx !== cardIndex);
+        });
+    };
+
+    /**
      * Remove any revealed card from the opponent's hand.
      * Use this when the card moves to the table.
      */
@@ -289,9 +312,9 @@ const UI = (() => {
         showGameResult,
         updateGameInfo,
         renderPlayerHand,
-        renderPlayerHand,
         renderOpponentHand,
         revealOpponentCard,
+        revealPlayerCard,
         removeRevealedCard,
         renderTableCards,
         renderTrumpCard,
