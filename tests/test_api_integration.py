@@ -1,3 +1,13 @@
+"""
+Test di integrazione per l'API HTTP/WebSocket.
+
+Questi test usano `fastapi.testclient.TestClient` e, di conseguenza, lavorano
+contro lo stato globale mantenuto in `briscola_ai.backend.server`.
+
+Nota: puliamo sempre lo stato globale con una fixture `autouse` per evitare
+interferenze tra casi di test.
+"""
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -26,6 +36,7 @@ def _clean_server_state() -> None:
 
 
 def test_backend_root_healthcheck() -> None:
+    """Smoke test: l'endpoint root del backend risponde e contiene un messaggio."""
     client = TestClient(server.app)
     r = client.get("/")
     assert r.status_code == 200
@@ -33,6 +44,7 @@ def test_backend_root_healthcheck() -> None:
 
 
 def test_create_game_get_state_and_play_action_happy_path() -> None:
+    """Happy path: crea partita, legge observation e gioca una carta valida."""
     client = TestClient(server.app)
 
     create = client.post(
@@ -68,6 +80,7 @@ def test_create_game_get_state_and_play_action_happy_path() -> None:
 
 
 def test_play_action_rejects_wrong_turn() -> None:
+    """Regola di turnazione: un giocatore non può giocare quando non è il suo turno."""
     client = TestClient(server.app)
 
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
@@ -83,6 +96,7 @@ def test_play_action_rejects_wrong_turn() -> None:
 
 
 def test_main_app_serves_ui_and_mounts_api() -> None:
+    """La FastAPI principale deve servire UI statica e montare `/api/`."""
     client = TestClient(main_app)
 
     root = client.get("/")
@@ -99,6 +113,7 @@ def test_main_app_serves_ui_and_mounts_api() -> None:
 
 
 def test_get_game_state_returns_404_for_unknown_game() -> None:
+    """Errore corretto: stato partita inesistente => 404."""
     client = TestClient(server.app)
     r = client.get("/games/not-a-real-game-id")
     assert r.status_code == 404
@@ -106,6 +121,7 @@ def test_get_game_state_returns_404_for_unknown_game() -> None:
 
 
 def test_get_game_state_rejects_invalid_player_index() -> None:
+    """Errore corretto: player_index fuori range => 400."""
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
@@ -116,6 +132,7 @@ def test_get_game_state_rejects_invalid_player_index() -> None:
 
 
 def test_get_game_result_returns_404_for_unknown_game() -> None:
+    """Errore corretto: result di partita inesistente => 404."""
     client = TestClient(server.app)
     r = client.get("/games/not-a-real-game-id/result")
     assert r.status_code == 404
@@ -123,6 +140,7 @@ def test_get_game_result_returns_404_for_unknown_game() -> None:
 
 
 def test_get_game_result_returns_in_progress_when_game_not_finished() -> None:
+    """Se la partita non è terminata, `/result` deve indicare che è in progress."""
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
@@ -133,6 +151,7 @@ def test_get_game_result_returns_in_progress_when_game_not_finished() -> None:
 
 
 def test_websocket_rejects_unknown_game() -> None:
+    """WebSocket su partita inesistente: il server chiude subito la connessione."""
     client = TestClient(server.app)
     with pytest.raises(WebSocketDisconnect) as excinfo:
         with client.websocket_connect("/ws/not-a-real-game-id/0"):
@@ -141,6 +160,7 @@ def test_websocket_rejects_unknown_game() -> None:
 
 
 def test_websocket_ping_pong_and_receives_update_after_action() -> None:
+    """WS: ping/pong funziona e, dopo una giocata HTTP, arriva uno snapshot aggiornato."""
     client = TestClient(server.app)
 
     create = client.post("/games", json={"num_players": 2, "player_names": ["Alice", "Bob"]})
@@ -169,6 +189,7 @@ def test_websocket_ping_pong_and_receives_update_after_action() -> None:
 
 
 def test_server_lifespan_cancels_cleanup_task(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Allo shutdown dell'app, il task di cleanup periodico deve essere cancellato."""
     cancelled = {"value": False}
 
     async def fake_cleanup_inactive_games():  # type: ignore[no-untyped-def]

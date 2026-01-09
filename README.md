@@ -1,6 +1,6 @@
 # Briscola AI
 
-![Coverage](coverage.svg)
+![Coverage](https://img.shields.io/badge/coverage-56%25-red)
 
 Un gioco di Briscola con funzionalità di IA. Il progetto implementa la Briscola con un’interfaccia web e un giocatore controllato dall’IA. L’obiettivo è arrivare a una rete neurale che impari a giocare raccogliendo dati dalle partite dei giocatori umani.
 
@@ -106,7 +106,7 @@ Con il virtual environment attivo e le dipendenze dev installate (`uv pip instal
 
 - Test: `pytest`
 - Coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
-- Aggiorna badge coverage: `python scripts/update_coverage_badge.py`
+- Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README.
 - Lint: `ruff check src tests scripts`
 - Format: `ruff format src tests scripts`
 - Typecheck: `mypy src`

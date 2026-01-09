@@ -1,3 +1,12 @@
+"""
+Test di flusso per `BriscolaGame.play_action`.
+
+Obiettivo:
+- validare la transizione di stato quando una presa si completa
+- verificare la logica di pesca post-presa in modalità 2 giocatori
+- assicurare che azioni invalide non corrompano lo stato
+"""
+
 from briscola_ai.game.game import BriscolaGame
 from briscola_ai.game.models import Card, Rank, Suit
 
@@ -74,6 +83,7 @@ def test_after_trick_in_2p_cards_are_dealt_starting_from_trick_winner() -> None:
 
 
 def test_invalid_action_does_not_modify_state() -> None:
+    """Un'azione invalida (indice carta fuori range) deve restituire errore senza side-effect."""
     game = BriscolaGame(num_players=2, player_names=["A", "B"])
     game.trump_card = Card(Suit.CUPS, Rank.TWO)
     game.deck = []

@@ -218,10 +218,7 @@ async def play_action(game_id: str, action: GameAction):
     if result.get("trick_completed"):
         trick_cards = result.get("trick_cards", [])
         winner_index = result.get("trick_winner", 0)
-        points = sum(
-            card.rank.points if hasattr(card, 'rank') else 0 
-            for card, _ in trick_cards
-        )
+        points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
         await notify_trick_result(game_id, trick_cards, winner_index, points)
         # Delay per mostrare il risultato della presa (entrambe le carte + vincitore)
         await asyncio.sleep(2.5)
@@ -245,7 +242,7 @@ async def play_action(game_id: str, action: GameAction):
 async def _maybe_ai_turn(game_id: str, human_player_index: int):
     """
     Se non è il turno del giocatore umano, esegue una mossa IA automatica.
-    
+
     In una partita a 2 giocatori: l'avversario gioca automaticamente.
     Il delay rende visibile il turno IA nel frontend.
     """
@@ -272,11 +269,11 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
         return
 
     card_index = random.choice(valid_actions)
-    
+
     # Mostra la carta selezionata dall'IA nella sua mano prima di giocarla
     AI_REVEAL_DELAY = 1.5  # Tempo per mostrare la carta nella mano IA
     selected_card = game.players[ai_player_index].hand[card_index]
-    
+
     # Invia messaggio per rivelare la carta nella mano IA
     if game_id in connected_clients:
         reveal_message = {
@@ -286,8 +283,8 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
                 "suit": selected_card.suit.value,
                 "rank": selected_card.rank.name,
                 "number": selected_card.rank.number,
-                "points": selected_card.rank.points
-            }
+                "points": selected_card.rank.points,
+            },
         }
         for client in connected_clients[game_id].values():
             try:
@@ -295,10 +292,9 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
             except Exception:
                 pass
 
-    
     # Aspetta per mostrare la carta rivelata
     await asyncio.sleep(AI_REVEAL_DELAY)
-    
+
     result = game.play_action(card_index)
 
     # Se la presa è stata completata, invia notifica speciale con le carte e il vincitore
@@ -306,10 +302,7 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
         trick_cards = result.get("trick_cards", [])
         winner_index = result.get("trick_winner", 0)
         # Calcola i punti della presa
-        points = sum(
-            card.rank.points if hasattr(card, 'rank') else 0 
-            for card, _ in trick_cards
-        )
+        points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
         # Notifica speciale con il risultato della presa
         await notify_trick_result(game_id, trick_cards, winner_index, points)
         # Aspetta per mostrare entrambe le carte con il risultato
@@ -334,7 +327,7 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
         }
     )
 
-    # Se dopo questa mossa tocca ancora all'IA (improbabile in 2-player ma possibile 
+    # Se dopo questa mossa tocca ancora all'IA (improbabile in 2-player ma possibile
     # in scenari futuri), ricorsivamente schedula un'altra mossa.
     if not game.game_over and game.current_turn != human_player_index:
         asyncio.create_task(_maybe_ai_turn(game_id, human_player_index))
@@ -416,7 +409,7 @@ async def notify_clients(game_id: str):
 async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int, points: int):
     """
     Notifica i client del risultato della presa con le carte visibili.
-    
+
     Questo messaggio speciale permette al frontend di mostrare entrambe le carte
     e indicare chiaramente chi ha vinto la mano.
     """
@@ -424,14 +417,17 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
         return
 
     game = active_games[game_id]
-    winner_name = game.players[winner_index].name if winner_index < len(game.players) else f"Giocatore {winner_index + 1}"
+    if winner_index < len(game.players):
+        winner_name = game.players[winner_index].name
+    else:
+        winner_name = f"Giocatore {winner_index + 1}"
 
     trick_result_message = {
         "type": "trick_result",
         "trick_cards": trick_cards,
         "winner_index": winner_index,
         "winner_name": winner_name,
-        "points": points
+        "points": points,
     }
 
     for _, websocket in connected_clients[game_id].items():
