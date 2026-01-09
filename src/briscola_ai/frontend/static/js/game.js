@@ -4,7 +4,8 @@
  * Coordina la logica di gioco. La UI è ora guidata esclusivamente
  * dallo stato ricevuto via WebSocket dal backend.
  *
- * L'IA gioca automaticamente lato server (non più client-side).
+ * L'IA viene triggerata dal frontend quando le animazioni sono complete
+ * (modello "trigger" - separazione presentazione/logica di gioco).
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -59,6 +60,35 @@ document.addEventListener('DOMContentLoaded', () => {
         _scheduleFlush();
     };
 
+    // Flag per evitare trigger multipli dell'IA
+    let aiTurnScheduled = false;
+
+    /**
+     * Schedula il trigger della mossa IA.
+     * Chiamato quando riceviamo uno snapshot che indica che è il turno dell'IA.
+     */
+    const _scheduleAiTurn = () => {
+        if (aiTurnScheduled) return;
+        aiTurnScheduled = true;
+
+        const state = getState();
+        if (!state.gameId) {
+            aiTurnScheduled = false;
+            return;
+        }
+
+        // Piccolo delay per dare respiro alla UI (il reveal è già gestito dal hold)
+        setTimeout(async () => {
+            aiTurnScheduled = false;
+            try {
+                await API.triggerAiTurn(state.gameId);
+                // La risposta arriva via WebSocket, non serve fare altro qui
+            } catch (error) {
+                console.error('Errore nel trigger mossa IA:', error);
+            }
+        }, 100);
+    };
+
     const _applyObservation = (obs) => {
         store.setState({
             observation: obs,
@@ -72,6 +102,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (obs.game_over) {
             handleGameOver();
+        } else if (!obs.my_turn) {
+            // È il turno dell'IA: triggeriamo la mossa
+            _scheduleAiTurn();
         }
     };
 

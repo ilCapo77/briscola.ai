@@ -230,35 +230,57 @@ async def play_action(game_id: str, action: GameAction):
         if game_id in connected_clients:
             await notify_clients(game_id)
 
-    # Se la partita non è finita e tocca all'IA (giocatore non umano),
-    # schedula una mossa automatica dopo un breve delay.
-    # Per ora consideriamo "umano" solo il giocatore che ha effettuato l'ultima mossa.
-    if not game.game_over:
-        asyncio.create_task(_maybe_ai_turn(game_id, action.player_index))
+    # Il frontend triggerà la mossa IA quando sarà pronto (dopo le animazioni).
+    # Non scheduliamo più automaticamente la mossa IA qui.
 
     return _json_safe(result)
 
 
-async def _maybe_ai_turn(game_id: str, human_player_index: int):
+@app.post("/games/{game_id}/ai-turn", response_model=Dict)
+async def trigger_ai_turn(game_id: str):
     """
-    Se non è il turno del giocatore umano, esegue una mossa IA automatica.
+    Endpoint per triggerare la mossa dell'IA.
+    
+    Chiamato dal frontend quando le animazioni sono complete e il giocatore
+    è pronto a vedere la mossa dell'IA. Questo separa la logica di presentazione
+    (frontend) dalla logica di gioco (backend).
+    """
+    if game_id not in active_games:
+        raise HTTPException(status_code=404, detail="Partita non trovata")
 
-    In una partita a 2 giocatori: l'avversario gioca automaticamente.
-    Il delay rende visibile il turno IA nel frontend.
+    game = active_games[game_id]
+
+    if game.game_over:
+        raise HTTPException(status_code=400, detail="Partita terminata")
+
+    # Verifica che sia effettivamente il turno dell'IA (non del giocatore umano, index 0)
+    human_player_index = 0  # In 2-player, l'umano è sempre player 0
+    if game.current_turn == human_player_index:
+        raise HTTPException(status_code=400, detail="Non è il turno dell'IA")
+
+    # Esegui la mossa IA
+    result = await _execute_ai_turn(game_id, human_player_index)
+    return _json_safe(result) if result else {"status": "no_action"}
+
+
+async def _execute_ai_turn(game_id: str, human_player_index: int):
     """
-    AI_DELAY_SECONDS = 1.5
+    Esegue la mossa dell'IA.
+    
+    Nota: non c'è più delay iniziale. Il timing delle animazioni è gestito
+    dal frontend che chiama questo endpoint quando è pronto.
+    """
+    AI_REVEAL_DELAY = 1.4  # Tempo per mostrare la carta nella mano IA
     SHOW_AI_CARD_SECONDS = 1.5  # Tempo per mostrare la carta IA prima di pulire il tavolo
 
-    await asyncio.sleep(AI_DELAY_SECONDS)
-
     if game_id not in active_games:
-        return
+        return None
 
     game = active_games[game_id]
 
     # Se la partita è finita o tocca al giocatore umano, non fare nulla
     if game.game_over or game.current_turn == human_player_index:
-        return
+        return None
 
     # AI gioca una carta casuale tra le valide
     ai_player_index = game.current_turn
@@ -266,12 +288,9 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
     valid_actions = observation.get("valid_actions", [])
 
     if not valid_actions:
-        return
+        return None
 
     card_index = random.choice(valid_actions)
-
-    # Mostra la carta selezionata dall'IA nella sua mano prima di giocarla
-    AI_REVEAL_DELAY = 1.4  # Tempo per mostrare la carta nella mano IA
     selected_card = game.players[ai_player_index].hand[card_index]
 
     # Invia messaggio per rivelare la carta nella mano IA
@@ -297,21 +316,16 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
 
     result = game.play_action(card_index)
 
-    # Se la presa è stata completata, invia notifica speciale con le carte e il vincitore
+    # Se la presa è stata completata, invia notifica speciale
     if result.get("trick_completed"):
         trick_cards = result.get("trick_cards", [])
         winner_index = result.get("trick_winner", 0)
-        # Calcola i punti della presa
         points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
-        # Notifica speciale con il risultato della presa
         await notify_trick_result(game_id, trick_cards, winner_index, points)
-        # Aspetta per mostrare entrambe le carte con il risultato
         await asyncio.sleep(SHOW_AI_CARD_SECONDS)
-        # Notifica con lo stato aggiornato dopo il delay
         if game_id in connected_clients:
             await notify_clients(game_id)
     else:
-        # Presa non completata: mostra solo la carta AI
         if game_id in connected_clients:
             await notify_clients(game_id)
 
@@ -327,10 +341,7 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int):
         }
     )
 
-    # Se dopo questa mossa tocca ancora all'IA (improbabile in 2-player ma possibile
-    # in scenari futuri), ricorsivamente schedula un'altra mossa.
-    if not game.game_over and game.current_turn != human_player_index:
-        asyncio.create_task(_maybe_ai_turn(game_id, human_player_index))
+    return result
 
 
 @app.get("/games/{game_id}/result", response_model=Dict)
