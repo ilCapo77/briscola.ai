@@ -10,7 +10,10 @@ Un gioco di Briscola con funzionalità di IA. Il progetto implementa la Briscola
 - Supporto sia per 2 giocatori sia per 4 giocatori (a squadre)
 - Interfaccia utente web
 - Aggiornamenti in tempo reale via WebSocket
-- IA semplice (attualmente strategia casuale)
+- IA semplice (attualmente strategia casuale) con architettura "trigger":
+  - Il frontend controlla le animazioni e triggera la mossa IA quando pronto
+  - Il backend esegue la logica di gioco senza delay artificiali
+  - Separazione pulita tra presentazione e logica
 - Raccolta dati per machine learning
 
 Nota didattica: lo sviluppo “step-by-step” verso l’addestramento ML è attualmente focalizzato sulla modalità **2 giocatori**; il 4‑player rimane come supporto e regressione.
