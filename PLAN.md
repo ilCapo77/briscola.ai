@@ -28,6 +28,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
 - UI quality: da stabilizzare/validare (non ancora coperta da test automatici).
 - Test: presenti in `tests/` (unit + integrazione API base).
 - Coverage: misurata con `pytest-cov` (attuale ~56% su `briscola_ai`; obiettivo: crescita progressiva).
+- Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 
 Comandi di verifica (sempre validi):
 - test: `pytest`
@@ -86,7 +87,7 @@ Obiettivo: aggiornare senza rompere API e comportamento, usando i test come rete
 Stato attuale (dopo upgrade):
 - venv: Python 3.14
 - stack: FastAPI + Pydantic v2
-- tests: verdi (22)
+- tests: verdi (29)
 - coverage totale: ~56% (focus prossimo: aumentare copertura di `backend/server.py` e rami non coperti del motore)
 
 Prossimi step (per aumentare coverage, focus 2-player):
@@ -210,4 +211,7 @@ Percorso consigliato:
 
 ## Prossimo passo (proposta)
 
-Se sei d’accordo: iniziamo dalla **Fase 0** (test + simulatore CLI minimo), poi facciamo l’upgrade dipendenze con sicurezza.
+Se sei d’accordo: focalizziamoci sulla **stabilizzazione UI** (2 giocatori) e sulla chiarezza didattica dei passaggi della mano:
+- rendere la sequenza sempre esplicita: *prima carta*, *seconda carta*, *risultato presa* (con tempi ragionevoli e carte sovrapposte)
+- eliminare i casi in cui il frontend “cade” o mostra fallback (carta bianca/retro) per problemi di serializzazione/mapping
+- (opzionale) introdurre un linter JS (ESLint/Biome) quando decidiamo una toolchain minima per il frontend

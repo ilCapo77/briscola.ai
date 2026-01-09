@@ -32,6 +32,8 @@ The app serves the UI at `http://localhost:8000` by default (`--host`, `--port` 
 - Commenting-first (didactic repo): keep code and tests well commented; explain non-obvious logic, edge cases, and what each test scenario is asserting.
 - Agent communication: for each iteration, explain what changed and why in a didactic way (assumptions, reasoning, and how to verify locally).
 - Planning hygiene: keep `PLAN.md` continuously updated so it’s always clear what’s done, what’s in progress, and what’s next.
+- Planning hygiene (commit gate): before every commit, check `PLAN.md` and update it if needed so the plan stays aligned with the actual repo state.
+- Quality gate (commit): before every commit, if the changes affect Python code/tests, run `ruff check src tests scripts` and `pytest` (and fix issues) before committing.
 - Doc hygiene: keep `AGENTS.md` itself updated as the working agreement evolves (update it whenever we introduce new tooling, conventions, or expectations).
 - Tooling (dev deps):
   - Canonical: `ruff format src tests scripts` and `ruff check --fix src tests scripts` (includes import sorting via `I` rules), plus `mypy src`.
