@@ -70,11 +70,21 @@ Connessione: `ws://host/api/ws/{game_id}/{player_index}`
 
 **Messaggi dal server:**
 
-| Tipo | Descrizione |
-|------|-------------|
-| `observation` | Stato completo della partita (mano, tavolo, punti, turno) |
-| `ai_card_reveal` | L'IA mostra quale carta sta per giocare |
-| `trick_result` | Risultato della presa (vincitore, punti) |
+Nota importante: **non tutti i messaggi hanno un campo `type`**.
+
+- Lo **snapshot di gioco** (“observation”) è un oggetto JSON *senza* `type` (es. contiene `my_hand`, `my_turn`, `table_cards`, ecc.).
+- I messaggi “speciali” (es. reveal IA e risultato presa) hanno `type`.
+
+| Messaggio | Formato | Descrizione |
+|----------|---------|-------------|
+| Snapshot (observation) | `{ ... }` *(senza `type`)* | Stato completo della partita per il giocatore indicizzato dal WS |
+| Reveal IA | `{ "type": "ai_card_reveal", ... }` | L'IA mostra quale carta sta per giocare |
+| Risultato presa | `{ "type": "trick_result", ... }` | Risultato della presa (carte, vincitore, punti) |
+| Keepalive | `{ "type": "pong" }` | Risposta ai ping del client (non è uno snapshot) |
+
+Regola pratica lato client:
+- se `payload.type` esiste → gestisci come messaggio speciale
+- altrimenti → trattalo come observation snapshot
 
 ### Flusso di gioco tipico
 
@@ -89,19 +99,19 @@ Connessione: `ws://host/api/ws/{game_id}/{player_index}`
        │                                            │
        │  WS connect /ws/{id}/0                     │
        │ ──────────────────────────────────────────>│
-       │                          observation (WS)  │
+       │                     snapshot (WS, no type) │
        │ <──────────────────────────────────────────│
        │                                            │
        │  POST /actions (gioca carta)               │
        │ ──────────────────────────────────────────>│
-       │                          observation (WS)  │
+       │                     snapshot (WS, no type) │
        │ <──────────────────────────────────────────│
        │                                            │
        │  POST /ai-turn (trigger IA)                │
        │ ──────────────────────────────────────────>│
        │                       ai_card_reveal (WS)  │
        │ <──────────────────────────────────────────│
-       │                          observation (WS)  │
+       │                     snapshot (WS, no type) │
        │ <──────────────────────────────────────────│
        │                                            │
 ```

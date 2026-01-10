@@ -26,6 +26,12 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - back: `card_back.png` (retro carta, usato per mano avversario e mazzo)
   - Nota UI: le carte in UI mantengono l'aspect ratio delle immagini (177x285px).
 - UI quality: da stabilizzare/validare (non ancora coperta da test automatici).
+  - Punti da sistemare/considerare (trigger IA + robustezza):
+    - Evitare doppi trigger IA: rendere `POST /api/games/{id}/ai-turn` idempotente e/o protetto da lock per partita (race: doppie chiamate ravvicinate).
+    - Frontend: evitare trigger multipli su snapshot ripetuti/reconnect (flag “in flight” fino a risposta/errore).
+    - Documentare/decidere il contratto WS: snapshot senza `type` vs introdurre `type: "observation"` (allineare README/UI).
+    - Chiarire vincolo attuale “umano = player 0” nel trigger IA (incompatibile con 4-player o “scegli giocatore” finché non generalizziamo).
+    - Considerare fallback per client non-UI (uso API puro): se non chiami `/ai-turn`, la partita può fermarsi (decidere se mantenere un default server-side o documentare chiaramente).
 - Test: presenti in `tests/` (unit + integrazione API base).
 - Coverage: misurata con `pytest-cov` (attuale ~56% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
