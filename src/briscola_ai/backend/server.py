@@ -252,6 +252,14 @@ async def play_action(game_id: str, action: GameAction):
     # Modello "standard": se dopo la mossa umana tocca all'IA, il backend gioca automaticamente.
     # Nota UX: non inseriamo `asyncio.sleep()` per animazioni; il frontend gestisce i timing
     # trattenendo gli update (reveal/risultato presa) quando li riceve.
+    #
+    # Nota architetturale (task IA fuori lock):
+    # Schediliamo il task IA *dopo* aver rilasciato il lock per evitare deadlock e permettere
+    # alla risposta HTTP di tornare subito al client. Il check `game_after.game_over` qui è
+    # solo un'ottimizzazione: la vera guardia è dentro `_maybe_ai_turn`, che riacquisisce il
+    # lock e verifica nuovamente lo stato prima di giocare. Questo pattern è safe perché:
+    # 1. Il task può trovare la partita già terminata/rimossa → ritorna subito.
+    # 2. Eventuali azioni concorrenti (es. reconnect) sono serializzate dal lock interno.
     if game_id in active_games:
         game_after = active_games[game_id]
         if not game_after.game_over and game_after.num_players == 2 and game_after.current_turn != action.player_index:

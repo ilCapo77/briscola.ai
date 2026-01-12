@@ -32,7 +32,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Documentare/decidere il contratto WS: snapshot senza `type` vs introdurre `type: "observation"` (allineare README/UI).
     - Chiarire vincolo attuale UI “umano = player 0” (focus 2-player; da generalizzare se aggiungiamo scelta giocatore/4-player in UI).
   - Timing animazioni (scelta architetturale):
-    - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato presa).
+    - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
 - Coverage: misurata con `pytest-cov` (attuale ~56% su `briscola_ai`; obiettivo: crescita progressiva).
@@ -68,9 +68,9 @@ Comandi di verifica (sempre validi):
   - [x] distribuzione corretta (2p e 4p)
   - [x] fine partita 2p + somma punti = 120
 - [x] Rafforzamento test (regole core):
-  - [x] ordine di presa della Briscola (Asso > Tre > Re > ...)
+  - [x] ordine delle carte nella mano (Asso > Tre > Re > ...)
   - [x] briscola batte non-briscola anche se “bassa”
-  - [x] flusso `play_action`: fine presa, aggiornamento turno, pescata in 2p
+  - [x] flusso `play_action`: fine mano, aggiornamento turno, pescata in 2p
 - [x] Documentazione didattica:
   - [x] docstring dettagliate su moduli/classi/funzioni/metodi (Python)
 - Risultato: comportamento “bloccato” da test prima dell’upgrade dipendenze.
@@ -109,10 +109,11 @@ Obiettivo: rendere la UI affidabile e “debuggabile” (strumento didattico e, 
 
 Step suggeriti (focus 2-player):
 - [x] Stabilizzare rendering carte: immagini in `/static/assets/cards/` e normalizzazione payload carte lato UI (WS/HTTP).
-- [x] Sequenza presa stabile e leggibile: 1° carta → 2° carta → risultato (con tempi controllati lato frontend; **senza** carte sovrapposte).
+- [x] Sequenza mano stabile e leggibile: 1° carta → 2° carta → risultato (con tempi controllati lato frontend; **senza** carte sovrapposte).
 - [x] Fix freeze UI: ignorare messaggi WS keepalive (`ping`/`pong`) che non sono snapshot di gioco.
-- [x] Esito presa: usare `trick_result.trick_cards` dal backend per evitare race (niente duplicazioni “Tu/IA” sul tavolo).
+- [x] Esito mano: usare `trick_result.trick_cards` dal backend per evitare race (niente duplicazioni “Tu/IA” sul tavolo).
 - [ ] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
+  - Documentazione: vedi `README.md` → sezione “Smoke test UI (manuale)”.
 - [ ] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
 - [ ] Allineare contratto dati UI↔API:
   - [ ] definire un DTO stabile per `Card`, `GameObservation`, `GameResult` (idealmente da OpenAPI/Pydantic)
@@ -162,7 +163,7 @@ Azioni chiave:
 Obiettivo: coprire il motore e assicurare stabilità in evoluzione.
 
 - Unit test dominio (priorità alta):
-  - regole presa (`who_wins_trick`) con casi noti
+  - regole mano (`who_wins_trick`) con casi noti
   - punteggi (somma punti carte catturate)
   - invarianti: nessuna carta duplicata, mano sempre valida, turni coerenti
 - Test di integrazione API (priorità media):

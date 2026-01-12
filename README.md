@@ -72,13 +72,13 @@ Connessione: `ws://host/api/ws/{game_id}/{player_index}`
 Nota importante: **non tutti i messaggi hanno un campo `type`**.
 
 - Lo **snapshot di gioco** (“observation”) è un oggetto JSON *senza* `type` (es. contiene `my_hand`, `my_turn`, `table_cards`, ecc.).
-- I messaggi “speciali” (es. reveal IA e risultato presa) hanno `type`.
+- I messaggi “speciali” (es. reveal IA e risultato della mano) hanno `type`.
 
 | Messaggio | Formato | Descrizione |
 |----------|---------|-------------|
 | Snapshot (observation) | `{ ... }` *(senza `type`)* | Stato completo della partita per il giocatore indicizzato dal WS |
 | Reveal IA | `{ "type": "ai_card_reveal", ... }` | L'IA mostra quale carta sta per giocare |
-| Risultato presa | `{ "type": "trick_result", ... }` | Risultato della presa (carte, vincitore, punti) |
+| Risultato mano | `{ "type": "trick_result", ... }` | Risultato della mano (carte, vincitore, punti) |
 | Keepalive | `{ "type": "pong" }` | Risposta ai ping del client (non è uno snapshot) |
 
 Nota: gli snapshot includono `server_version` (intero monotono) come metadato debug‑friendly (incrementato ad ogni azione, umana o IA) per capire se lo stato sta avanzando e per diagnosticare problemi di ordering/reconnect.
@@ -124,7 +124,7 @@ Il backend avanza automaticamente la partita quando è il turno dell'IA (pattern
 1. Il giocatore gioca → backend aggiorna stato → frontend riceve update
 2. Backend vede che tocca all'IA e gioca automaticamente:
    - invia `ai_card_reveal`
-   - invia `trick_result` (quando la presa si completa)
+   - invia `trick_result` (quando la mano si completa)
    - invia lo snapshot aggiornato
 3. Frontend gestisce la presentazione:
    - mette in coda gli eventi ricevuti via WS
@@ -211,6 +211,26 @@ Con il virtual environment attivo e le dipendenze dev installate (`uv pip instal
 - Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README.
 - Lint: `ruff check src tests scripts`
 - Format: `ruff format src tests scripts`
+
+### Smoke test UI (manuale)
+
+Obiettivo: una verifica rapida (2–3 minuti) per capire subito se una modifica ha rotto il flusso principale della UI.
+
+Setup:
+- Avvia server: `briscola-server --reload`
+- Apri UI: `http://localhost:8000`
+- Apri DevTools → tab **Console** (lascia aperto durante la partita)
+
+Checklist:
+1. Avvia una partita **2-player** inserendo un nome giocatore
+2. Gioca **3 mani complete** (tu giochi → IA gioca → appare il risultato della mano)
+3. Verifica che la sequenza visiva sia sempre: **reveal** → **seconda carta** → **risultato della mano**
+4. (Opzionale) Continua fino a fine partita e verifica che appaia **Partita terminata** + risultato finale
+
+Expected:
+- Nessun errore in console (ok log informativi; no eccezioni uncaught)
+- Nessun “freeze”: la UI resta interattiva e le carte non scompaiono in modo incoerente
+- Nessuna duplicazione sul tavolo (es. due carte attribuite allo stesso player nella stessa mano)
 - Typecheck: `mypy src`
 
 ## Simulazioni (headless)

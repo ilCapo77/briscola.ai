@@ -47,7 +47,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Track last known table state to detect changes
     let lastTableCardsCount = 0;
-    let lastTrickWinner = null;
 
     // UI hold: quando evidenziamo una carta, rinviamo il rendering dello snapshot
     // finché non è passato il tempo di reveal (evita che la carta appaia sul tavolo
@@ -157,6 +156,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 _applyObservation(next.data);
                 continue;
             }
+
+            // Tipo sconosciuto: logghiamo per debug e proseguiamo.
+            console.warn('Evento WS con tipo non gestito:', next.type, next);
         }
 
         if (pendingEvents.length > 0) _scheduleFlush();
