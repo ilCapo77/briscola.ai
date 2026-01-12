@@ -25,7 +25,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - front: `{suit}_{rank}.png` con `suit` in `{clubs,cups,coins,swords}` e `rank` in `1..10` (es. `clubs_1.png`)
     - back: `card_back.png` (retro carta, usato per mano avversario e mazzo)
   - Nota UI: le carte in UI mantengono l'aspect ratio delle immagini (177x285px).
-- UI quality: da stabilizzare/validare (non ancora coperta da test automatici).
+- UI quality: **stabile in 2-player** (nessun bug visibile segnalato); manca ancora una copertura automatica UI (almeno smoke test manuale documentato) e decisione su linting JS.
   - Punti da sistemare/considerare (trigger IA + robustezza):
     - Evitare doppi trigger IA: rendere `POST /api/games/{id}/ai-turn` idempotente e/o protetto da lock per partita (race: doppie chiamate ravvicinate).
     - Frontend: evitare trigger multipli su snapshot ripetuti/reconnect (flag “in flight” fino a risposta/errore).
@@ -109,18 +109,12 @@ Prossimi step (per aumentare coverage, focus 2-player):
 Obiettivo: rendere la UI affidabile e “debuggabile” (strumento didattico e, in futuro, di raccolta dati).
 
 Step suggeriti (focus 2-player):
-- [x] Stabilizzare rendering carte: usare immagini in `/static/assets/cards/` e normalizzare il payload carte (WS/HTTP).
-- [x] Rendere chiari gli step: indicatore presa/turno/mazzo + banner esito presa + storia prese (con carte catturate).
+- [x] Stabilizzare rendering carte: immagini in `/static/assets/cards/` e normalizzazione payload carte lato UI (WS/HTTP).
+- [x] Sequenza presa stabile e leggibile: 1° carta → 2° carta → risultato (con tempi controllati lato frontend; **senza** carte sovrapposte).
 - [x] Fix freeze UI: ignorare messaggi WS keepalive (`ping`/`pong`) che non sono snapshot di gioco.
-- [x] Robustezza UI: ignorare payload WS non-snapshot e loggare carte non renderizzabili (fallback visuale + info console).
-- [x] Log prese: render robusto delle carte (gestisce anche tuple tipo `[card, player]` e fallback con log onerror).
-- [x] Overlay presa: usare `trick_cards` dal backend per evitare race WS/HTTP (no più duplicati "Tu"/avversario).
-- [x] UI nel tavolo: carte sovrapposte con rotazione/offset + messaggi step (1/2/3) sotto le carte + risultato con timing.
-- [x] Sequenza presa stabile: accumulo client-side delle carte giocate per mostrare sempre 1° carta, 2° carta, risultato (no “sparizioni”).
-- [x] Fix visuali critici (UI Bug hunting):
-  - [x] "AI Card Reveal" non funzionava (backend type error)
-  - [x] Duplicazione carte in animazione fine presa (sync timing)
-- [ ] Riprodurre e catalogare i bug UI (console JS, tab Network, handshake WebSocket).
+- [x] Esito presa: usare `trick_result.trick_cards` dal backend per evitare race (niente duplicazioni “Tu/IA” sul tavolo).
+- [ ] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
+- [ ] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
 - [ ] Allineare contratto dati UI↔API:
   - [ ] definire un DTO stabile per `Card`, `GameObservation`, `GameResult` (idealmente da OpenAPI/Pydantic)
   - [ ] ridurre accoppiamento a stringhe “magiche” (es. `player_0_hand_size`) introducendo campi espliciti
@@ -222,10 +216,4 @@ Percorso consigliato:
 - **Compatibilità FastAPI/Pydantic v2**: upgrade richiede cambi mirati.
 - **Modalità 4 giocatori**: l’osservazione parziale e il training a squadre complicano; possiamo partire dal 2‑player per didattica e poi estendere.
 - **Persistenza**: SQLite è semplice e “portabile”; Postgres in Docker è più realistico ma aggiunge overhead operativo.
-
-## Prossimo passo (proposta)
-
-Se sei d’accordo: focalizziamoci sulla **stabilizzazione UI** (2 giocatori) e sulla chiarezza didattica dei passaggi della mano:
-- [x] Rendere la sequenza sempre esplicita: *prima carta*, *seconda carta*, *risultato presa* (tempi ragionevoli; **non** usiamo più carte sovrapposte)
-- [x] Eliminare i casi in cui il frontend “cade” o mostra fallback (carta bianca/retro) per problemi di serializzazione/mapping
-- [ ] (Opzionale) introdurre un linter JS (ESLint/Biome) quando decidiamo una toolchain minima per il frontend (**da decidere**)
+- **Tooling frontend (lint JS)**: decidere se introdurre un linter/formatter JS (es. Biome vs ESLint/Prettier) o mantenere un check minimale (es. `node --check` integrato in `pytest`).
