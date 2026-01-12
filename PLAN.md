@@ -29,7 +29,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
   - Punti da sistemare/considerare (IA server-driven + robustezza):
     - Backend: mossa IA eseguita automaticamente quando è il suo turno (pattern standard); serializzazione mutazioni tramite `game_locks`.
     - Frontend: coda eventi WS + hold per mantenere la sequenza didattica (carta 1 → carta 2 → risultato) anche se gli update arrivano “subito”.
-    - Documentare/decidere il contratto WS: snapshot senza `type` vs introdurre `type: "observation"` (allineare README/UI).
+    - Contratto WS fissato: gli snapshot includono `type: "observation"` (allineare README/UI e test).
     - Chiarire vincolo attuale UI “umano = player 0” (focus 2-player; da generalizzare se aggiungiamo scelta giocatore/4-player in UI).
   - Timing animazioni (scelta architetturale):
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).

@@ -193,6 +193,7 @@ def test_websocket_ping_pong_and_receives_update_after_action() -> None:
 
     with client.websocket_connect(f"/ws/{game_id}/0") as ws:
         initial = ws.receive_json()
+        assert initial["type"] == "observation"
         assert initial["my_index"] == 0
         assert initial["my_turn"] is True
         assert initial["valid_actions"]
@@ -208,6 +209,7 @@ def test_websocket_ping_pong_and_receives_update_after_action() -> None:
         assert play.status_code == 200
 
         updated = ws.receive_json()
+        assert updated["type"] == "observation"
         assert updated["my_index"] == 0
         assert updated["my_turn"] is False
         assert updated["valid_actions"] == []

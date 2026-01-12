@@ -407,6 +407,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     try:
         # Invia lo stato iniziale della partita
         observation = game.get_observation_for_player(player_index)
+        observation["type"] = "observation"
         observation["server_version"] = game_versions.get(game_id, 0)
         json_data = json.dumps(observation, cls=GameJSONEncoder)
         await websocket.send_text(json_data)
@@ -441,6 +442,7 @@ async def notify_clients(game_id: str):
     for player_idx, websocket in connected_clients[game_id].items():
         try:
             observation = game.get_observation_for_player(player_idx)
+            observation["type"] = "observation"
             observation["server_version"] = game_versions.get(game_id, 0)
             json_data = json.dumps(observation, cls=GameJSONEncoder)
             await websocket.send_text(json_data)
@@ -451,7 +453,7 @@ async def notify_clients(game_id: str):
 
 async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int, points: int):
     """
-    Notifica i client del risultato della presa con le carte visibili.
+    Notifica i client del risultato della mano con le carte visibili.
 
     Questo messaggio speciale permette al frontend di mostrare entrambe le carte
     e indicare chiaramente chi ha vinto la mano.

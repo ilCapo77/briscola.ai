@@ -69,14 +69,14 @@ Connessione: `ws://host/api/ws/{game_id}/{player_index}`
 
 **Messaggi dal server:**
 
-Nota importante: **non tutti i messaggi hanno un campo `type`**.
+Nota importante: **tutti i messaggi WebSocket includono un campo `type`**.
 
-- Lo **snapshot di gioco** (“observation”) è un oggetto JSON *senza* `type` (es. contiene `my_hand`, `my_turn`, `table_cards`, ecc.).
-- I messaggi “speciali” (es. reveal IA e risultato della mano) hanno `type`.
+- Lo **snapshot di gioco** (“observation”) ha `type: "observation"` e contiene campi come `my_hand`, `my_turn`, `table_cards`, ecc.
+- I messaggi evento (es. reveal IA, risultato mano, keepalive) hanno anch'essi `type`.
 
 | Messaggio | Formato | Descrizione |
 |----------|---------|-------------|
-| Snapshot (observation) | `{ ... }` *(senza `type`)* | Stato completo della partita per il giocatore indicizzato dal WS |
+| Snapshot (observation) | `{ "type": "observation", ... }` | Stato completo della partita per il giocatore indicizzato dal WS |
 | Reveal IA | `{ "type": "ai_card_reveal", ... }` | L'IA mostra quale carta sta per giocare |
 | Risultato mano | `{ "type": "trick_result", ... }` | Risultato della mano (carte, vincitore, punti) |
 | Keepalive | `{ "type": "pong" }` | Risposta ai ping del client (non è uno snapshot) |
@@ -84,8 +84,8 @@ Nota importante: **non tutti i messaggi hanno un campo `type`**.
 Nota: gli snapshot includono `server_version` (intero monotono) come metadato debug‑friendly (incrementato ad ogni azione, umana o IA) per capire se lo stato sta avanzando e per diagnosticare problemi di ordering/reconnect.
 
 Regola pratica lato client:
-- se `payload.type` esiste → gestisci come messaggio speciale
-- altrimenti → trattalo come observation snapshot
+- `payload.type === "observation"` → snapshot
+- altrimenti → messaggio evento
 
 ### Flusso di gioco tipico
 
@@ -100,19 +100,19 @@ Regola pratica lato client:
        │                                            │
        │  WS connect /ws/{id}/0                     │
        │ ──────────────────────────────────────────>│
-       │                     snapshot (WS, no type) │
+       │                              snapshot (WS) │
        │ <──────────────────────────────────────────│
        │                                            │
        │  POST /actions (gioca carta)               │
        │ ──────────────────────────────────────────>│
-       │                     snapshot (WS, no type) │
+       │                              snapshot (WS) │
        │ <──────────────────────────────────────────│
        │                                            │
        │                       ai_card_reveal (WS)  │
        │ <──────────────────────────────────────────│
        │                       trick_result (WS)    │
        │ <──────────────────────────────────────────│
-       │                     snapshot (WS, no type) │
+       │                              snapshot (WS) │
        │ <──────────────────────────────────────────│
        │                                            │
 ```

@@ -230,9 +230,15 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
+        // Contratto WS: gli snapshot devono avere `type: "observation"`.
+        if (data?.type !== 'observation') {
+            console.warn('Unhandled WS message type:', data?.type, data);
+            return;
+        }
+
         // Validate it's an observation
-        if (!data || !Array.isArray(data.my_hand)) {
-            console.warn('Ignoring invalid WS message:', data);
+        if (!Array.isArray(data.my_hand)) {
+            console.warn('Ignoring invalid observation (no my_hand):', data);
             return;
         }
 
@@ -257,7 +263,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const pointsText = data.points > 0 ? ` (+${data.points} punti)` : '';
         UI.showTurnMessage(`${winnerLabel}${pointsText}`, false);
 
-        // Trattieni la UI: lo snapshot “post presa” arriverà subito dopo, ma vogliamo
+        // Trattieni la UI: lo snapshot “post mano” arriverà subito dopo, ma vogliamo
         // lasciare il tempo di leggere il risultato.
         _holdUiForTrickResult();
     };
