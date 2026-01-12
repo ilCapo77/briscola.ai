@@ -214,15 +214,19 @@ async def play_action(game_id: str, action: GameAction):
         }
     )
 
-    # Se la presa è stata completata dall'umano, invia notifica con carte e vincitore
+    # Se la presa è stata completata dall'umano, invia notifica con carte e vincitore.
+    #
+    # Nota architetturale (trigger model):
+    # evitiamo `asyncio.sleep()` nel backend per ritardi "di presentazione". Il tempo
+    # di visualizzazione del risultato è gestito dal frontend (che può “trattenere”
+    # lo snapshot successivo finché l'utente ha letto la presa).
     if result.get("trick_completed"):
         trick_cards = result.get("trick_cards", [])
         winner_index = result.get("trick_winner", 0)
         points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
         await notify_trick_result(game_id, trick_cards, winner_index, points)
-        # Delay per mostrare il risultato della presa (entrambe le carte + vincitore)
-        await asyncio.sleep(2.5)
-        # Ora notifica con lo stato aggiornato (tavolo vuoto, nuove carte pescate)
+        # Subito dopo inviamo anche lo stato aggiornato (tavolo vuoto, nuove carte pescate).
+        # Il frontend decide se applicarlo subito o dopo un delay.
         if game_id in connected_clients:
             await notify_clients(game_id)
     else:
@@ -270,9 +274,6 @@ async def _execute_ai_turn(game_id: str, human_player_index: int):
     Nota: non c'è più delay iniziale. Il timing delle animazioni è gestito
     dal frontend che chiama questo endpoint quando è pronto.
     """
-    AI_REVEAL_DELAY = 1.4  # Tempo per mostrare la carta nella mano IA
-    SHOW_AI_CARD_SECONDS = 1.5  # Tempo per mostrare la carta IA prima di pulire il tavolo
-
     if game_id not in active_games:
         return None
 
@@ -311,9 +312,6 @@ async def _execute_ai_turn(game_id: str, human_player_index: int):
             except Exception:
                 pass
 
-    # Aspetta per mostrare la carta rivelata
-    await asyncio.sleep(AI_REVEAL_DELAY)
-
     result = game.play_action(card_index)
 
     # Se la presa è stata completata, invia notifica speciale
@@ -322,7 +320,6 @@ async def _execute_ai_turn(game_id: str, human_player_index: int):
         winner_index = result.get("trick_winner", 0)
         points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
         await notify_trick_result(game_id, trick_cards, winner_index, points)
-        await asyncio.sleep(SHOW_AI_CARD_SECONDS)
         if game_id in connected_clients:
             await notify_clients(game_id)
     else:

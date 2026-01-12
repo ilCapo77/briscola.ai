@@ -20,6 +20,16 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const REVEAL_DURATION_MS = 1400;
 
+    /**
+     * Durata (ms) di visualizzazione del risultato presa (chi vince + punti).
+     *
+     * Nota architetturale:
+     * il backend invia `trick_result` e subito dopo anche uno snapshot aggiornato.
+     * Per evitare che il risultato “sparisca” immediatamente, il frontend trattiene
+     * lo snapshot finché non è passato questo tempo.
+     */
+    const TRICK_RESULT_HOLD_MS = 2000;
+
     // Game state - minimal, derived from backend
     const store = Store.create({
         gameId: null,
@@ -60,6 +70,11 @@ document.addEventListener('DOMContentLoaded', () => {
         _scheduleFlush();
     };
 
+    const _holdUiForTrickResult = () => {
+        uiHoldUntilMs = Math.max(uiHoldUntilMs, Date.now() + TRICK_RESULT_HOLD_MS);
+        _scheduleFlush();
+    };
+
     // Flag per evitare trigger multipli dell'IA
     let aiTurnScheduled = false;
 
@@ -77,7 +92,9 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Piccolo delay per dare respiro alla UI (il reveal è già gestito dal hold)
+        // Il timing è controllato dal frontend: se stiamo "trattenendo" la UI (reveal o
+        // risultato presa), aspettiamo prima di triggerare l'IA.
+        const delay = Math.max(0, uiHoldUntilMs - Date.now()) + 100;
         setTimeout(async () => {
             aiTurnScheduled = false;
             try {
@@ -116,16 +133,20 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        if (pendingObservation) {
-            const obs = pendingObservation;
-            pendingObservation = null;
-            _applyObservation(obs);
-        }
-
+        // Ordine importante:
+        // - se c'è un `trick_result`, lo mostriamo PRIMA di applicare lo snapshot che
+        //   potrebbe già avere il tavolo vuoto/nuove carte.
         if (pendingTrickResult) {
             const msg = pendingTrickResult;
             pendingTrickResult = null;
             handleTrickResult(msg);
+            return;
+        }
+
+        if (pendingObservation) {
+            const obs = pendingObservation;
+            pendingObservation = null;
+            _applyObservation(obs);
         }
     };
 
@@ -235,6 +256,10 @@ document.addEventListener('DOMContentLoaded', () => {
         const winnerLabel = data.winner_index === state.playerIndex ? 'Tu vinci!' : `${data.winner_name} vince!`;
         const pointsText = data.points > 0 ? ` (+${data.points} punti)` : '';
         UI.showTurnMessage(`${winnerLabel}${pointsText}`, false);
+
+        // Trattieni la UI: lo snapshot “post presa” arriverà subito dopo, ma vogliamo
+        // lasciare il tempo di leggere il risultato.
+        _holdUiForTrickResult();
     };
 
     /**
