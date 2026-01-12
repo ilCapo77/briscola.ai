@@ -82,6 +82,8 @@ Nota importante: **non tutti i messaggi hanno un campo `type`**.
 | Risultato presa | `{ "type": "trick_result", ... }` | Risultato della presa (carte, vincitore, punti) |
 | Keepalive | `{ "type": "pong" }` | Risposta ai ping del client (non è uno snapshot) |
 
+Nota: gli snapshot includono `server_version` (intero monotono). Il frontend lo usa per rendere idempotente `POST /api/games/{id}/ai-turn` inviando `expected_version`.
+
 Regola pratica lato client:
 - se `payload.type` esiste → gestisci come messaggio speciale
 - altrimenti → trattalo come observation snapshot

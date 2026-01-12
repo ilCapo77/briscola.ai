@@ -181,16 +181,18 @@ const API = (() => {
      * Triggera la mossa dell'IA.
      * Chiamato dal frontend quando le animazioni sono complete.
      * @param {string} gameId - ID della partita
+     * @param {number|null|undefined} expectedVersion - `server_version` atteso (idempotenza)
      * @returns {Promise} - Promise con l'esito dell'azione IA
      */
-    const triggerAiTurn = async (gameId) => {
+    const triggerAiTurn = async (gameId, expectedVersion = null) => {
         _requireServedOverHttp();
         try {
             const response = await fetch(`${API_URL}/games/${gameId}/ai-turn`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
-                }
+                },
+                body: JSON.stringify({ expected_version: expectedVersion })
             });
 
             if (!response.ok) {

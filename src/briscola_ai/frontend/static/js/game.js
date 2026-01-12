@@ -75,35 +75,39 @@ document.addEventListener('DOMContentLoaded', () => {
         _scheduleFlush();
     };
 
-    // Flag per evitare trigger multipli dell'IA
-    let aiTurnScheduled = false;
+    // Stato client-side per evitare doppi trigger IA (reconnect, snapshot duplicati, ecc.).
+    // Nota: il backend è comunque protetto da lock + `expected_version`, ma qui evitiamo rumore.
+    let aiTurnInFlight = null;
+    let lastAiTriggeredVersion = null;
 
     /**
      * Schedula il trigger della mossa IA.
      * Chiamato quando riceviamo uno snapshot che indica che è il turno dell'IA.
      */
-    const _scheduleAiTurn = () => {
-        if (aiTurnScheduled) return;
-        aiTurnScheduled = true;
-
+    const _scheduleAiTurn = (expectedVersion) => {
         const state = getState();
-        if (!state.gameId) {
-            aiTurnScheduled = false;
-            return;
-        }
+        if (!state.gameId || state.gameOver) return;
+
+        // Se abbiamo già triggerato per questa versione, non ripetiamo.
+        if (expectedVersion != null && lastAiTriggeredVersion === expectedVersion) return;
+        if (aiTurnInFlight) return;
 
         // Il timing è controllato dal frontend: se stiamo "trattenendo" la UI (reveal o
         // risultato presa), aspettiamo prima di triggerare l'IA.
         const delay = Math.max(0, uiHoldUntilMs - Date.now()) + 100;
-        setTimeout(async () => {
-            aiTurnScheduled = false;
-            try {
-                await API.triggerAiTurn(state.gameId);
-                // La risposta arriva via WebSocket, non serve fare altro qui
-            } catch (error) {
+
+        aiTurnInFlight = new Promise((resolve) => setTimeout(resolve, delay))
+            .then(() => {
+                // Memorizziamo la versione per cui stiamo triggerando (idempotenza lato client).
+                lastAiTriggeredVersion = expectedVersion ?? lastAiTriggeredVersion;
+                return API.triggerAiTurn(state.gameId, expectedVersion ?? null);
+            })
+            .catch((error) => {
                 console.error('Errore nel trigger mossa IA:', error);
-            }
-        }, 100);
+            })
+            .finally(() => {
+                aiTurnInFlight = null;
+            });
     };
 
     const _applyObservation = (obs) => {
@@ -121,7 +125,7 @@ document.addEventListener('DOMContentLoaded', () => {
             handleGameOver();
         } else if (!obs.my_turn) {
             // È il turno dell'IA: triggeriamo la mossa
-            _scheduleAiTurn();
+            _scheduleAiTurn(obs.server_version);
         }
     };
 

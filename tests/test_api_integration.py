@@ -27,11 +27,15 @@ def _clean_server_state() -> None:
     server.active_games.clear()
     server.game_timestamps.clear()
     server.game_data.clear()
+    server.game_locks.clear()
+    server.game_versions.clear()
     server.connected_clients.clear()
     yield
     server.active_games.clear()
     server.game_timestamps.clear()
     server.game_data.clear()
+    server.game_locks.clear()
+    server.game_versions.clear()
     server.connected_clients.clear()
 
 

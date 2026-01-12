@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -92,6 +92,20 @@ class GameState(BaseModel):
     player_index: Optional[int] = None
 
 
+class AiTurnRequest(BaseModel):
+    """
+    Payload per triggerare la mossa IA in modo idempotente.
+
+    Campi:
+        expected_version:
+            Se presente, il backend esegue la mossa IA solo se coincide con la `server_version`
+            corrente della partita (inclusa negli snapshot WS/HTTP). Questo evita doppi trigger
+            dovuti a reconnect o richieste duplicate.
+    """
+
+    expected_version: Optional[int] = None
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -127,6 +141,13 @@ active_games: Dict[str, BriscolaGame] = {}
 game_timestamps: Dict[str, datetime] = {}
 game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
 
+# Sincronizzazione e versioning server-side (per evitare race/doppi trigger IA):
+# - `game_locks`: garantisce che le mutazioni di stato di una partita siano serializzate.
+# - `game_versions`: contatore monotono incrementato ad ogni `play_action` (umano o IA).
+#   Il frontend può inviare `expected_version` per rendere il trigger IA idempotente.
+game_locks: Dict[str, asyncio.Lock] = {}
+game_versions: Dict[str, int] = {}
+
 # Connessioni WebSocket
 connected_clients: Dict[str, Dict[int, WebSocket]] = {}
 
@@ -149,6 +170,8 @@ async def create_game(config: GameConfig):
         active_games[game_id] = game
         game_timestamps[game_id] = datetime.now()
         game_data[game_id] = []
+        game_locks[game_id] = asyncio.Lock()
+        game_versions[game_id] = 0
 
         # Inizializza il dizionario delle connessioni WebSocket per questa partita
         connected_clients[game_id] = {}
@@ -178,12 +201,16 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
     if player_index is not None:
         # Restituisce una vista specifica per il giocatore
         try:
-            return _json_safe(game.get_observation_for_player(player_index))
+            payload = game.get_observation_for_player(player_index)
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
         # Restituisce lo stato completo (per spettatori o debugging)
-        return _json_safe(game.get_game_state())
+        payload = game.get_game_state()
+
+    # Aggiungiamo metadati server-side utili a rendere la UI idempotente e debug-friendly.
+    payload["server_version"] = game_versions.get(game_id, 0)
+    return _json_safe(payload)
 
 
 @app.post("/games/{game_id}/actions", response_model=Dict)
@@ -192,56 +219,60 @@ async def play_action(game_id: str, action: GameAction):
     if game_id not in active_games:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
-    game = active_games[game_id]
+    async with game_locks[game_id]:
+        game = active_games[game_id]
 
-    # Verifica che sia il turno del giocatore
-    if game.current_turn != action.player_index:
-        raise HTTPException(status_code=400, detail="Non è il tuo turno")
+        # Verifica che sia il turno del giocatore
+        if game.current_turn != action.player_index:
+            raise HTTPException(status_code=400, detail="Non è il tuo turno")
 
-    # Esegue l'azione
-    result = game.play_action(action.card_index)
+        # Esegue l'azione
+        result = game.play_action(action.card_index)
+        game_versions[game_id] = game_versions.get(game_id, 0) + 1
 
-    # Aggiorna timestamp
-    game_timestamps[game_id] = datetime.now()
+        # Aggiorna timestamp
+        game_timestamps[game_id] = datetime.now()
 
-    # Registra l'azione per il training ML
-    game_data[game_id].append(
-        {
-            "timestamp": datetime.now().isoformat(),
-            "player_index": action.player_index,
-            "card_index": action.card_index,
-            "result": result,
-        }
-    )
+        # Registra l'azione per il training ML
+        game_data[game_id].append(
+            {
+                "timestamp": datetime.now().isoformat(),
+                "player_index": action.player_index,
+                "card_index": action.card_index,
+                "result": result,
+            }
+        )
 
-    # Se la presa è stata completata dall'umano, invia notifica con carte e vincitore.
-    #
-    # Nota architetturale (trigger model):
-    # evitiamo `asyncio.sleep()` nel backend per ritardi "di presentazione". Il tempo
-    # di visualizzazione del risultato è gestito dal frontend (che può “trattenere”
-    # lo snapshot successivo finché l'utente ha letto la presa).
-    if result.get("trick_completed"):
-        trick_cards = result.get("trick_cards", [])
-        winner_index = result.get("trick_winner", 0)
-        points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
-        await notify_trick_result(game_id, trick_cards, winner_index, points)
-        # Subito dopo inviamo anche lo stato aggiornato (tavolo vuoto, nuove carte pescate).
-        # Il frontend decide se applicarlo subito o dopo un delay.
-        if game_id in connected_clients:
-            await notify_clients(game_id)
-    else:
-        # Presa non completata: notifica normale
-        if game_id in connected_clients:
-            await notify_clients(game_id)
+        # Se la presa è stata completata dall'umano, invia notifica con carte e vincitore.
+        #
+        # Nota architetturale (trigger model):
+        # evitiamo `asyncio.sleep()` nel backend per ritardi "di presentazione". Il tempo
+        # di visualizzazione del risultato è gestito dal frontend (che può “trattenere”
+        # lo snapshot successivo finché l'utente ha letto la presa).
+        if result.get("trick_completed"):
+            trick_cards = result.get("trick_cards", [])
+            winner_index = result.get("trick_winner", 0)
+            points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
+            await notify_trick_result(game_id, trick_cards, winner_index, points)
+            # Subito dopo inviamo anche lo stato aggiornato (tavolo vuoto, nuove carte pescate).
+            # Il frontend decide se applicarlo subito o dopo un delay.
+            if game_id in connected_clients:
+                await notify_clients(game_id)
+        else:
+            # Presa non completata: notifica normale
+            if game_id in connected_clients:
+                await notify_clients(game_id)
 
     # Il frontend triggerà la mossa IA quando sarà pronto (dopo le animazioni).
     # Non scheduliamo più automaticamente la mossa IA qui.
 
-    return _json_safe(result)
+    payload = dict(result)
+    payload["server_version"] = game_versions.get(game_id, 0)
+    return _json_safe(payload)
 
 
 @app.post("/games/{game_id}/ai-turn", response_model=Dict)
-async def trigger_ai_turn(game_id: str):
+async def trigger_ai_turn(game_id: str, request: AiTurnRequest = Body(default=AiTurnRequest())):
     """
     Endpoint per triggerare la mossa dell'IA.
     
@@ -252,19 +283,33 @@ async def trigger_ai_turn(game_id: str):
     if game_id not in active_games:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
-    game = active_games[game_id]
+    expected_version = request.expected_version
 
-    if game.game_over:
-        raise HTTPException(status_code=400, detail="Partita terminata")
+    async with game_locks[game_id]:
+        game = active_games[game_id]
 
-    # Verifica che sia effettivamente il turno dell'IA (non del giocatore umano, index 0)
-    human_player_index = 0  # In 2-player, l'umano è sempre player 0
-    if game.current_turn == human_player_index:
-        raise HTTPException(status_code=400, detail="Non è il turno dell'IA")
+        if game.game_over:
+            return {"status": "no_action", "reason": "game_over", "server_version": game_versions.get(game_id, 0)}
 
-    # Esegui la mossa IA
-    result = await _execute_ai_turn(game_id, human_player_index)
-    return _json_safe(result) if result else {"status": "no_action"}
+        current_version = game_versions.get(game_id, 0)
+        if expected_version is not None and expected_version != current_version:
+            # Idempotenza: se il client ha già triggerato (o è in ritardo), non facciamo nulla.
+            return {"status": "no_action", "reason": "version_mismatch", "server_version": current_version}
+
+        # Verifica che sia effettivamente il turno dell'IA (non del giocatore umano, index 0).
+        # Nota: in 2-player l'umano è sempre player 0; questa assunzione va generalizzata per 4-player.
+        human_player_index = 0
+        if game.current_turn == human_player_index:
+            return {"status": "no_action", "reason": "not_ai_turn", "server_version": current_version}
+
+        result = await _execute_ai_turn(game_id, human_player_index)
+
+        if not result:
+            return {"status": "no_action", "reason": "no_action", "server_version": game_versions.get(game_id, 0)}
+
+        out = dict(result)
+        out["server_version"] = game_versions.get(game_id, 0)
+        return _json_safe(out)
 
 
 async def _execute_ai_turn(game_id: str, human_player_index: int):
@@ -313,6 +358,7 @@ async def _execute_ai_turn(game_id: str, human_player_index: int):
                 pass
 
     result = game.play_action(card_index)
+    game_versions[game_id] = game_versions.get(game_id, 0) + 1
 
     # Se la presa è stata completata, invia notifica speciale
     if result.get("trick_completed"):
@@ -374,6 +420,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     try:
         # Invia lo stato iniziale della partita
         observation = game.get_observation_for_player(player_index)
+        observation["server_version"] = game_versions.get(game_id, 0)
         json_data = json.dumps(observation, cls=GameJSONEncoder)
         await websocket.send_text(json_data)
 
@@ -407,6 +454,7 @@ async def notify_clients(game_id: str):
     for player_idx, websocket in connected_clients[game_id].items():
         try:
             observation = game.get_observation_for_player(player_idx)
+            observation["server_version"] = game_versions.get(game_id, 0)
             json_data = json.dumps(observation, cls=GameJSONEncoder)
             await websocket.send_text(json_data)
         except Exception:
@@ -436,6 +484,7 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
         "winner_index": winner_index,
         "winner_name": winner_name,
         "points": points,
+        "server_version": game_versions.get(game_id, 0),
     }
 
     for _, websocket in connected_clients[game_id].items():
@@ -464,6 +513,10 @@ async def cleanup_inactive_games():
                 del active_games[game_id]
             if game_id in game_timestamps:
                 del game_timestamps[game_id]
+            if game_id in game_versions:
+                del game_versions[game_id]
+            if game_id in game_locks:
+                del game_locks[game_id]
             if game_id in connected_clients:
                 # Chiude tutte le connessioni WebSocket
                 for websocket in connected_clients[game_id].values():

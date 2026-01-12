@@ -27,8 +27,8 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
   - Nota UI: le carte in UI mantengono l'aspect ratio delle immagini (177x285px).
 - UI quality: **stabile in 2-player** (nessun bug visibile segnalato); manca ancora una copertura automatica UI (almeno smoke test manuale documentato) e decisione su linting JS.
   - Punti da sistemare/considerare (trigger IA + robustezza):
-    - Evitare doppi trigger IA: rendere `POST /api/games/{id}/ai-turn` idempotente e/o protetto da lock per partita (race: doppie chiamate ravvicinate).
-    - Frontend: evitare trigger multipli su snapshot ripetuti/reconnect (flag “in flight” fino a risposta/errore).
+    - Evitare doppi trigger IA: `POST /api/games/{id}/ai-turn` usa lock per partita + `expected_version`/`server_version` per idempotenza.
+    - Frontend: evitare trigger multipli su snapshot ripetuti/reconnect (flag “in flight” + last version).
     - Documentare/decidere il contratto WS: snapshot senza `type` vs introdurre `type: "observation"` (allineare README/UI).
     - Chiarire vincolo attuale “umano = player 0” nel trigger IA (incompatibile con 4-player o “scegli giocatore” finché non generalizziamo).
     - Considerare fallback per client non-UI (uso API puro): se non chiami `/ai-turn`, la partita può fermarsi (decidere se mantenere un default server-side o documentare chiaramente).
