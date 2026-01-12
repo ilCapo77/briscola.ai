@@ -84,6 +84,16 @@ Nota importante: **non tutti i messaggi hanno un campo `type`**.
 
 Nota: gli snapshot includono `server_version` (intero monotono). Il frontend lo usa per rendere idempotente `POST /api/games/{id}/ai-turn` inviando `expected_version`.
 
+Risposta di `POST /api/games/{id}/ai-turn`:
+- Se l'IA gioca, il backend ritorna il risultato dell'azione (ed invia gli update via WebSocket).
+- Se non deve/può giocare, ritorna `{ "status": "no_action", "reason": "...", "server_version": <int> }`.
+
+Valori tipici di `reason`:
+- `version_mismatch`: lo stato è già avanzato rispetto alla `expected_version` (richiesta duplicata o “in ritardo”).
+- `not_ai_turn`: non è il turno dell'IA.
+- `game_over`: la partita è terminata.
+- `no_action`: nessuna azione valida disponibile (caso raro/edge).
+
 Regola pratica lato client:
 - se `payload.type` esiste → gestisci come messaggio speciale
 - altrimenti → trattalo come observation snapshot
