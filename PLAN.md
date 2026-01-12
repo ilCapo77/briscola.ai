@@ -25,7 +25,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - front: `{suit}_{rank}.png` con `suit` in `{clubs,cups,coins,swords}` e `rank` in `1..10` (es. `clubs_1.png`)
     - back: `card_back.png` (retro carta, usato per mano avversario e mazzo)
   - Nota UI: le carte in UI mantengono l'aspect ratio delle immagini (177x285px).
-- UI quality: **stabile in 2-player** (nessun bug visibile segnalato); manca ancora una copertura automatica UI (almeno smoke test manuale documentato) e decisione su linting JS.
+- UI quality: **stabile in 2-player** (nessun bug visibile segnalato); smoke test UI manuale documentato e decisione su linting JS ancora aperta.
   - Punti da sistemare/considerare (IA server-driven + robustezza):
     - Backend: mossa IA eseguita automaticamente quando è il suo turno (pattern standard); serializzazione mutazioni tramite `game_locks`.
     - Frontend: coda eventi WS + hold per mantenere la sequenza didattica (carta 1 → carta 2 → risultato) anche se gli update arrivano “subito”.
@@ -112,7 +112,7 @@ Step suggeriti (focus 2-player):
 - [x] Sequenza mano stabile e leggibile: 1° carta → 2° carta → risultato (con tempi controllati lato frontend; **senza** carte sovrapposte).
 - [x] Fix freeze UI: ignorare messaggi WS keepalive (`ping`/`pong`) che non sono snapshot di gioco.
 - [x] Esito mano: usare `trick_result.trick_cards` dal backend per evitare race (niente duplicazioni “Tu/IA” sul tavolo).
-- [ ] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
+- [x] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
   - Documentazione: vedi `README.md` → sezione “Smoke test UI (manuale)”.
 - [ ] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
 - [ ] Allineare contratto dati UI↔API:
@@ -122,7 +122,7 @@ Step suggeriti (focus 2-player):
   - [ ] gestione errori in UI (banner/stato connessione, retry/backoff WS, messaggi user-friendly)
   - [ ] fallback senza WebSocket (polling) per debug
 - [ ] Test UI:
-  - [ ] smoke test manuale documentato (passi + expected)
+  - [x] smoke test manuale documentato (passi + expected)
   - [ ] (opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS
 
 - [x] **Refactor IA → modello server-driven (standard)**:
