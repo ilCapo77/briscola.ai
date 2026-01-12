@@ -186,7 +186,8 @@ button:disabled {
     font-size: 0.85rem;
     font-weight: 600;
     animation: pulse 1.5s infinite;
-    display: none;
+    visibility: hidden;
+    /* usa visibility per mantenere lo spazio nel layout */
 }
 
 @keyframes pulse {

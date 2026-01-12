@@ -148,8 +148,8 @@ const UI = (() => {
             elements.playerHand.appendChild(cardEl);
         });
 
-        // Show/hide turn indicator
-        elements.turnIndicator.style.display = isMyTurn ? 'inline-block' : 'none';
+        // Show/hide turn indicator (visibility mantiene lo spazio nel layout)
+        elements.turnIndicator.style.visibility = isMyTurn ? 'visible' : 'hidden';
     };
 
     const renderOpponentHand = (cardCount) => {
