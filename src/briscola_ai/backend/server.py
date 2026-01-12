@@ -23,7 +23,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from fastapi import Body, FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
@@ -92,20 +92,6 @@ class GameState(BaseModel):
     player_index: Optional[int] = None
 
 
-class AiTurnRequest(BaseModel):
-    """
-    Payload per triggerare la mossa IA in modo idempotente.
-
-    Campi:
-        expected_version:
-            Se presente, il backend esegue la mossa IA solo se coincide con la `server_version`
-            corrente della partita (inclusa negli snapshot WS/HTTP). Questo evita doppi trigger
-            dovuti a reconnect o richieste duplicate.
-    """
-
-    expected_version: Optional[int] = None
-
-
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -144,7 +130,7 @@ game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
 # Sincronizzazione e versioning server-side (per evitare race/doppi trigger IA):
 # - `game_locks`: garantisce che le mutazioni di stato di una partita siano serializzate.
 # - `game_versions`: contatore monotono incrementato ad ogni `play_action` (umano o IA).
-#   Il frontend può inviare `expected_version` per rendere il trigger IA idempotente.
+#   Lo includiamo negli snapshot/messaggi WS come metadato debug-friendly (ordering/reconnect).
 game_locks: Dict[str, asyncio.Lock] = {}
 game_versions: Dict[str, int] = {}
 
@@ -245,7 +231,7 @@ async def play_action(game_id: str, action: GameAction):
 
         # Se la presa è stata completata dall'umano, invia notifica con carte e vincitore.
         #
-        # Nota architetturale (trigger model):
+        # Nota architetturale:
         # evitiamo `asyncio.sleep()` nel backend per ritardi "di presentazione". Il tempo
         # di visualizzazione del risultato è gestito dal frontend (che può “trattenere”
         # lo snapshot successivo finché l'utente ha letto la presa).
@@ -263,70 +249,64 @@ async def play_action(game_id: str, action: GameAction):
             if game_id in connected_clients:
                 await notify_clients(game_id)
 
-    # Il frontend triggerà la mossa IA quando sarà pronto (dopo le animazioni).
-    # Non scheduliamo più automaticamente la mossa IA qui.
+    # Modello "standard": se dopo la mossa umana tocca all'IA, il backend gioca automaticamente.
+    # Nota UX: non inseriamo `asyncio.sleep()` per animazioni; il frontend gestisce i timing
+    # trattenendo gli update (reveal/risultato presa) quando li riceve.
+    if game_id in active_games:
+        game_after = active_games[game_id]
+        if not game_after.game_over and game_after.num_players == 2 and game_after.current_turn != action.player_index:
+            asyncio.create_task(_maybe_ai_turn(game_id=game_id, human_player_index=action.player_index))
 
     payload = dict(result)
     payload["server_version"] = game_versions.get(game_id, 0)
     return _json_safe(payload)
 
 
-@app.post("/games/{game_id}/ai-turn", response_model=Dict)
-async def trigger_ai_turn(game_id: str, request: AiTurnRequest = Body(default=AiTurnRequest())):
+async def _maybe_ai_turn(game_id: str, human_player_index: int) -> None:
     """
-    Endpoint per triggerare la mossa dell'IA.
-    
-    Chiamato dal frontend quando le animazioni sono complete e il giocatore
-    è pronto a vedere la mossa dell'IA. Questo separa la logica di presentazione
-    (frontend) dalla logica di gioco (backend).
+    Esegue automaticamente le mosse dell'IA quando è il suo turno (2-player).
+
+    Nota architetturale:
+    - modello standard: il backend avanza la partita senza richiedere un trigger dal client.
+    - il frontend controlla solo la *presentazione* (hold/animazioni) senza influenzare il dominio.
     """
-    if game_id not in active_games:
-        raise HTTPException(status_code=404, detail="Partita non trovata")
+    if game_id not in active_games or game_id not in game_locks:
+        return
 
-    expected_version = request.expected_version
+    # In 2-player ci aspettiamo al massimo una mossa IA per volta, ma gestiamo anche
+    # eventuali casi futuri dove l'IA potrebbe avere turni consecutivi (safety loop).
+    safety = 10
+    while safety > 0:
+        safety -= 1
+        async with game_locks[game_id]:
+            if game_id not in active_games:
+                return
+            game = active_games[game_id]
+            if game.game_over:
+                return
+            if game.num_players != 2:
+                return
+            if game.current_turn == human_player_index:
+                return
 
-    async with game_locks[game_id]:
-        game = active_games[game_id]
-
-        if game.game_over:
-            return {"status": "no_action", "reason": "game_over", "server_version": game_versions.get(game_id, 0)}
-
-        current_version = game_versions.get(game_id, 0)
-        if expected_version is not None and expected_version != current_version:
-            # Idempotenza: se il client ha già triggerato (o è in ritardo), non facciamo nulla.
-            return {"status": "no_action", "reason": "version_mismatch", "server_version": current_version}
-
-        # Verifica che sia effettivamente il turno dell'IA (non del giocatore umano, index 0).
-        # Nota: in 2-player l'umano è sempre player 0; questa assunzione va generalizzata per 4-player.
-        human_player_index = 0
-        if game.current_turn == human_player_index:
-            return {"status": "no_action", "reason": "not_ai_turn", "server_version": current_version}
-
-        result = await _execute_ai_turn(game_id, human_player_index)
-
-        if not result:
-            return {"status": "no_action", "reason": "no_action", "server_version": game_versions.get(game_id, 0)}
-
-        out = dict(result)
-        out["server_version"] = game_versions.get(game_id, 0)
-        return _json_safe(out)
+            await _execute_ai_turn_locked(game_id, human_player_index)
 
 
-async def _execute_ai_turn(game_id: str, human_player_index: int):
+async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None:
     """
-    Esegue la mossa dell'IA.
-    
-    Nota: non c'è più delay iniziale. Il timing delle animazioni è gestito
-    dal frontend che chiama questo endpoint quando è pronto.
+    Esegue UNA singola mossa IA.
+
+    Precondizione:
+    - il chiamante ha acquisito `game_locks[game_id]`.
     """
     if game_id not in active_games:
-        return None
+        return
 
     game = active_games[game_id]
 
     # Se la partita è finita o tocca al giocatore umano, non fare nulla
     if game.game_over or game.current_turn == human_player_index:
-        return None
+        return
 
     # AI gioca una carta casuale tra le valide
     ai_player_index = game.current_turn
@@ -334,7 +314,7 @@ async def _execute_ai_turn(game_id: str, human_player_index: int):
     valid_actions = observation.get("valid_actions", [])
 
     if not valid_actions:
-        return None
+        return
 
     card_index = random.choice(valid_actions)
     selected_card = game.players[ai_player_index].hand[card_index]
@@ -383,8 +363,7 @@ async def _execute_ai_turn(game_id: str, human_player_index: int):
             "is_ai": True,
         }
     )
-
-    return result
+    return
 
 
 @app.get("/games/{game_id}/result", response_model=Dict)

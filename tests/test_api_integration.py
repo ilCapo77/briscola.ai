@@ -68,6 +68,7 @@ def test_create_game_get_state_and_play_action_happy_path() -> None:
     assert obs["my_index"] == 0
     assert obs["my_turn"] is True
     assert obs["valid_actions"]
+    initial_version = obs.get("server_version", 0)
 
     action = client.post(
         f"/games/{game_id}/actions",
@@ -77,10 +78,30 @@ def test_create_game_get_state_and_play_action_happy_path() -> None:
     result = action.json()
     assert "played_card" in result or "error" in result
     assert "error" not in result
+    played_card = result.get("played_card")
 
     state_p0_after = client.get(f"/games/{game_id}", params={"player_index": 0})
     assert state_p0_after.status_code == 200
-    assert state_p0_after.json()["my_turn"] is False
+    obs_after = state_p0_after.json()
+
+    # Con modello server-driven l'IA può giocare "subito" (in un task asincrono) e quindi,
+    # tra la POST e questa GET, lo stato potrebbe essere già avanzato oltre il semplice
+    # "dopo la carta umana" (es. presa completa + nuova carta IA come prima di mano).
+    #
+    # Invece di assumere un `my_turn` specifico, verifichiamo invarianti più robuste:
+    # - la `server_version` è avanzata almeno di 1 (abbiamo giocato un'azione umana)
+    # - la carta giocata non è più nella mano del giocatore 0
+    assert obs_after.get("server_version", 0) >= initial_version + 1
+
+    if played_card:
+        played_suit = played_card.get("suit")
+        played_number = played_card.get("number")
+        assert played_suit is not None
+        assert played_number is not None
+
+        assert not any(
+            (card.get("suit") == played_suit and card.get("number") == played_number) for card in obs_after["my_hand"]
+        )
 
 
 def test_play_action_rejects_wrong_turn() -> None:

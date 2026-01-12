@@ -26,12 +26,11 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - back: `card_back.png` (retro carta, usato per mano avversario e mazzo)
   - Nota UI: le carte in UI mantengono l'aspect ratio delle immagini (177x285px).
 - UI quality: **stabile in 2-player** (nessun bug visibile segnalato); manca ancora una copertura automatica UI (almeno smoke test manuale documentato) e decisione su linting JS.
-  - Punti da sistemare/considerare (trigger IA + robustezza):
-    - Evitare doppi trigger IA: `POST /api/games/{id}/ai-turn` usa lock per partita + `expected_version`/`server_version` per idempotenza.
-    - Frontend: evitare trigger multipli su snapshot ripetuti/reconnect (flag “in flight” + last version).
+  - Punti da sistemare/considerare (IA server-driven + robustezza):
+    - Backend: mossa IA eseguita automaticamente quando è il suo turno (pattern standard); serializzazione mutazioni tramite `game_locks`.
+    - Frontend: coda eventi WS + hold per mantenere la sequenza didattica (carta 1 → carta 2 → risultato) anche se gli update arrivano “subito”.
     - Documentare/decidere il contratto WS: snapshot senza `type` vs introdurre `type: "observation"` (allineare README/UI).
-    - Chiarire vincolo attuale “umano = player 0” nel trigger IA (incompatibile con 4-player o “scegli giocatore” finché non generalizziamo).
-    - Considerare fallback per client non-UI (uso API puro): se non chiami `/ai-turn`, la partita può fermarsi (decidere se mantenere un default server-side o documentare chiaramente).
+    - Chiarire vincolo attuale UI “umano = player 0” (focus 2-player; da generalizzare se aggiungiamo scelta giocatore/4-player in UI).
   - Timing animazioni (scelta architetturale):
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato presa).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
@@ -125,10 +124,10 @@ Step suggeriti (focus 2-player):
   - [ ] smoke test manuale documentato (passi + expected)
   - [ ] (opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS
 
-- [x] **Refactor timing IA → frontend trigger model**:
-  - Il frontend ora triggera attivamente la mossa IA tramite `POST /ai-turn`
-  - Backend non usa più `asyncio.sleep` per il delay iniziale dell'IA
-  - Separazione pulita tra logica di presentazione (frontend) e logica di gioco (backend)
+- [x] **Refactor IA → modello server-driven (standard)**:
+  - Backend: rimuovere endpoint di trigger e far avanzare automaticamente la partita quando tocca all'IA
+  - Frontend: mantenere UX invariata con hold/coda eventi (no dipendenza da un trigger client)
+  - Obiettivo: UI didattica leggibile senza `asyncio.sleep()` nel backend
 
 Deliverable minimo:
 - la UI permette di avviare una partita 2-player, giocare carte e vedere fine partita senza errori in console.

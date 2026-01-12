@@ -4,8 +4,9 @@
  * Coordina la logica di gioco. La UI è ora guidata esclusivamente
  * dallo stato ricevuto via WebSocket dal backend.
  *
- * L'IA viene triggerata dal frontend quando le animazioni sono complete
- * (modello "trigger" - separazione presentazione/logica di gioco).
+ * Modello "standard":
+ * - il backend avanza automaticamente la partita (incluse le mosse IA)
+ * - il frontend controlla solo la presentazione (hold/animazioni) degli update ricevuti.
  */
 
 document.addEventListener('DOMContentLoaded', () => {
@@ -52,8 +53,21 @@ document.addEventListener('DOMContentLoaded', () => {
     // finché non è passato il tempo di reveal (evita che la carta appaia sul tavolo
     // mentre è ancora "in mano").
     let uiHoldUntilMs = 0;
-    let pendingObservation = null;
-    let pendingTrickResult = null;
+    /**
+     * Coda di eventi UI provenienti dal backend.
+     *
+     * Motivazione:
+     * - Con il modello server-driven, gli eventi arrivano "subito" dal WS:
+     *   snapshot, reveal IA, risultato presa, snapshot post-presa.
+     * - Per mantenere una sequenza visiva didattica (carta 1 -> carta 2 -> risultato),
+     *   il frontend mette in coda gli eventi e li consuma rispettando gli hold.
+     *
+     * Tipi attesi:
+     * - { type: 'observation', data: <snapshot> }
+     * - { type: 'ai_card_reveal', data: <message> }
+     * - { type: 'trick_result', data: <message> }
+     */
+    let pendingEvents = [];
     let flushTimeoutId = null;
 
     const _scheduleFlush = () => {
@@ -75,39 +89,24 @@ document.addEventListener('DOMContentLoaded', () => {
         _scheduleFlush();
     };
 
-    // Stato client-side per evitare doppi trigger IA (reconnect, snapshot duplicati, ecc.).
-    // Nota: il backend è comunque protetto da lock + `expected_version`, ma qui evitiamo rumore.
-    let aiTurnInFlight = null;
-    let lastAiTriggeredVersion = null;
-
     /**
-     * Schedula il trigger della mossa IA.
-     * Chiamato quando riceviamo uno snapshot che indica che è il turno dell'IA.
+     * Accoda un evento, collassando snapshot consecutivi.
+     *
+     * Gli snapshot (`observation`) sono ridondanti: se ne arrivano più di uno di fila
+     * mentre siamo in hold, teniamo solo l'ultimo per evitare flicker e lavoro inutile.
      */
-    const _scheduleAiTurn = (expectedVersion) => {
-        const state = getState();
-        if (!state.gameId || state.gameOver) return;
-
-        // Se abbiamo già triggerato per questa versione, non ripetiamo.
-        if (expectedVersion != null && lastAiTriggeredVersion === expectedVersion) return;
-        if (aiTurnInFlight) return;
-
-        // Il timing è controllato dal frontend: se stiamo "trattenendo" la UI (reveal o
-        // risultato presa), aspettiamo prima di triggerare l'IA.
-        const delay = Math.max(0, uiHoldUntilMs - Date.now()) + 100;
-
-        aiTurnInFlight = new Promise((resolve) => setTimeout(resolve, delay))
-            .then(() => {
-                // Memorizziamo la versione per cui stiamo triggerando (idempotenza lato client).
-                lastAiTriggeredVersion = expectedVersion ?? lastAiTriggeredVersion;
-                return API.triggerAiTurn(state.gameId, expectedVersion ?? null);
-            })
-            .catch((error) => {
-                console.error('Errore nel trigger mossa IA:', error);
-            })
-            .finally(() => {
-                aiTurnInFlight = null;
-            });
+    const _enqueueEvent = (event) => {
+        if (event.type === 'observation') {
+            const last = pendingEvents[pendingEvents.length - 1];
+            if (last?.type === 'observation') {
+                pendingEvents[pendingEvents.length - 1] = event;
+            } else {
+                pendingEvents.push(event);
+            }
+        } else {
+            pendingEvents.push(event);
+        }
+        _scheduleFlush();
     };
 
     const _applyObservation = (obs) => {
@@ -123,35 +122,44 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (obs.game_over) {
             handleGameOver();
-        } else if (!obs.my_turn) {
-            // È il turno dell'IA: triggeriamo la mossa
-            _scheduleAiTurn(obs.server_version);
         }
     };
 
     const _flushPending = () => {
-        flushTimeoutId = null;
+        if (flushTimeoutId) {
+            clearTimeout(flushTimeoutId);
+            flushTimeoutId = null;
+        }
 
         if (Date.now() < uiHoldUntilMs) {
             _scheduleFlush();
             return;
         }
 
-        // Ordine importante:
-        // - se c'è un `trick_result`, lo mostriamo PRIMA di applicare lo snapshot che
-        //   potrebbe già avere il tavolo vuoto/nuove carte.
-        if (pendingTrickResult) {
-            const msg = pendingTrickResult;
-            pendingTrickResult = null;
-            handleTrickResult(msg);
-            return;
+        // Consuma quanti più eventi possibili finché non entriamo in un nuovo hold.
+        while (pendingEvents.length > 0 && Date.now() >= uiHoldUntilMs) {
+            const next = pendingEvents.shift();
+
+            if (next.type === 'ai_card_reveal') {
+                const data = next.data;
+                console.log('AI card reveal:', data.card_index, data.card);
+                UI.revealOpponentCard(data.card_index, data.card);
+                _holdUiForReveal();
+                break;
+            }
+
+            if (next.type === 'trick_result') {
+                handleTrickResult(next.data);
+                break;
+            }
+
+            if (next.type === 'observation') {
+                _applyObservation(next.data);
+                continue;
+            }
         }
 
-        if (pendingObservation) {
-            const obs = pendingObservation;
-            pendingObservation = null;
-            _applyObservation(obs);
-        }
+        if (pendingEvents.length > 0) _scheduleFlush();
     };
 
     /**
@@ -208,23 +216,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // Ignore ping/pong
         if (data?.type === 'ping' || data?.type === 'pong') return;
 
-        // Handle trick result message - shows both cards with winner
-        if (data?.type === 'trick_result') {
-            // Se siamo nel mezzo di un reveal, rimandiamo il risultato per rispettare la sequenza.
-            if (Date.now() < uiHoldUntilMs) {
-                pendingTrickResult = data;
-                _scheduleFlush();
-                return;
-            }
-            handleTrickResult(data);
+        if (data?.type === 'ai_card_reveal') {
+            _enqueueEvent({ type: 'ai_card_reveal', data });
+            _flushPending();
             return;
         }
 
-        // Handle AI card reveal - shows the AI's selected card face-up in its hand
-        if (data?.type === 'ai_card_reveal') {
-            console.log('AI card reveal:', data.card_index, data.card);
-            UI.revealOpponentCard(data.card_index, data.card);
-            _holdUiForReveal();
+        if (data?.type === 'trick_result') {
+            _enqueueEvent({ type: 'trick_result', data });
+            _flushPending();
             return;
         }
 
@@ -234,14 +234,8 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
 
-        // Se stiamo mostrando un reveal, memorizziamo lo snapshot e lo applichiamo dopo.
-        if (Date.now() < uiHoldUntilMs) {
-            pendingObservation = data;
-            _scheduleFlush();
-            return;
-        }
-
-        _applyObservation(data);
+        _enqueueEvent({ type: 'observation', data });
+        _flushPending();
     };
 
     /**

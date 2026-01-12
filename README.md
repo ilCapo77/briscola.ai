@@ -10,10 +10,10 @@ Un gioco di Briscola con funzionalità di IA. Il progetto implementa la Briscola
 - Supporto sia per 2 giocatori sia per 4 giocatori (a squadre)
 - Interfaccia utente web
 - Aggiornamenti in tempo reale via WebSocket
-- IA semplice (attualmente strategia casuale) con architettura "trigger":
-  - Il frontend controlla le animazioni e triggera la mossa IA quando pronto
-  - Il backend esegue la logica di gioco senza delay artificiali
-  - Separazione pulita tra presentazione e logica
+- IA semplice (attualmente strategia casuale) con modello "standard" server‑driven:
+  - Il backend avanza automaticamente la partita quando è il turno dell'IA
+  - Il backend non introduce delay di presentazione (niente `asyncio.sleep()` per animazioni)
+  - Il frontend controlla solo la presentazione (hold/animazioni) degli update ricevuti via WS
 - Raccolta dati per machine learning
 
 Nota didattica: lo sviluppo “step-by-step” verso l’addestramento ML è attualmente focalizzato sulla modalità **2 giocatori**; il 4‑player rimane come supporto e regressione.
@@ -61,7 +61,6 @@ Il sistema usa un'architettura ibrida HTTP + WebSocket:
 | `POST` | `/api/games` | Crea una nuova partita |
 | `GET` | `/api/games/{id}` | Ottiene lo stato della partita |
 | `POST` | `/api/games/{id}/actions` | Il giocatore gioca una carta |
-| `POST` | `/api/games/{id}/ai-turn` | Triggera la mossa dell'IA |
 | `GET` | `/api/games/{id}/result` | Ottiene il risultato finale |
 
 ### WebSocket (tempo reale)
@@ -82,17 +81,7 @@ Nota importante: **non tutti i messaggi hanno un campo `type`**.
 | Risultato presa | `{ "type": "trick_result", ... }` | Risultato della presa (carte, vincitore, punti) |
 | Keepalive | `{ "type": "pong" }` | Risposta ai ping del client (non è uno snapshot) |
 
-Nota: gli snapshot includono `server_version` (intero monotono). Il frontend lo usa per rendere idempotente `POST /api/games/{id}/ai-turn` inviando `expected_version`.
-
-Risposta di `POST /api/games/{id}/ai-turn`:
-- Se l'IA gioca, il backend ritorna il risultato dell'azione (ed invia gli update via WebSocket).
-- Se non deve/può giocare, ritorna `{ "status": "no_action", "reason": "...", "server_version": <int> }`.
-
-Valori tipici di `reason`:
-- `version_mismatch`: lo stato è già avanzato rispetto alla `expected_version` (richiesta duplicata o “in ritardo”).
-- `not_ai_turn`: non è il turno dell'IA.
-- `game_over`: la partita è terminata.
-- `no_action`: nessuna azione valida disponibile (caso raro/edge).
+Nota: gli snapshot includono `server_version` (intero monotono) come metadato debug‑friendly (incrementato ad ogni azione, umana o IA) per capire se lo stato sta avanzando e per diagnosticare problemi di ordering/reconnect.
 
 Regola pratica lato client:
 - se `payload.type` esiste → gestisci come messaggio speciale
@@ -119,25 +108,29 @@ Regola pratica lato client:
        │                     snapshot (WS, no type) │
        │ <──────────────────────────────────────────│
        │                                            │
-       │  POST /ai-turn (trigger IA)                │
-       │ ──────────────────────────────────────────>│
        │                       ai_card_reveal (WS)  │
+       │ <──────────────────────────────────────────│
+       │                       trick_result (WS)    │
        │ <──────────────────────────────────────────│
        │                     snapshot (WS, no type) │
        │ <──────────────────────────────────────────│
        │                                            │
 ```
 
-### Modello "Trigger" per l'IA
+### Modello server‑driven per l'IA (scelta attuale)
 
-A differenza di un'architettura tradizionale dove il server decide quando l'IA gioca, qui il **frontend controlla il timing**:
+Il backend avanza automaticamente la partita quando è il turno dell'IA (pattern standard “server‑authoritative”):
 
 1. Il giocatore gioca → backend aggiorna stato → frontend riceve update
-2. Frontend mostra animazione (1.4s)
-3. Frontend chiama `POST /ai-turn` quando pronto
-4. Backend esegue mossa IA → invia `ai_card_reveal` → attende → invia update
+2. Backend vede che tocca all'IA e gioca automaticamente:
+   - invia `ai_card_reveal`
+   - invia `trick_result` (quando la presa si completa)
+   - invia lo snapshot aggiornato
+3. Frontend gestisce la presentazione:
+   - mette in coda gli eventi ricevuti via WS
+   - applica gli snapshot solo dopo gli hold, per mostrare in modo leggibile: carta 1 → carta 2 → risultato
 
-Questo separa la **logica di presentazione** (frontend) dalla **logica di gioco** (backend).
+Questa scelta mantiene separata la **logica di presentazione** (frontend) dalla **logica di gioco** (backend), evitando al contempo che la UI debba “pilotare” il dominio con chiamate dedicate.
 
 ## Installazione
 

@@ -178,36 +178,6 @@ const API = (() => {
     };
 
     /**
-     * Triggera la mossa dell'IA.
-     * Chiamato dal frontend quando le animazioni sono complete.
-     * @param {string} gameId - ID della partita
-     * @param {number|null|undefined} expectedVersion - `server_version` atteso (idempotenza)
-     * @returns {Promise} - Promise con l'esito dell'azione IA
-     */
-    const triggerAiTurn = async (gameId, expectedVersion = null) => {
-        _requireServedOverHttp();
-        try {
-            const response = await fetch(`${API_URL}/games/${gameId}/ai-turn`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({ expected_version: expectedVersion })
-            });
-
-            if (!response.ok) {
-                const error = await response.json();
-                throw new Error(error.detail || 'Impossibile triggerare la mossa IA');
-            }
-
-            return await response.json();
-        } catch (error) {
-            console.error('Errore nel trigger mossa IA:', error);
-            throw error;
-        }
-    };
-
-    /**
      * Connette al WebSocket per aggiornamenti in tempo reale
      * @param {string} gameId - ID della partita
      * @param {number} playerIndex - Indice del giocatore
@@ -332,7 +302,6 @@ const API = (() => {
         getGameState,
         playCard,
         getGameResult,
-        triggerAiTurn,
         connectWebSocket,
         disconnectWebSocket
     };
