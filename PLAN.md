@@ -226,6 +226,6 @@ Percorso consigliato:
 ## Prossimo passo (proposta)
 
 Se sei d’accordo: focalizziamoci sulla **stabilizzazione UI** (2 giocatori) e sulla chiarezza didattica dei passaggi della mano:
-- rendere la sequenza sempre esplicita: *prima carta*, *seconda carta*, *risultato presa* (con tempi ragionevoli e carte sovrapposte)
-- eliminare i casi in cui il frontend “cade” o mostra fallback (carta bianca/retro) per problemi di serializzazione/mapping
-- (opzionale) introdurre un linter JS (ESLint/Biome) quando decidiamo una toolchain minima per il frontend
+- [x] Rendere la sequenza sempre esplicita: *prima carta*, *seconda carta*, *risultato presa* (tempi ragionevoli; **non** usiamo più carte sovrapposte)
+- [x] Eliminare i casi in cui il frontend “cade” o mostra fallback (carta bianca/retro) per problemi di serializzazione/mapping
+- [ ] (Opzionale) introdurre un linter JS (ESLint/Biome) quando decidiamo una toolchain minima per il frontend (**da decidere**)
