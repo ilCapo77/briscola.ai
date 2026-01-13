@@ -5,8 +5,6 @@ Verifica che la conversione dal dominio ai DTO funzioni correttamente
 e che i DTO producano JSON con la struttura attesa.
 """
 
-import pytest
-
 from briscola_ai.backend.dto import (
     AiCardRevealDTO,
     CardDTO,
