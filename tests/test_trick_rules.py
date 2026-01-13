@@ -1,7 +1,7 @@
 """
-Test di regole della presa (trick) per la Briscola.
+Test di regole della mano (trick) per la Briscola.
 
-Qui testiamo solo la funzione di determinazione vincitore presa, isolandola
+Qui testiamo solo la funzione di determinazione del vincitore della mano, isolandola
 dal resto del flusso (pesca, fine partita, ecc.).
 """
 

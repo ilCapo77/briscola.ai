@@ -299,12 +299,12 @@ async def play_action(game_id: str, action: GameAction):
             }
         )
 
-        # Se la presa è stata completata dall'umano, invia notifica con carte e vincitore.
+        # Se la mano è stata completata dall'umano, invia notifica con carte e vincitore.
         #
         # Nota architetturale:
         # evitiamo `asyncio.sleep()` nel backend per ritardi "di presentazione". Il tempo
         # di visualizzazione del risultato è gestito dal frontend (che può “trattenere”
-        # lo snapshot successivo finché l'utente ha letto la presa).
+        # lo snapshot successivo finché l'utente ha letto il risultato della mano).
         if result.get("trick_completed"):
             trick_cards = result.get("trick_cards", [])
             winner_index = result.get("trick_winner", 0)
@@ -315,13 +315,13 @@ async def play_action(game_id: str, action: GameAction):
             if game_id in connected_clients:
                 await notify_clients(game_id)
         else:
-            # Presa non completata: notifica normale
+            # Mano non completata: notifica normale
             if game_id in connected_clients:
                 await notify_clients(game_id)
 
     # Modello "standard": se dopo la mossa umana tocca all'IA, il backend gioca automaticamente.
     # Nota UX: non inseriamo `asyncio.sleep()` per animazioni; il frontend gestisce i timing
-    # trattenendo gli update (reveal/risultato presa) quando li riceve.
+    # trattenendo gli update (reveal/risultato mano) quando li riceve.
     #
     # Nota architetturale (task IA fuori lock):
     # Schediliamo il task IA *dopo* aver rilasciato il lock per evitare deadlock e permettere
@@ -413,7 +413,7 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     result = game.play_action(card_index)
     game_versions[game_id] = game_versions.get(game_id, 0) + 1
 
-    # Se la presa è stata completata, invia notifica speciale
+    # Se la mano è stata completata, invia notifica speciale
     if result.get("trick_completed"):
         trick_cards = result.get("trick_cards", [])
         winner_index = result.get("trick_winner", 0)

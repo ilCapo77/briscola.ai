@@ -22,7 +22,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const REVEAL_DURATION_MS = 1400;
 
     /**
-     * Durata (ms) di visualizzazione del risultato presa (chi vince + punti).
+     * Durata (ms) di visualizzazione del risultato della mano (chi vince + punti).
      *
      * Nota architetturale:
      * il backend invia `trick_result` e subito dopo anche uno snapshot aggiornato.
@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', () => {
      *
      * Motivazione:
      * - Con il modello server-driven, gli eventi arrivano "subito" dal WS:
-     *   snapshot, reveal IA, risultato presa, snapshot post-presa.
+     *   snapshot, reveal IA, risultato mano, snapshot post-mano.
      * - Per mantenere una sequenza visiva didattica (carta 1 -> carta 2 -> risultato),
      *   il frontend mette in coda gli eventi e li consuma rispettando gli hold.
      *

@@ -86,7 +86,7 @@ def test_create_game_get_state_and_play_action_happy_path() -> None:
 
     # Con modello server-driven l'IA può giocare "subito" (in un task asincrono) e quindi,
     # tra la POST e questa GET, lo stato potrebbe essere già avanzato oltre il semplice
-    # "dopo la carta umana" (es. presa completa + nuova carta IA come prima di mano).
+    # "dopo la carta umana" (es. mano completa + nuova carta IA come prima di mano).
     #
     # Invece di assumere un `my_turn` specifico, verifichiamo invarianti più robuste:
     # - la `server_version` è avanzata almeno di 1 (abbiamo giocato un'azione umana)

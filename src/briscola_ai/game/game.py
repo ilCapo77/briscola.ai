@@ -4,8 +4,8 @@ Motore di gioco della Briscola.
 Questo modulo contiene `BriscolaGame`, una classe “stateful” che gestisce:
 - creazione e mescolamento del mazzo
 - distribuzione delle carte (2 giocatori con pescata dal mazzo; 4 giocatori a mazzo completo)
-- turno di gioco, carte sul tavolo (`table_cards`) e prese
-- calcolo del vincitore della presa e accumulo dei punti
+- turno di gioco, carte sul tavolo (`table_cards`) e mani
+- calcolo del vincitore della mano e accumulo dei punti
 
 Nota didattica:
 in una fase successiva del refactor potremo trasformare questa implementazione in un
@@ -27,12 +27,12 @@ class BriscolaGame:
     Progettata per essere compatibile con workflow di addestramento ML.
 
     Attributi principali (stato):
-    - `players`: lista di `Player` (mano, prese, punti)
+    - `players`: lista di `Player` (mano, carte raccolte, punti)
     - `deck`: mazzo rimanente (in 2 giocatori si pesca; in 4 viene svuotato in distribuzione)
     - `trump_card`: carta di briscola (definisce il seme di briscola)
-    - `table_cards`: carte giocate nella presa corrente come lista di `(Card, player_index)`
+    - `table_cards`: carte giocate nella mano corrente come lista di `(Card, player_index)`
     - `current_turn`: indice del giocatore che deve giocare ora
-    - `first_player`: indice del giocatore che ha aperto la presa corrente
+    - `first_player`: indice del giocatore che ha aperto la mano corrente
     - `game_over` / `winner`: fine partita e vincitore (singolo o squadra)
     """
 
@@ -66,7 +66,7 @@ class BriscolaGame:
         self.trump_card: Optional[Card] = None
         self.table_cards: List[Tuple[Card, int]] = []  # (carta, indice_giocatore)
         self.current_turn = 0
-        self.first_player = 0  # Chi gioca per primo nella presa
+        self.first_player = 0  # Chi gioca per primo nella mano
         self.game_over = False
         self.winner: Optional[Union[Player, Tuple[Player, Player]]] = None  # Giocatore singolo o squadra
 
@@ -97,7 +97,7 @@ class BriscolaGame:
         """
         Distribuisce le carte in base alla modalità di gioco.
 
-        - 2 giocatori: 3 carte a testa + 1 briscola scoperta; poi si pesca dal mazzo dopo ogni presa.
+        - 2 giocatori: 3 carte a testa + 1 briscola scoperta; poi si pesca dal mazzo dopo ogni mano.
         - 4 giocatori: 10 carte a testa (mazzo completo); la briscola viene fissata dall'ultima carta
           dell'ultimo giocatore (scelta implementativa coerente con la tradizione “ultima carta distribuita”).
         """
@@ -227,12 +227,12 @@ class BriscolaGame:
 
     def who_wins_trick(self, cards_and_players: List[Tuple[Card, int]]) -> int:
         """
-        Determina il vincitore di una presa con 2 o 4 carte secondo le regole della Briscola.
+        Determina il vincitore di una mano con 2 o 4 carte secondo le regole della Briscola.
 
         Priorità delle regole:
         1. Vince la briscola più alta
         2. Se non ci sono briscole: vince la carta più alta del seme di uscita
-        3. Se ci sono semi diversi e nessuna briscola: vince chi ha aperto la presa
+        3. Se ci sono semi diversi e nessuna briscola: vince chi ha aperto la mano
 
         Argomenti:
             cards_and_players: Lista di tuple (carta, indice_giocatore) in ordine di gioco
@@ -270,7 +270,7 @@ class BriscolaGame:
                 highest_leading = max(leading_suit_cards, key=lambda x: x[0].rank.trick_strength)
                 return highest_leading[1]
             else:
-                # Nessuna carta del seme di uscita: vince chi ha aperto la presa
+                # Nessuna carta del seme di uscita: vince chi ha aperto la mano
                 return cards_and_players[0][1]
 
     def play_action(self, card_index: int) -> Dict:
@@ -305,17 +305,17 @@ class BriscolaGame:
             "trick_size": len(self.table_cards),
         }
 
-        # Verifica se la presa è completa
+        # Verifica se la mano è completa
         if len(self.table_cards) == self.num_players:
-            # Determina il vincitore della presa
+            # Determina il vincitore della mano
             trick_winner = self.who_wins_trick(self.table_cards)
 
-            # Snapshot della presa prima di ripulire il tavolo.
+            # Snapshot della mano prima di ripulire il tavolo.
             # Serve al frontend per mostrare in modo consistente le carte giocate quando lo stato WS
             # viene aggiornato dopo la cattura (e quindi `table_cards` risulta già vuoto).
             trick_cards = self.table_cards.copy()
 
-            # Il vincitore prende tutte le carte della presa
+            # Il vincitore prende tutte le carte della mano
             captured_cards = [card for card, _ in trick_cards]
             self.players[trick_winner].take_cards(captured_cards)
 
@@ -329,14 +329,14 @@ class BriscolaGame:
                 }
             )
 
-            # Pulisce il tavolo e imposta il vincitore come primo di mano per la presa successiva
+            # Pulisce il tavolo e imposta il vincitore come primo di mano per la mano successiva
             self.table_cards.clear()
             self.first_player = trick_winner
             self.current_turn = trick_winner
 
             # Distribuisce nuove carte (solo modalità a 2)
             if not self.is_team_game and len(self.deck) > 0:
-                # Distribuisce in ordine partendo dal vincitore della presa
+                # Distribuisce in ordine partendo dal vincitore della mano
                 for i in range(self.num_players):
                     player_idx = (trick_winner + i) % self.num_players
                     if len(self.deck) > 0:

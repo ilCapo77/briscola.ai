@@ -3,14 +3,14 @@ Modelli di dominio per la Briscola.
 
 Questo modulo definisce le entità minime con cui rappresentiamo una partita:
 - `Suit`: i semi del mazzo italiano (bastoni, coppe, denari, spade)
-- `Rank`: i ranghi/valori delle carte con punteggio e ordine di presa
+- `Rank`: i ranghi/valori delle carte con punteggio e ordine di forza (per vincere una mano)
 - `Card`: una carta (seme + rango)
 - `Player`: un giocatore con mano, carte prese e punteggio
 
 Nota didattica:
 in Briscola esistono due “ordini” diversi che spesso si confondono:
-- `points`: i punti che una carta vale quando viene presa (Asso=11, Tre=10, Re=4, Cavallo=3, Fante=2)
-- `trick_strength`: quanto una carta è “forte” per vincere la presa (Asso > Tre > Re > ...)
+- `points`: i punti che una carta vale quando viene raccolta (Asso=11, Tre=10, Re=4, Cavallo=3, Fante=2)
+- `trick_strength`: quanto una carta è “forte” per vincere una mano (Asso > Tre > Re > ...)
 """
 
 from dataclasses import dataclass
@@ -38,8 +38,8 @@ class Rank(Enum):
     - `number`: numero “stampato” (1..10)
     - `points`: punti della Briscola
 
-    Importante: l'ordine di presa non è l'ordine numerico.
-    Per determinare il vincitore di una presa usare `trick_strength`.
+    Importante: l'ordine di forza in una mano non è l'ordine numerico.
+    Per determinare il vincitore di una mano usare `trick_strength`.
     """
 
     ACE = (1, 11)  # (number, points)
@@ -59,7 +59,7 @@ class Rank(Enum):
 
         Argomenti:
             number: valore numerico (1..10)
-            points: punti assegnati quando la carta viene presa
+            points: punti assegnati quando la carta viene raccolta
         """
         self.number = number
         self.points = points
@@ -67,13 +67,13 @@ class Rank(Enum):
     @property
     def trick_strength(self) -> int:
         """
-        Forza relativa della carta per determinare il vincitore di una presa.
+        Forza relativa della carta per determinare il vincitore di una mano.
 
-        Nota: in Briscola l'ordine di presa NON coincide con il valore numerico della carta.
+        Nota: in Briscola l'ordine di forza NON coincide con il valore numerico della carta.
         Ordine (dal più forte al più debole): Asso, Tre, Re, Cavallo, Fante, 7, 6, 5, 4, 2.
 
         Ritorna:
-            Un intero dove un valore più alto indica una carta più forte nella presa.
+            Un intero dove un valore più alto indica una carta più forte nella mano.
         """
         strength_by_name = {
             "ACE": 10,
@@ -153,7 +153,7 @@ class Player:
         raise ValueError(f"Indice carta non valido: {index}")
 
     def take_cards(self, cards: List[Card]) -> None:
-        """Prende le carte catturate in una presa vinta e aggiorna i punti"""
+        """Prende le carte catturate in una mano vinta e aggiorna i punti"""
         self.captured_cards.extend(cards)
         self.points = sum(card.rank.points for card in self.captured_cards)
 
