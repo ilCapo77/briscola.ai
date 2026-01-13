@@ -7,6 +7,15 @@ tra backend e frontend via WebSocket. I DTO garantiscono:
 - Documentazione implicita del contratto API
 - Serializzazione coerente (no encoder custom)
 
+Note architetturali:
+- **Focus 2-player**: i DTO sono progettati per la modalità 2 giocatori.
+  I campi 4-player (my_team, teammate_index, ecc.) non sono inclusi.
+  Se in futuro si vuole supportare il 4-player via WS, estendere ObservationDTO.
+- **HTTP vs WS**: gli endpoint HTTP (/api/games/{id}) usano ancora il formato
+  "vecchio" con `GameJSONEncoder`. I DTO sono usati solo per i messaggi WS.
+  Questo è intenzionale per minimizzare il rischio di breaking change sugli
+  endpoint REST già in uso. In futuro si potrebbe allineare anche l'HTTP.
+
 Nota: i DTO sono separati dai modelli di dominio (`game/models.py`) per mantenere
 la separazione tra logica di gioco e serializzazione API.
 """
