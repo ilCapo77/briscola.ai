@@ -59,7 +59,8 @@ Il sistema usa un'architettura ibrida HTTP + WebSocket:
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | `POST` | `/api/games` | Crea una nuova partita |
-| `GET` | `/api/games/{id}` | Ottiene lo stato della partita |
+| `GET` | `/api/games/{id}` | Ottiene lo stato della partita (full state per debug/spettatori) |
+| `GET` | `/api/games/{id}?player_index={i}` | Ottiene la vista del giocatore `i` (stesso formato `type: "observation"` del WebSocket) |
 | `POST` | `/api/games/{id}/actions` | Il giocatore gioca una carta |
 | `GET` | `/api/games/{id}/result` | Ottiene il risultato finale |
 

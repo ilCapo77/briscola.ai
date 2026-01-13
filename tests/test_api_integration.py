@@ -215,6 +215,43 @@ def test_websocket_ping_pong_and_receives_update_after_action() -> None:
         assert updated["valid_actions"] == []
 
 
+def test_http_observation_matches_ws_observation_format() -> None:
+    """
+    Contratto: `GET /games/{id}?player_index=X` deve restituire lo stesso formato
+    di uno snapshot WS (`type: "observation"`).
+
+    Nota:
+    - non confrontiamo l'intero payload per uguaglianza byte-per-byte (ordine chiavi),
+      ma fissiamo campi e shape principali: `type`, `players`, `table_cards`, `my_hand`.
+    """
+    client = TestClient(server.app)
+
+    create = client.post("/games", json={"num_players": 2, "player_names": ["Alice", "Bob"]})
+    assert create.status_code == 200
+    game_id = create.json()["game_id"]
+
+    with client.websocket_connect(f"/ws/{game_id}/0") as ws:
+        ws_obs = ws.receive_json()
+
+    http_obs = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+
+    assert ws_obs["type"] == "observation"
+    assert http_obs["type"] == "observation"
+
+    # Shape principale: players e table_cards sono strutture "esplicite" (DTO), non tuple/chiavi dinamiche.
+    assert isinstance(ws_obs.get("players"), list)
+    assert isinstance(http_obs.get("players"), list)
+    assert isinstance(ws_obs.get("table_cards"), list)
+    assert isinstance(http_obs.get("table_cards"), list)
+    assert isinstance(ws_obs.get("my_hand"), list)
+    assert isinstance(http_obs.get("my_hand"), list)
+
+    # Controllo minimo su un elemento card: deve avere i campi DTO attesi.
+    if http_obs["my_hand"]:
+        card = http_obs["my_hand"][0]
+        assert set(card.keys()) >= {"suit", "rank", "number", "points"}
+
+
 def test_server_lifespan_cancels_cleanup_task(monkeypatch: pytest.MonkeyPatch) -> None:
     """Allo shutdown dell'app, il task di cleanup periodico deve essere cancellato."""
     cancelled = {"value": False}
