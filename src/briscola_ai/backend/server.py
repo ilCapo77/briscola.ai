@@ -32,8 +32,10 @@ from ..game.models import Card, Rank, Suit
 from .dto import (
     AiCardRevealDTO,
     CardDTO,
+    GameStateDTO,
     ObservationDTO,
     PlayerInfoDTO,
+    PlayerStateDTO,
     TableCardDTO,
     TrickResultDTO,
 )
@@ -136,6 +138,62 @@ def _build_observation_dto(game: BriscolaGame, player_index: int, server_version
         teammate_points=teammate_points,
         my_team_points=my_team_points,
         opponent_team_points=opponent_team_points,
+    )
+
+
+def _build_game_state_dto(game: BriscolaGame, server_version: int) -> GameStateDTO:
+    """
+    Costruisce un GameStateDTO (stato completo) dal dominio.
+
+    Uso previsto:
+    - endpoint HTTP `GET /games/{id}` senza `player_index` (debug/spectator)
+
+    Nota sicurezza/fair-play:
+    Questo payload contiene tutte le mani e quindi NON deve essere usato da un client
+    che rappresenta un singolo giocatore umano.
+    """
+    state = game.get_game_state()
+
+    trump_card = CardDTO.from_domain(state["trump_card"]) if state["trump_card"] else None
+    trump_suit = state["trump_card"].suit.value if state["trump_card"] else None
+    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state["table_cards"]]
+
+    players: list[PlayerStateDTO] = []
+    for i, player in enumerate(game.players):
+        players.append(
+            PlayerStateDTO(
+                index=i,
+                name=player.name,
+                points=player.points,
+                hand=[CardDTO.from_domain(card) for card in player.hand],
+                hand_size=len(player.hand),
+                captured_cards=[CardDTO.from_domain(card) for card in player.captured_cards],
+            )
+        )
+
+    teams = state.get("teams")
+    team_0_points = state.get("team_0_points")
+    team_1_points = state.get("team_1_points")
+
+    return GameStateDTO(
+        server_version=server_version,
+        num_players=state["num_players"],
+        is_team_game=state["is_team_game"],
+        trump_card=trump_card,
+        trump_suit=trump_suit,
+        table_cards=table_cards,
+        current_turn=state["current_turn"],
+        first_player=state["first_player"],
+        cards_remaining_in_deck=state["cards_remaining_in_deck"],
+        valid_actions=state["valid_actions"],
+        game_over=state["game_over"],
+        trick_in_progress=state["trick_in_progress"],
+        trick_size=state["trick_size"],
+        expected_trick_size=state["expected_trick_size"],
+        players=players,
+        teams=teams,
+        team_0_points=team_0_points,
+        team_1_points=team_1_points,
     )
 
 
@@ -262,11 +320,9 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
-        # Restituisce lo stato completo (per spettatori o debugging)
-        # Nota: questo usa ancora il formato "vecchio" con GameJSONEncoder
-        payload = game.get_game_state()
-        payload["server_version"] = game_versions.get(game_id, 0)
-        return _json_safe(payload)
+        # Restituisce lo stato completo (per spettatori o debugging) come DTO Pydantic.
+        dto = _build_game_state_dto(game, game_versions.get(game_id, 0))
+        return dto.model_dump()
 
 
 @app.post("/games/{game_id}/actions", response_model=Dict)

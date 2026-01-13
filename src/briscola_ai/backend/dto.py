@@ -12,8 +12,8 @@ Note architetturali:
   la modalità a squadre (my_team, teammate_index, ecc.). In 2-player sono None.
 - **HTTP e WS allineati**: l'endpoint `GET /games/{id}?player_index=X` restituisce
   lo stesso formato di ObservationDTO usato nei messaggi WS.
-  Solo `GET /games/{id}` (senza player_index) usa ancora il formato legacy per
-  lo "stato completo" (debugging/spettatori).
+  `GET /games/{id}` (senza player_index) restituisce invece un `GameStateDTO`
+  (stato completo per debugging/spettatori, include tutte le mani).
 
 Nota: i DTO sono separati dai modelli di dominio (`game/models.py`) per mantenere
 la separazione tra logica di gioco e serializzazione API.
@@ -82,6 +82,22 @@ class PlayerInfoDTO(BaseModel):
     hand_size: int
 
 
+class PlayerStateDTO(BaseModel):
+    """
+    Stato completo di un giocatore (debug/spectator).
+
+    Include la mano completa e le carte raccolte; NON è adatto ad un client “fair”
+    perché rivela informazione nascosta (tutte le carte).
+    """
+
+    index: int
+    name: str
+    points: int
+    hand: list[CardDTO]
+    hand_size: int
+    captured_cards: list[CardDTO]
+
+
 class ObservationDTO(BaseModel):
     """
     Snapshot dello stato di gioco dal punto di vista di un giocatore.
@@ -147,3 +163,43 @@ class TrickResultDTO(BaseModel):
     winner_name: str
     points: int
     server_version: int
+
+
+class GameStateDTO(BaseModel):
+    """
+    Stato completo della partita (debug/spectator).
+
+    Differenza rispetto a `ObservationDTO`:
+    - include tutte le mani dei giocatori e le carte raccolte
+    - include dettagli utili al debug (es. `trick_in_progress`, `expected_trick_size`)
+    - NON dovrebbe essere usato dalla UI “player-facing” perché non nasconde informazioni.
+    """
+
+    type: Literal["game_state"] = "game_state"
+    server_version: int
+
+    num_players: int
+    is_team_game: bool
+
+    trump_card: CardDTO | None
+    trump_suit: str | None
+
+    table_cards: list[TableCardDTO]
+
+    current_turn: int
+    first_player: int
+
+    cards_remaining_in_deck: int
+    valid_actions: list[int]
+
+    game_over: bool
+    trick_in_progress: bool
+    trick_size: int
+    expected_trick_size: int
+
+    players: list[PlayerStateDTO]
+
+    # Team-play (solo 4-player)
+    teams: list[tuple[int, int]] | None = None
+    team_0_points: int | None = None
+    team_1_points: int | None = None

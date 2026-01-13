@@ -145,6 +145,27 @@ def test_get_game_state_returns_404_for_unknown_game() -> None:
     assert r.json()["detail"] == "Partita non trovata"
 
 
+def test_get_game_state_without_player_index_returns_game_state_dto() -> None:
+    """Contratto: `GET /games/{id}` (senza player_index) ritorna `type: \"game_state\"`."""
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    r = client.get(f"/games/{game_id}")
+    assert r.status_code == 200
+    payload = r.json()
+
+    assert payload["type"] == "game_state"
+    assert payload["num_players"] == 2
+    assert payload["is_team_game"] is False
+    assert isinstance(payload.get("players"), list)
+    assert len(payload["players"]) == 2
+
+    # Deve includere mani complete (debug/spectator), quindi `hand` è presente.
+    assert "hand" in payload["players"][0]
+    assert isinstance(payload["players"][0]["hand"], list)
+
+
 def test_get_game_state_rejects_invalid_player_index() -> None:
     """Errore corretto: player_index fuori range => 400."""
     client = TestClient(server.app)
