@@ -225,7 +225,11 @@ const UI = (() => {
 
         if (!Array.isArray(tableCards)) return;
 
-        tableCards.forEach(([card, playerIndex]) => {
+        // Nuovo formato DTO: [{card, player_index}, ...]
+        tableCards.forEach((item) => {
+            const card = item.card;
+            const playerIndex = item.player_index;
+
             const wrapper = document.createElement('div');
             wrapper.className = 'table-card';
 

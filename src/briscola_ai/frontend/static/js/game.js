@@ -174,14 +174,16 @@ document.addEventListener('DOMContentLoaded', () => {
         const isMyTurn = obs.my_turn && !obs.game_over;
         UI.renderPlayerHand(obs.my_hand || [], isMyTurn, playCard);
 
-        // Opponent hand
-        const opponentHandSize = obs[`player_${state.opponentIndex}_hand_size`] || 0;
+        // Opponent hand and points (nuovo formato: array `players`)
+        const opponent = (obs.players || []).find(p => p.index === state.opponentIndex);
+        const opponentHandSize = opponent?.hand_size || 0;
+        const opponentPoints = opponent?.points || 0;
+        const opponentName = opponent?.name || 'Avversario IA';
         UI.renderOpponentHand(opponentHandSize);
 
         // Points
         UI.updatePlayerPoints(obs.my_points || 0);
-        const opponentPoints = obs[`player_${state.opponentIndex}_points`] || 0;
-        UI.updateOpponentInfo('Avversario IA', opponentPoints);
+        UI.updateOpponentInfo(opponentName, opponentPoints);
 
         // Table cards
         UI.renderTableCards(obs.table_cards || []);

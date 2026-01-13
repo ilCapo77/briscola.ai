@@ -29,6 +29,14 @@ from pydantic import BaseModel
 
 from ..game.game import BriscolaGame
 from ..game.models import Card, Rank, Suit
+from .dto import (
+    AiCardRevealDTO,
+    CardDTO,
+    ObservationDTO,
+    PlayerInfoDTO,
+    TableCardDTO,
+    TrickResultDTO,
+)
 
 
 # Encoder JSON personalizzato per oggetti Card, Suit e Rank
@@ -67,6 +75,55 @@ def _json_safe(payload: object) -> object:
     che inviamo via WebSocket (dove usiamo già `GameJSONEncoder`).
     """
     return json.loads(json.dumps(payload, cls=GameJSONEncoder))
+
+
+def _build_observation_dto(game: BriscolaGame, player_index: int, server_version: int) -> ObservationDTO:
+    """
+    Costruisce un ObservationDTO dal dominio.
+
+    Questa funzione centralizza la conversione da stato di gioco a payload WS,
+    garantendo che il formato sia sempre coerente con il contratto DTO.
+    """
+    obs = game.get_observation_for_player(player_index)
+
+    # Converti carte in mano
+    my_hand = [CardDTO.from_domain(card) for card in obs["my_hand"]]
+
+    # Converti carta briscola
+    trump_card = CardDTO.from_domain(obs["trump_card"]) if obs["trump_card"] else None
+    trump_suit = obs["trump_card"].suit.value if obs["trump_card"] else None
+
+    # Converti carte sul tavolo
+    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in obs["table_cards"]]
+
+    # Costruisci lista players (sostituisce player_{n}_* dinamici)
+    players = []
+    for i, player in enumerate(game.players):
+        players.append(
+            PlayerInfoDTO(
+                index=i,
+                name=player.name,
+                points=player.points,
+                hand_size=len(player.hand),
+            )
+        )
+
+    return ObservationDTO(
+        server_version=server_version,
+        my_index=player_index,
+        my_hand=my_hand,
+        my_points=obs["my_points"],
+        my_turn=obs["my_turn"],
+        trump_card=trump_card,
+        trump_suit=trump_suit,
+        table_cards=table_cards,
+        cards_remaining_in_deck=obs["cards_remaining_in_deck"],
+        valid_actions=obs["valid_actions"],
+        game_over=obs["game_over"],
+        num_players=obs["num_players"],
+        is_team_game=obs["is_team_game"],
+        players=players,
+    )
 
 
 # Modelli per richieste e risposte API
@@ -327,21 +384,16 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     card_index = random.choice(valid_actions)
     selected_card = game.players[ai_player_index].hand[card_index]
 
-    # Invia messaggio per rivelare la carta nella mano IA
+    # Invia messaggio per rivelare la carta nella mano IA (usando DTO)
     if game_id in connected_clients:
-        reveal_message = {
-            "type": "ai_card_reveal",
-            "card_index": card_index,
-            "card": {
-                "suit": selected_card.suit.value,
-                "rank": selected_card.rank.name,
-                "number": selected_card.rank.number,
-                "points": selected_card.rank.points,
-            },
-        }
+        reveal_dto = AiCardRevealDTO(
+            card_index=card_index,
+            card=CardDTO.from_domain(selected_card),
+        )
+        reveal_json = reveal_dto.model_dump_json()
         for client in connected_clients[game_id].values():
             try:
-                await client.send_json(reveal_message)
+                await client.send_text(reveal_json)
             except Exception:
                 pass
 
@@ -405,12 +457,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     connected_clients[game_id][player_index] = websocket
 
     try:
-        # Invia lo stato iniziale della partita
-        observation = game.get_observation_for_player(player_index)
-        observation["type"] = "observation"
-        observation["server_version"] = game_versions.get(game_id, 0)
-        json_data = json.dumps(observation, cls=GameJSONEncoder)
-        await websocket.send_text(json_data)
+        # Invia lo stato iniziale della partita (usando DTO)
+        dto = _build_observation_dto(game, player_index, game_versions.get(game_id, 0))
+        await websocket.send_text(dto.model_dump_json())
 
         # Mantiene la connessione aperta e gestisce i messaggi
         while True:
@@ -438,14 +487,12 @@ async def notify_clients(game_id: str):
 
     game = active_games[game_id]
 
-    # Invia lo stato aggiornato a ogni client connesso
+    # Invia lo stato aggiornato a ogni client connesso (usando DTO)
+    server_version = game_versions.get(game_id, 0)
     for player_idx, websocket in connected_clients[game_id].items():
         try:
-            observation = game.get_observation_for_player(player_idx)
-            observation["type"] = "observation"
-            observation["server_version"] = game_versions.get(game_id, 0)
-            json_data = json.dumps(observation, cls=GameJSONEncoder)
-            await websocket.send_text(json_data)
+            dto = _build_observation_dto(game, player_idx, server_version)
+            await websocket.send_text(dto.model_dump_json())
         except Exception:
             # Gestisce client disconnessi
             pass
@@ -467,19 +514,20 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
     else:
         winner_name = f"Giocatore {winner_index + 1}"
 
-    trick_result_message = {
-        "type": "trick_result",
-        "trick_cards": trick_cards,
-        "winner_index": winner_index,
-        "winner_name": winner_name,
-        "points": points,
-        "server_version": game_versions.get(game_id, 0),
-    }
+    # Costruisci DTO per il risultato della mano
+    trick_cards_dto = [TableCardDTO.from_domain(card, idx) for card, idx in trick_cards]
+    trick_result_dto = TrickResultDTO(
+        trick_cards=trick_cards_dto,
+        winner_index=winner_index,
+        winner_name=winner_name,
+        points=points,
+        server_version=game_versions.get(game_id, 0),
+    )
+    trick_result_json = trick_result_dto.model_dump_json()
 
     for _, websocket in connected_clients[game_id].items():
         try:
-            json_data = json.dumps(trick_result_message, cls=GameJSONEncoder)
-            await websocket.send_text(json_data)
+            await websocket.send_text(trick_result_json)
         except Exception:
             pass
 
