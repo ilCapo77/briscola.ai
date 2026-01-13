@@ -1,20 +1,19 @@
 """
-DTO (Data Transfer Objects) per i messaggi WebSocket.
+DTO (Data Transfer Objects) per i messaggi WebSocket e HTTP.
 
 Questo modulo definisce i modelli Pydantic v2 per tutti i messaggi scambiati
-tra backend e frontend via WebSocket. I DTO garantiscono:
+tra backend e frontend. I DTO garantiscono:
 - Validazione automatica dei payload
 - Documentazione implicita del contratto API
 - Serializzazione coerente (no encoder custom)
 
 Note architetturali:
-- **Focus 2-player**: i DTO sono progettati per la modalità 2 giocatori.
-  I campi 4-player (my_team, teammate_index, ecc.) non sono inclusi.
-  Se in futuro si vuole supportare il 4-player via WS, estendere ObservationDTO.
-- **HTTP vs WS**: gli endpoint HTTP (/api/games/{id}) usano ancora il formato
-  "vecchio" con `GameJSONEncoder`. I DTO sono usati solo per i messaggi WS.
-  Questo è intenzionale per minimizzare il rischio di breaking change sugli
-  endpoint REST già in uso. In futuro si potrebbe allineare anche l'HTTP.
+- **Supporto 2-player e 4-player**: ObservationDTO include campi opzionali per
+  la modalità a squadre (my_team, teammate_index, ecc.). In 2-player sono None.
+- **HTTP e WS allineati**: l'endpoint `GET /games/{id}?player_index=X` restituisce
+  lo stesso formato di ObservationDTO usato nei messaggi WS.
+  Solo `GET /games/{id}` (senza player_index) usa ancora il formato legacy per
+  lo "stato completo" (debugging/spettatori).
 
 Nota: i DTO sono separati dai modelli di dominio (`game/models.py`) per mantenere
 la separazione tra logica di gioco e serializzazione API.
@@ -87,7 +86,8 @@ class ObservationDTO(BaseModel):
     """
     Snapshot dello stato di gioco dal punto di vista di un giocatore.
 
-    Questo è il messaggio principale inviato via WebSocket dopo ogni azione.
+    Questo è il messaggio principale inviato via WebSocket e HTTP dopo ogni azione.
+    Supporta sia la modalità 2-player che 4-player (a squadre).
     """
 
     type: Literal["observation"] = "observation"
@@ -113,6 +113,13 @@ class ObservationDTO(BaseModel):
 
     # Info sugli altri giocatori (sostituisce player_{n}_*)
     players: list[PlayerInfoDTO]
+
+    # Campi 4-player (opzionali, None in modalità 2-player)
+    my_team: int | None = None
+    teammate_index: int | None = None
+    teammate_points: int | None = None
+    my_team_points: int | None = None
+    opponent_team_points: int | None = None
 
 
 class AiCardRevealDTO(BaseModel):

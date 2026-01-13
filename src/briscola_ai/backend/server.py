@@ -81,8 +81,9 @@ def _build_observation_dto(game: BriscolaGame, player_index: int, server_version
     """
     Costruisce un ObservationDTO dal dominio.
 
-    Questa funzione centralizza la conversione da stato di gioco a payload WS,
+    Questa funzione centralizza la conversione da stato di gioco a payload WS/HTTP,
     garantendo che il formato sia sempre coerente con il contratto DTO.
+    Supporta sia modalità 2-player che 4-player.
     """
     obs = game.get_observation_for_player(player_index)
 
@@ -108,6 +109,13 @@ def _build_observation_dto(game: BriscolaGame, player_index: int, server_version
             )
         )
 
+    # Campi 4-player (None se 2-player)
+    my_team = obs.get("my_team")
+    teammate_index = obs.get("teammate_index")
+    teammate_points = obs.get("teammate_points")
+    my_team_points = obs.get("my_team_points")
+    opponent_team_points = obs.get("opponent_team_points")
+
     return ObservationDTO(
         server_version=server_version,
         my_index=player_index,
@@ -123,6 +131,11 @@ def _build_observation_dto(game: BriscolaGame, player_index: int, server_version
         num_players=obs["num_players"],
         is_team_game=obs["is_team_game"],
         players=players,
+        my_team=my_team,
+        teammate_index=teammate_index,
+        teammate_points=teammate_points,
+        my_team_points=my_team_points,
+        opponent_team_points=opponent_team_points,
     )
 
 
@@ -242,18 +255,18 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
     game_timestamps[game_id] = datetime.now()
 
     if player_index is not None:
-        # Restituisce una vista specifica per il giocatore
+        # Restituisce una vista specifica per il giocatore (stesso formato dei messaggi WS)
         try:
-            payload = game.get_observation_for_player(player_index)
+            dto = _build_observation_dto(game, player_index, game_versions.get(game_id, 0))
+            return dto.model_dump()
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
         # Restituisce lo stato completo (per spettatori o debugging)
+        # Nota: questo usa ancora il formato "vecchio" con GameJSONEncoder
         payload = game.get_game_state()
-
-    # Aggiungiamo metadati server-side utili a rendere la UI idempotente e debug-friendly.
-    payload["server_version"] = game_versions.get(game_id, 0)
-    return _json_safe(payload)
+        payload["server_version"] = game_versions.get(game_id, 0)
+        return _json_safe(payload)
 
 
 @app.post("/games/{game_id}/actions", response_model=Dict)
