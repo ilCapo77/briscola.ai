@@ -141,7 +141,7 @@ Stato (Phase 2B):
 - [x] Introdotto motore “funzionale” in parallelo: `GameState + step()` in `src/briscola_ai/domain/`.
 - [x] Aggiunti test di parità vs `BriscolaGame` per migrazione sicura (`tests/test_domain_step_parity.py`).
 - [x] Migrato il backend (in-memory store) da `BriscolaGame` a `GameState` + `step`.
-- [ ] Migrare gli endpoint HTTP `/actions` a DTO (rimuovere `GameJSONEncoder` e `_json_safe`).
+- [x] Migrare gli endpoint HTTP `/actions` a DTO (rimuovere `GameJSONEncoder` e `_json_safe`).
 
 Proposta struttura (indicativa):
 

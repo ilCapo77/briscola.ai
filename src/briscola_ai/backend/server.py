@@ -30,55 +30,17 @@ from pydantic import BaseModel
 from ..domain.engine import PlayCardAction, step
 from ..domain.state import GameState as DomainGameState
 from ..domain.state import new_game_state
-from ..game.models import Card, Rank, Suit
 from .dto import (
     AiCardRevealDTO,
     CardDTO,
     GameStateDTO,
     ObservationDTO,
+    PlayActionResultDTO,
     PlayerInfoDTO,
     PlayerStateDTO,
     TableCardDTO,
     TrickResultDTO,
 )
-
-
-# Encoder JSON personalizzato per oggetti Card, Suit e Rank
-class GameJSONEncoder(json.JSONEncoder):
-    """
-    Encoder JSON per serializzare oggetti del dominio (`Card`, `Suit`, `Rank`).
-
-    Nota: è una soluzione rapida. In una migrazione a Pydantic v2 preferiremo
-    definire esplicitamente gli schemi (DTO) e una serializzazione controllata.
-    """
-
-    def default(self, obj):
-        """
-        Converte oggetti non serializzabili (Card/Suit/Rank) in dizionari/valori JSON.
-
-        Argomenti:
-            obj: oggetto Python da serializzare
-
-        Ritorna:
-            Una struttura composta solo da tipi JSON-safe (dict, list, str, int, ...).
-        """
-        if isinstance(obj, Card):
-            return {"suit": obj.suit.value, "rank": obj.rank.name, "points": obj.rank.points, "number": obj.rank.number}
-        elif isinstance(obj, Suit):
-            return obj.value
-        elif isinstance(obj, Rank):
-            return {"name": obj.name, "number": obj.number, "points": obj.points}
-        return super().default(obj)
-
-
-def _json_safe(payload: object) -> object:
-    """
-    Converte un oggetto Python (che può contenere `Card`/`Suit`/`Rank`) in una struttura JSON-safe.
-
-    Nota: usiamo questa funzione sugli endpoint HTTP per mantenere lo stesso formato delle carte
-    che inviamo via WebSocket (dove usiamo già `GameJSONEncoder`).
-    """
-    return json.loads(json.dumps(payload, cls=GameJSONEncoder))
 
 
 def _build_observation_dto(state: DomainGameState, player_index: int, server_version: int) -> ObservationDTO:
@@ -344,8 +306,8 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
         return game_state_dto.model_dump()
 
 
-@app.post("/games/{game_id}/actions", response_model=Dict)
-async def play_action(game_id: str, action: GameAction):
+@app.post("/games/{game_id}/actions", response_model=PlayActionResultDTO, response_model_exclude_none=True)
+async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
     """Gioca una carta nella partita"""
     if game_id not in active_games:
         raise HTTPException(status_code=404, detail="Partita non trovata")
@@ -365,27 +327,35 @@ async def play_action(game_id: str, action: GameAction):
             PlayCardAction(player_index=action.player_index, card_index=action.card_index),
         )
         if step_result.error:
-            error_payload: Dict[str, object] = {
-                "error": step_result.error,
-                "server_version": game_versions.get(game_id, 0),
-            }
-            return _json_safe(error_payload)
+            # Usiamo un errore HTTP standard invece di un payload con `error`.
+            # Questo rende l'API più prevedibile per i client e coerente con gli altri endpoint.
+            raise HTTPException(status_code=400, detail=step_result.error)
 
         active_games[game_id] = new_state
         game_versions[game_id] = game_versions.get(game_id, 0) + 1
+        server_version = game_versions.get(game_id, 0)
 
-        result: Dict[str, object] = {
-            "played_card": step_result.played_card,
-            "player": step_result.player,
-            "trick_completed": step_result.trick_completed,
-            "trick_winner": step_result.trick_winner,
-            "captured_cards": [],
-            "cards_dealt": step_result.cards_dealt,
-            "trick_size": len(step_result.trick_cards),
-        }
+        if step_result.played_card is None or step_result.player is None:
+            # Invariante: su successo, `step()` deve restituire sempre played_card e player.
+            raise HTTPException(status_code=500, detail="Risposta dominio incompleta (played_card/player)")
+
+        trick_cards_dto: list[TableCardDTO] | None = None
+        captured_cards_dto: list[CardDTO] = []
         if step_result.trick_completed:
-            result["trick_cards"] = list(step_result.trick_cards)
-            result["captured_cards"] = [card for card, _ in step_result.trick_cards]
+            trick_cards_dto = [TableCardDTO.from_domain(card, idx) for card, idx in step_result.trick_cards]
+            captured_cards_dto = [CardDTO.from_domain(card) for card, _ in step_result.trick_cards]
+
+        action_result_dto = PlayActionResultDTO(
+            server_version=server_version,
+            played_card=CardDTO.from_domain(step_result.played_card),
+            player=step_result.player,
+            trick_completed=step_result.trick_completed,
+            trick_winner=step_result.trick_winner,
+            trick_size=len(step_result.trick_cards),
+            cards_dealt=step_result.cards_dealt,
+            trick_cards=trick_cards_dto,
+            captured_cards=captured_cards_dto,
+        )
 
         # Aggiorna timestamp
         game_timestamps[game_id] = datetime.now()
@@ -396,7 +366,8 @@ async def play_action(game_id: str, action: GameAction):
                 "timestamp": datetime.now().isoformat(),
                 "player_index": action.player_index,
                 "card_index": action.card_index,
-                "result": result,
+                # Salviamo il DTO (JSON-friendly) invece di oggetti di dominio.
+                "result": action_result_dto.model_dump(exclude_none=True),
             }
         )
 
@@ -438,9 +409,7 @@ async def play_action(game_id: str, action: GameAction):
     if should_schedule_ai:
         asyncio.create_task(_maybe_ai_turn(game_id=game_id, human_player_index=action.player_index))
 
-    payload: Dict[str, object] = dict(result)
-    payload["server_version"] = game_versions.get(game_id, 0)
-    return _json_safe(payload)
+    return action_result_dto
 
 
 async def _maybe_ai_turn(game_id: str, human_player_index: int) -> None:

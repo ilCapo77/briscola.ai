@@ -203,3 +203,31 @@ class GameStateDTO(BaseModel):
     teams: list[tuple[int, int]] | None = None
     team_0_points: int | None = None
     team_1_points: int | None = None
+
+
+class PlayActionResultDTO(BaseModel):
+    """
+    Risposta HTTP per `POST /api/games/{game_id}/actions`.
+
+    Nota didattica:
+    - Il frontend NON usa questo payload per aggiornare la UI: la UI si aggiorna via WebSocket
+      tramite `ObservationDTO` + messaggi evento (es. `TrickResultDTO`).
+    - Questo DTO esiste per avere un contratto HTTP stabile e documentato (OpenAPI) e per
+      evitare encoder JSON custom in backend.
+    - In caso di azione invalida, l'endpoint risponde con errore HTTP (es. 400) usando
+      `HTTPException(detail=...)` e NON con un campo `error` dentro questo DTO.
+    """
+
+    server_version: int
+
+    played_card: CardDTO
+    player: int
+
+    trick_completed: bool
+    trick_winner: int | None
+    trick_size: int
+    cards_dealt: bool
+
+    # Presenti solo quando `trick_completed` è True.
+    trick_cards: list[TableCardDTO] | None = None
+    captured_cards: list[CardDTO] = []
