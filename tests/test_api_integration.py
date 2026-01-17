@@ -8,6 +8,8 @@ Nota: puliamo sempre lo stato globale con una fixture `autouse` per evitare
 interferenze tra casi di test.
 """
 
+from collections.abc import Generator
+
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -17,7 +19,7 @@ from briscola_ai.main import app as main_app
 
 
 @pytest.fixture(autouse=True)
-def _clean_server_state() -> None:
+def _clean_server_state() -> Generator[None, None, None]:
     """
     I test d'integrazione usano stato globale in `briscola_ai.backend.server`.
 
@@ -277,7 +279,8 @@ def test_server_lifespan_cancels_cleanup_task(monkeypatch: pytest.MonkeyPatch) -
     """Allo shutdown dell'app, il task di cleanup periodico deve essere cancellato."""
     cancelled = {"value": False}
 
-    async def fake_cleanup_inactive_games():  # type: ignore[no-untyped-def]
+    async def fake_cleanup_inactive_games() -> None:
+        # Implementazione fake: serve solo a verificare che il lifespan cancelli il task.
         try:
             while True:
                 await server.asyncio.sleep(3600)

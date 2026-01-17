@@ -334,14 +334,14 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
     if player_index is not None:
         # Restituisce una vista specifica per il giocatore (stesso formato dei messaggi WS)
         try:
-            dto = _build_observation_dto(game, player_index, game_versions.get(game_id, 0))
-            return dto.model_dump()
+            observation_dto = _build_observation_dto(game, player_index, game_versions.get(game_id, 0))
+            return observation_dto.model_dump()
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
         # Restituisce lo stato completo (per spettatori o debugging) come DTO Pydantic.
-        dto = _build_game_state_dto(game, game_versions.get(game_id, 0))
-        return dto.model_dump()
+        game_state_dto = _build_game_state_dto(game, game_versions.get(game_id, 0))
+        return game_state_dto.model_dump()
 
 
 @app.post("/games/{game_id}/actions", response_model=Dict)
@@ -365,9 +365,11 @@ async def play_action(game_id: str, action: GameAction):
             PlayCardAction(player_index=action.player_index, card_index=action.card_index),
         )
         if step_result.error:
-            payload = {"error": step_result.error}
-            payload["server_version"] = game_versions.get(game_id, 0)
-            return _json_safe(payload)
+            error_payload: Dict[str, object] = {
+                "error": step_result.error,
+                "server_version": game_versions.get(game_id, 0),
+            }
+            return _json_safe(error_payload)
 
         active_games[game_id] = new_state
         game_versions[game_id] = game_versions.get(game_id, 0) + 1
@@ -404,10 +406,10 @@ async def play_action(game_id: str, action: GameAction):
         # evitiamo `asyncio.sleep()` nel backend per ritardi "di presentazione". Il tempo
         # di visualizzazione del risultato è gestito dal frontend (che può “trattenere”
         # lo snapshot successivo finché l'utente ha letto il risultato della mano).
-        if result.get("trick_completed"):
-            trick_cards = result.get("trick_cards", [])
-            winner_index = result.get("trick_winner", 0)
-            points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
+        if step_result.trick_completed:
+            trick_cards = list(step_result.trick_cards)
+            winner_index = step_result.trick_winner if step_result.trick_winner is not None else 0
+            points = sum(card.rank.points for card, _ in step_result.trick_cards)
             await notify_trick_result(game_id, trick_cards, winner_index, points)
             # Subito dopo inviamo anche lo stato aggiornato (tavolo vuoto, nuove carte pescate).
             # Il frontend decide se applicarlo subito o dopo un delay.
@@ -436,7 +438,7 @@ async def play_action(game_id: str, action: GameAction):
     if should_schedule_ai:
         asyncio.create_task(_maybe_ai_turn(game_id=game_id, human_player_index=action.player_index))
 
-    payload = dict(result)
+    payload: Dict[str, object] = dict(result)
     payload["server_version"] = game_versions.get(game_id, 0)
     return _json_safe(payload)
 
@@ -532,10 +534,10 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
         result["captured_cards"] = [card for card, _ in step_result.trick_cards]
 
     # Se la mano è stata completata, invia notifica speciale
-    if result.get("trick_completed"):
-        trick_cards = result.get("trick_cards", [])
-        winner_index = result.get("trick_winner", 0)
-        points = sum(card.rank.points if hasattr(card, "rank") else 0 for card, _ in trick_cards)
+    if step_result.trick_completed:
+        trick_cards = list(step_result.trick_cards)
+        winner_index = step_result.trick_winner if step_result.trick_winner is not None else 0
+        points = sum(card.rank.points for card, _ in step_result.trick_cards)
         await notify_trick_result(game_id, trick_cards, winner_index, points)
         if game_id in connected_clients:
             await notify_clients(game_id)
