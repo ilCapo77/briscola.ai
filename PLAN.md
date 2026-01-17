@@ -219,7 +219,7 @@ Percorso consigliato:
 
 ## Rischi e decisioni da prendere insieme
 
-- **Compatibilità FastAPI/Pydantic v2**: upgrade richiede cambi mirati.
+- **Compatibilità FastAPI/Pydantic v2**: ✅ già completata (stack aggiornato + DTO Pydantic v2 + test verdi).
 - **Modalità 4 giocatori**: l’osservazione parziale e il training a squadre complicano; possiamo partire dal 2‑player per didattica e poi estendere.
 - **Persistenza**: SQLite è semplice e “portabile”; Postgres in Docker è più realistico ma aggiunge overhead operativo.
 - **Tooling frontend (lint JS)**: decidere se introdurre un linter/formatter JS (es. Biome vs ESLint/Prettier) o mantenere un check minimale (es. `node --check` integrato in `pytest`).
