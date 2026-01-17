@@ -15,6 +15,8 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from briscola_ai.backend import server
+from briscola_ai.domain.models import Card, Rank, Suit
+from briscola_ai.domain.state import GameState, PlayerState
 from briscola_ai.main import app as main_app
 
 
@@ -203,6 +205,195 @@ def test_get_game_result_returns_in_progress_when_game_not_finished() -> None:
     assert payload["game_over"] is False
     assert payload["is_team_game"] is False
     assert payload["points"] == {}
+
+
+def test_get_game_result_2p_finished_returns_stable_dto() -> None:
+    """
+    `/result` deve avere shape stabile anche a partita terminata (2-player).
+
+    Nota didattica:
+    qui usiamo lo stato in memoria del server per creare un end-game "deterministico"
+    (evitando di dover giocare 40 mosse via HTTP in un test d'integrazione).
+    """
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    # Forziamo uno stato finale coerente.
+    server.active_games[game_id] = GameState(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        players=(
+            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=70),
+            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=50),
+        ),
+        deck=tuple(),
+        trump_card=Card(Suit.CUPS, Rank.TWO),
+        table_cards=tuple(),
+        current_turn=0,
+        first_player=0,
+        game_over=True,
+        winner_index=0,
+        winning_team=None,
+    )
+    server.game_versions[game_id] = 123
+
+    r = client.get(f"/games/{game_id}/result")
+    assert r.status_code == 200
+    payload = r.json()
+
+    assert payload["type"] == "game_result"
+    assert payload["server_version"] == 123
+    assert payload["game_in_progress"] is False
+    assert payload["game_over"] is True
+    assert payload["is_team_game"] is False
+    assert payload["winner"] == "A"
+    assert payload["winner_index"] == 0
+    assert payload["points"] == {"A": 70, "B": 50}
+    assert payload["point_difference"] == 20
+
+
+def test_get_game_result_2p_tie_omits_winner_index() -> None:
+    """In pareggio 2-player, `winner_index` deve essere None (e quindi non presente nel JSON)."""
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    server.active_games[game_id] = GameState(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        players=(
+            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=60),
+            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=60),
+        ),
+        deck=tuple(),
+        trump_card=Card(Suit.CUPS, Rank.TWO),
+        table_cards=tuple(),
+        current_turn=0,
+        first_player=0,
+        game_over=True,
+        winner_index=None,
+        winning_team=None,
+    )
+
+    r = client.get(f"/games/{game_id}/result")
+    assert r.status_code == 200
+    payload = r.json()
+
+    assert payload["winner"] == "Pareggio"
+    assert "winner_index" not in payload
+
+
+def test_get_game_result_4p_finished_returns_team_fields() -> None:
+    """`/result` deve esporre `team_points` e `winning_team` quando la partita è a squadre."""
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 4, "player_names": ["A", "B", "C", "D"]})
+    game_id = create.json()["game_id"]
+
+    server.active_games[game_id] = GameState(
+        num_players=4,
+        is_team_game=True,
+        teams=((0, 2), (1, 3)),
+        players=(
+            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=40),
+            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=20),
+            PlayerState(name="C", hand=tuple(), captured_cards=tuple(), points=30),
+            PlayerState(name="D", hand=tuple(), captured_cards=tuple(), points=30),
+        ),
+        deck=tuple(),
+        trump_card=Card(Suit.CUPS, Rank.TWO),
+        table_cards=tuple(),
+        current_turn=0,
+        first_player=0,
+        game_over=True,
+        winner_index=None,
+        winning_team=0,
+    )
+
+    r = client.get(f"/games/{game_id}/result")
+    assert r.status_code == 200
+    payload = r.json()
+
+    assert payload["is_team_game"] is True
+    assert payload["winner"] == "Squadra 0 (A e C)"
+    assert payload["winning_team"] == 0
+    assert payload["team_points"] == {"Team 0": 70, "Team 1": 50}
+    assert payload["points"] == {"A": 40, "B": 20, "C": 30, "D": 30}
+    assert payload["point_difference"] == 20
+
+
+def test_get_game_result_4p_tie_omits_winning_team() -> None:
+    """In pareggio 4-player, `winning_team` deve essere None (e quindi non presente nel JSON)."""
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 4, "player_names": ["A", "B", "C", "D"]})
+    game_id = create.json()["game_id"]
+
+    server.active_games[game_id] = GameState(
+        num_players=4,
+        is_team_game=True,
+        teams=((0, 2), (1, 3)),
+        players=(
+            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=30),
+            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=30),
+            PlayerState(name="C", hand=tuple(), captured_cards=tuple(), points=30),
+            PlayerState(name="D", hand=tuple(), captured_cards=tuple(), points=30),
+        ),
+        deck=tuple(),
+        trump_card=Card(Suit.CUPS, Rank.TWO),
+        table_cards=tuple(),
+        current_turn=0,
+        first_player=0,
+        game_over=True,
+        winner_index=None,
+        winning_team=None,
+    )
+
+    r = client.get(f"/games/{game_id}/result")
+    assert r.status_code == 200
+    payload = r.json()
+
+    assert payload["winner"] == "Pareggio"
+    assert "winning_team" not in payload
+
+
+def test_server_version_is_monotone_on_actions_when_ai_disabled(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Verifica che `server_version` sia monotona sugli endpoint HTTP, senza rumore da task IA.
+
+    Nota:
+    - disabilitiamo il task IA per rendere il test deterministico.
+    - giochiamo 3 azioni seguendo `current_turn` del GameStateDTO (debug).
+    """
+
+    async def _no_ai(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(server, "_maybe_ai_turn", _no_ai)
+
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    # Versione iniziale: 0
+    obs0 = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+    assert obs0["server_version"] == 0
+
+    versions = []
+    for _ in range(3):
+        full = client.get(f"/games/{game_id}").json()
+        current_turn = full["current_turn"]
+        card_index = full["valid_actions"][0]
+
+        out = client.post(
+            f"/games/{game_id}/actions",
+            json={"game_id": game_id, "player_index": current_turn, "card_index": card_index},
+        ).json()
+        versions.append(out["server_version"])
+
+    assert versions == sorted(versions)
+    assert versions == [1, 2, 3]
 
 
 def test_websocket_rejects_unknown_game() -> None:

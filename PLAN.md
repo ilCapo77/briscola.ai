@@ -165,7 +165,7 @@ Azioni chiave:
   - utile per ML e per evitare leak informativo.
 - API: trasformare oggetti Python in JSON con **Pydantic schema** invece di encoder custom.
 
-### Fase 3 — Test “seri” e qualità (parallela alle fasi 1–2) 🚧 (in corso)
+### Fase 3 — Test “seri” e qualità (parallela alle fasi 1–2) ✅ (completata)
 
 Obiettivo: coprire il motore e assicurare stabilità in evoluzione.
 
@@ -175,8 +175,9 @@ Obiettivo: coprire il motore e assicurare stabilità in evoluzione.
   - [x] punteggi (somma punti carte catturate) come invariante dei test dominio
   - [x] casi limite: ultima carta/briscola in 2p e pareggi (2p/4p) (`tests/test_domain_endgame_cases.py`)
 - Test di integrazione API (priorità media):
-  - crea partita → gioca azione → stato cambia → fine partita
-  - WebSocket: connessione + ricezione update (anche test “light”)
+  - [x] crea partita → gioca azione → stato cambia (incl. `server_version` monotona) (`tests/test_api_integration.py`)
+  - [x] endpoint `/result` (in progress + game over 2p/4p + pareggio) (`tests/test_api_integration.py`)
+  - [x] WebSocket: connessione + ricezione update (anche test “light”) (`tests/test_api_integration.py`)
 - Aggiungere CI (GitHub Actions) per `pytest` e lint (quando il repo è versionato).
 
 ### Fase 4 — Data pipeline per ML (didattica) (4–8 sessioni)
