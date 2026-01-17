@@ -307,7 +307,12 @@ const UI = (() => {
         // Manteniamo sempre visibile il placeholder del mazzo per evitare che l'area "tavolo"
         // cambi altezza quando il mazzo si esaurisce.
         elements.deck.style.display = 'flex';
-        elements.deck.classList.toggle('empty', safeCount <= 0);
+
+        // Quando il mazzo è vuoto:
+        // - non vogliamo più mostrare il retro della carta (sembra che ci sia ancora un mazzo)
+        // - vogliamo un placeholder "vuoto" simile allo slot briscola.
+        elements.deck.classList.toggle('deck-empty', safeCount <= 0);
+        elements.deck.classList.toggle('card-back', safeCount > 0);
     };
 
     const updatePlayerPoints = (points) => {
