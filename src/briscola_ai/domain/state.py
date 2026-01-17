@@ -6,8 +6,9 @@ Obiettivo:
 - abilitare replay deterministico e pipeline ML
 - ridurre dipendenze del dominio da FastAPI/DTO/JSON
 
-In questa prima iterazione usiamo ancora gli oggetti `Card` del dominio esistente
-(`briscola_ai.game.models`) per minimizzare il rischio durante la migrazione.
+Nota di migrazione:
+in una prima iterazione `Card/Rank/Suit` vivevano in `briscola_ai.game.models`.
+Ora sono stati spostati in `briscola_ai.domain.models` per rendere il dominio autosufficiente.
 """
 
 from __future__ import annotations
@@ -15,7 +16,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from ..game.models import Card, Rank, Suit
+from .models import Card, Rank, Suit
 
 
 @dataclass(frozen=True, slots=True)

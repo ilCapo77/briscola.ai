@@ -23,7 +23,7 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from ..game.models import Card
+from ..domain.models import Card
 
 
 class CardDTO(BaseModel):

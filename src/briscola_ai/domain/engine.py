@@ -10,7 +10,7 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Optional
 
-from ..game.models import Card, Suit
+from .models import Card, Suit
 from .state import GameState, PlayerState
 
 
