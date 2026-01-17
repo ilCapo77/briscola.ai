@@ -282,9 +282,8 @@ const UI = (() => {
             return;
         }
 
-        if (!trumpSuit) return;
-
-        // Quando non abbiamo (o non vogliamo mostrare) la carta, mostriamo comunque il seme di briscola.
+        // Placeholder sempre presente: mantiene stabile il layout anche quando il mazzo si esaurisce.
+        // Quando non abbiamo (o non vogliamo mostrare) la carta, mostriamo comunque il seme di briscola (se noto).
         const suitNames = {
             clubs: 'Bastoni',
             cups: 'Coppe',
@@ -293,7 +292,11 @@ const UI = (() => {
         };
         const label = document.createElement('div');
         label.className = 'trump-suit-indicator';
-        label.textContent = `Briscola: ${suitNames[trumpSuit] || trumpSuit}`;
+        if (trumpSuit) {
+            label.textContent = `Briscola: ${suitNames[trumpSuit] || trumpSuit}`;
+        } else {
+            label.textContent = 'Briscola';
+        }
         elements.trumpCard.appendChild(label);
     };
 
