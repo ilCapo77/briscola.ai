@@ -301,8 +301,13 @@ const UI = (() => {
     };
 
     const updateDeckCount = (count) => {
-        elements.deckCount.textContent = count;
-        elements.deck.style.display = count > 0 ? 'flex' : 'none';
+        const safeCount = Number.isFinite(count) ? count : 0;
+        elements.deckCount.textContent = safeCount;
+
+        // Manteniamo sempre visibile il placeholder del mazzo per evitare che l'area "tavolo"
+        // cambi altezza quando il mazzo si esaurisce.
+        elements.deck.style.display = 'flex';
+        elements.deck.classList.toggle('empty', safeCount <= 0);
     };
 
     const updatePlayerPoints = (points) => {

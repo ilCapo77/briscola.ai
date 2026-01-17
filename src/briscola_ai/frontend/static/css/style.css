@@ -386,6 +386,15 @@ button:disabled {
     font-size: 12px;
 }
 
+/* Mazzo vuoto: manteniamo il placeholder ma lo rendiamo più "silenzioso". */
+#deck.empty {
+    opacity: 0.5;
+}
+
+#deck.empty #deck-count {
+    display: none;
+}
+
 .card-slot {
     width: var(--card-width);
     height: var(--card-height);
