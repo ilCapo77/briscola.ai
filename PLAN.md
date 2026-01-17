@@ -117,7 +117,7 @@ Step suggeriti (focus 2-player):
 - [x] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
 - [ ] Allineare contratto dati UI↔API:
   - [x] definire un DTO stabile per `Card` e `GameObservation` (Pydantic: `CardDTO`, `ObservationDTO`)
-  - [ ] definire un DTO stabile per `GameResult` (oggi `GET /api/games/{id}/result` è ancora un dict)
+  - [x] definire un DTO stabile per `GameResult` (Pydantic: `GameResultDTO`)
   - [x] ridurre accoppiamento a stringhe “magiche” (es. `player_0_hand_size`) introducendo campi espliciti (es. `players[]`)
 - [x] Robustezza runtime:
   - [x] gestione errori in UI (banner/stato connessione, retry/backoff WS, messaggi user-friendly)

@@ -195,7 +195,14 @@ def test_get_game_result_returns_in_progress_when_game_not_finished() -> None:
 
     r = client.get(f"/games/{game_id}/result")
     assert r.status_code == 200
-    assert r.json() == {"game_in_progress": True}
+    payload = r.json()
+
+    # Contratto: anche quando la partita è in corso, il risultato ha shape stabile (DTO).
+    assert payload["type"] == "game_result"
+    assert payload["game_in_progress"] is True
+    assert payload["game_over"] is False
+    assert payload["is_team_game"] is False
+    assert payload["points"] == {}
 
 
 def test_websocket_rejects_unknown_game() -> None:

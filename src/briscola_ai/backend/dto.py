@@ -231,3 +231,33 @@ class PlayActionResultDTO(BaseModel):
     # Presenti solo quando `trick_completed` è True.
     trick_cards: list[TableCardDTO] | None = None
     captured_cards: list[CardDTO] = []
+
+
+class GameResultDTO(BaseModel):
+    """
+    Risposta HTTP per `GET /api/games/{game_id}/result`.
+
+    Scopo:
+    - esporre un contratto stabile e documentato (OpenAPI) per il risultato finale
+    - evitare dizionari "ad hoc" con shape variabile a seconda della modalità di gioco
+
+    Note:
+    - in 2-player usiamo `winner_index` (0/1) quando non c'è pareggio.
+    - in 4-player (a squadre) usiamo `winning_team` (0/1) quando non c'è pareggio.
+    - `points` è sempre una mappa nome->punti individuali (utile per UI/debug).
+    """
+
+    type: Literal["game_result"] = "game_result"
+    server_version: int
+
+    game_in_progress: bool
+    game_over: bool
+    is_team_game: bool
+
+    winner: str | None = None
+    winner_index: int | None = None
+    winning_team: int | None = None
+
+    points: dict[str, int] = {}
+    team_points: dict[str, int] | None = None
+    point_difference: int | None = None

@@ -33,6 +33,7 @@ from ..domain.state import new_game_state
 from .dto import (
     AiCardRevealDTO,
     CardDTO,
+    GameResultDTO,
     GameStateDTO,
     ObservationDTO,
     PlayActionResultDTO,
@@ -528,17 +529,24 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     return
 
 
-@app.get("/games/{game_id}/result", response_model=Dict)
-async def get_game_result(game_id: str):
+@app.get("/games/{game_id}/result", response_model=GameResultDTO, response_model_exclude_none=True)
+async def get_game_result(game_id: str) -> GameResultDTO:
     """Ottiene il risultato finale di una partita"""
     if game_id not in active_games:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
     state = active_games[game_id]
+    server_version = game_versions.get(game_id, 0)
     if not state.game_over:
-        return {"game_in_progress": True}
+        return GameResultDTO(
+            server_version=server_version,
+            game_in_progress=True,
+            game_over=False,
+            is_team_game=state.is_team_game,
+            points={},
+        )
 
-    result: Dict[str, object] = {"game_over": True, "is_team_game": state.is_team_game}
+    points_by_player = {p.name: p.points for p in state.players}
     if state.is_team_game and state.teams is not None:
         team_0_points = sum(state.players[i].points for i in state.teams[0])
         team_1_points = sum(state.players[i].points for i in state.teams[1])
@@ -558,16 +566,17 @@ async def get_game_result(game_id: str):
             p1_name = state.players[team_players[1]].name
             winner_str = f"Squadra {winning_team} ({p0_name} e {p1_name})"
 
-        result.update(
-            {
-                "winner": winner_str,
-                "winning_team": winning_team,
-                "team_points": {"Team 0": team_0_points, "Team 1": team_1_points},
-                "individual_points": {p.name: p.points for p in state.players},
-                "point_difference": abs(team_0_points - team_1_points),
-            }
+        return GameResultDTO(
+            server_version=server_version,
+            game_in_progress=False,
+            game_over=True,
+            is_team_game=True,
+            winner=winner_str,
+            winning_team=winning_team,
+            team_points={"Team 0": team_0_points, "Team 1": team_1_points},
+            points=points_by_player,
+            point_difference=abs(team_0_points - team_1_points),
         )
-        return result
 
     p0 = state.players[0].points
     p1 = state.players[1].points
@@ -578,15 +587,16 @@ async def get_game_result(game_id: str):
     else:
         winner_index = None
 
-    result.update(
-        {
-            "winner": state.players[winner_index].name if winner_index is not None else "Pareggio",
-            "winner_index": winner_index,
-            "points": {p.name: p.points for p in state.players},
-            "point_difference": abs(p0 - p1),
-        }
+    return GameResultDTO(
+        server_version=server_version,
+        game_in_progress=False,
+        game_over=True,
+        is_team_game=False,
+        winner=state.players[winner_index].name if winner_index is not None else "Pareggio",
+        winner_index=winner_index,
+        points=points_by_player,
+        point_difference=abs(p0 - p1),
     )
-    return result
 
 
 @app.websocket("/ws/{game_id}/{player_index}")
