@@ -137,6 +137,11 @@ Deliverable minimo:
 
 Obiettivo: rendere chiaro “cosa è Briscola” vs “come la servo” vs “come la alleno”.
 
+Stato (Phase 2B, avvio):
+- [x] Introdotto motore “funzionale” in parallelo: `GameState + step()` in `src/briscola_ai/domain/`.
+- [x] Aggiunti test di parità vs `BriscolaGame` per migrazione sicura (`tests/test_domain_step_parity.py`).
+- [ ] Migrare il backend (in-memory store) da `BriscolaGame` a `GameState` + `step`.
+
 Proposta struttura (indicativa):
 
 ```
