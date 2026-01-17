@@ -61,8 +61,12 @@ def _build_observation_dto(state: DomainGameState, player_index: int, server_ver
     # Converti carte in mano
     my_hand = [CardDTO.from_domain(card) for card in me.hand]
 
-    # Converti carte in mano
-    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card else None
+    # Carta di briscola:
+    # - In 2-player la briscola scoperta è "sotto il mazzo" e viene pescata per ultima.
+    # - Quando il mazzo è vuoto, mostrare anche la carta qui può risultare confusivo perché
+    #   la stessa carta può essere già finita nella mano di un giocatore.
+    #   In quel caso inviamo solo `trump_suit` (sempre) e lasciamo `trump_card=None`.
+    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card and len(state.deck) > 0 else None
     trump_suit = state.trump_card.suit.value if state.trump_card else None
 
     # Converti carte sul tavolo
@@ -134,7 +138,8 @@ def _build_game_state_dto(state: DomainGameState, server_version: int) -> GameSt
     Questo payload contiene tutte le mani e quindi NON deve essere usato da un client
     che rappresenta un singolo giocatore umano.
     """
-    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card else None
+    # Stesso criterio di `ObservationDTO`: se il mazzo è vuoto, non ripetiamo la carta di briscola.
+    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card and len(state.deck) > 0 else None
     trump_suit = state.trump_card.suit.value if state.trump_card else None
     table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state.table_cards]
 

@@ -391,6 +391,23 @@ button:disabled {
     height: var(--card-height);
 }
 
+/* Indicatore seme briscola (quando non mostriamo la carta) */
+.trump-suit-indicator {
+    width: 100%;
+    height: 100%;
+    border: 2px dashed rgba(255, 255, 255, 0.35);
+    border-radius: 8px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 8px;
+    text-align: center;
+    font-size: 0.85rem;
+    font-weight: 700;
+    color: var(--text-color);
+    background: rgba(0, 0, 0, 0.25);
+}
+
 /* Table card wrapper */
 .table-card {
     position: relative;

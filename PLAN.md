@@ -112,6 +112,7 @@ Step suggeriti (focus 2-player):
 - [x] Sequenza mano stabile e leggibile: 1° carta → 2° carta → risultato (con tempi controllati lato frontend; **senza** carte sovrapposte).
 - [x] Fix freeze UI: ignorare messaggi WS keepalive (`ping`/`pong`) che non sono snapshot di gioco.
 - [x] Esito mano: usare `trick_result.trick_cards` dal backend per evitare race (niente duplicazioni “Tu/IA” sul tavolo).
+- [x] Evitare duplicazione briscola: quando il mazzo è vuoto, mostrare solo `trump_suit` (non la carta) per non visualizzare la stessa carta anche in mano.
 - [x] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
   - Documentazione: vedi `README.md` → sezione “Smoke test UI (manuale)”.
 - [x] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).

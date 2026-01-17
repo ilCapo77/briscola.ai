@@ -246,8 +246,8 @@ document.addEventListener('DOMContentLoaded', () => {
         // Table cards
         UI.renderTableCards(obs.table_cards || []);
 
-        // Trump card
-        UI.renderTrumpCard(obs.trump_card);
+        // Briscola: quando `trump_card` è null (es. deck vuoto) mostriamo comunque il seme.
+        UI.renderTrumpCard(obs.trump_card, obs.trump_suit);
 
         // Deck count
         UI.updateDeckCount(obs.cards_remaining_in_deck || 0);

@@ -274,12 +274,27 @@ const UI = (() => {
         });
     };
 
-    const renderTrumpCard = (card) => {
+    const renderTrumpCard = (card, trumpSuit = null) => {
         elements.trumpCard.innerHTML = '';
         if (card) {
             const cardEl = createCardElement(card);
             elements.trumpCard.appendChild(cardEl);
+            return;
         }
+
+        if (!trumpSuit) return;
+
+        // Quando non abbiamo (o non vogliamo mostrare) la carta, mostriamo comunque il seme di briscola.
+        const suitNames = {
+            clubs: 'Bastoni',
+            cups: 'Coppe',
+            coins: 'Denari',
+            swords: 'Spade'
+        };
+        const label = document.createElement('div');
+        label.className = 'trump-suit-indicator';
+        label.textContent = `Briscola: ${suitNames[trumpSuit] || trumpSuit}`;
+        elements.trumpCard.appendChild(label);
     };
 
     const updateDeckCount = (count) => {
