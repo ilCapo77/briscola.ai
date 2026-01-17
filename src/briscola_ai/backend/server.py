@@ -27,7 +27,9 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ..game.game import BriscolaGame
+from ..domain.engine import PlayCardAction, step
+from ..domain.state import GameState as DomainGameState
+from ..domain.state import new_game_state
 from ..game.models import Card, Rank, Suit
 from .dto import (
     AiCardRevealDTO,
@@ -79,29 +81,33 @@ def _json_safe(payload: object) -> object:
     return json.loads(json.dumps(payload, cls=GameJSONEncoder))
 
 
-def _build_observation_dto(game: BriscolaGame, player_index: int, server_version: int) -> ObservationDTO:
+def _build_observation_dto(state: DomainGameState, player_index: int, server_version: int) -> ObservationDTO:
     """
-    Costruisce un ObservationDTO dal dominio.
+    Costruisce un ObservationDTO dal dominio (stato puro).
 
-    Questa funzione centralizza la conversione da stato di gioco a payload WS/HTTP,
+    Questa funzione centralizza la conversione da stato di gioco a payload WS/HTTP (Phase 2B),
     garantendo che il formato sia sempre coerente con il contratto DTO.
     Supporta sia modalità 2-player che 4-player.
     """
-    obs = game.get_observation_for_player(player_index)
+    if player_index < 0 or player_index >= state.num_players:
+        raise ValueError(f"L'indice giocatore deve essere compreso tra 0 e {state.num_players - 1}")
+
+    me = state.players[player_index]
+    my_turn = state.current_turn == player_index
 
     # Converti carte in mano
-    my_hand = [CardDTO.from_domain(card) for card in obs["my_hand"]]
+    my_hand = [CardDTO.from_domain(card) for card in me.hand]
 
-    # Converti carta briscola
-    trump_card = CardDTO.from_domain(obs["trump_card"]) if obs["trump_card"] else None
-    trump_suit = obs["trump_card"].suit.value if obs["trump_card"] else None
+    # Converti carte in mano
+    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card else None
+    trump_suit = state.trump_card.suit.value if state.trump_card else None
 
     # Converti carte sul tavolo
-    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in obs["table_cards"]]
+    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state.table_cards]
 
     # Costruisci lista players (sostituisce player_{n}_* dinamici)
-    players = []
-    for i, player in enumerate(game.players):
+    players: list[PlayerInfoDTO] = []
+    for i, player in enumerate(state.players):
         players.append(
             PlayerInfoDTO(
                 index=i,
@@ -112,26 +118,39 @@ def _build_observation_dto(game: BriscolaGame, player_index: int, server_version
         )
 
     # Campi 4-player (None se 2-player)
-    my_team = obs.get("my_team")
-    teammate_index = obs.get("teammate_index")
-    teammate_points = obs.get("teammate_points")
-    my_team_points = obs.get("my_team_points")
-    opponent_team_points = obs.get("opponent_team_points")
+    my_team = None
+    teammate_index = None
+    teammate_points = None
+    my_team_points = None
+    opponent_team_points = None
+    if state.is_team_game and state.teams is not None:
+        if player_index in state.teams[0]:
+            my_team = 0
+            teammate_index = state.teams[0][0] if state.teams[0][1] == player_index else state.teams[0][1]
+        else:
+            my_team = 1
+            teammate_index = state.teams[1][0] if state.teams[1][1] == player_index else state.teams[1][1]
+
+        teammate_points = state.players[teammate_index].points if teammate_index is not None else 0
+        my_team_points = sum(state.players[i].points for i in state.teams[my_team]) if my_team is not None else 0
+        opponent_team_points = (
+            sum(state.players[i].points for i in state.teams[1 - my_team]) if my_team is not None else 0
+        )
 
     return ObservationDTO(
         server_version=server_version,
         my_index=player_index,
         my_hand=my_hand,
-        my_points=obs["my_points"],
-        my_turn=obs["my_turn"],
+        my_points=me.points,
+        my_turn=my_turn,
         trump_card=trump_card,
         trump_suit=trump_suit,
         table_cards=table_cards,
-        cards_remaining_in_deck=obs["cards_remaining_in_deck"],
-        valid_actions=obs["valid_actions"],
-        game_over=obs["game_over"],
-        num_players=obs["num_players"],
-        is_team_game=obs["is_team_game"],
+        cards_remaining_in_deck=len(state.deck),
+        valid_actions=list(range(len(me.hand))) if my_turn and not state.game_over else [],
+        game_over=state.game_over,
+        num_players=state.num_players,
+        is_team_game=state.is_team_game,
         players=players,
         my_team=my_team,
         teammate_index=teammate_index,
@@ -141,7 +160,7 @@ def _build_observation_dto(game: BriscolaGame, player_index: int, server_version
     )
 
 
-def _build_game_state_dto(game: BriscolaGame, server_version: int) -> GameStateDTO:
+def _build_game_state_dto(state: DomainGameState, server_version: int) -> GameStateDTO:
     """
     Costruisce un GameStateDTO (stato completo) dal dominio.
 
@@ -152,14 +171,12 @@ def _build_game_state_dto(game: BriscolaGame, server_version: int) -> GameStateD
     Questo payload contiene tutte le mani e quindi NON deve essere usato da un client
     che rappresenta un singolo giocatore umano.
     """
-    state = game.get_game_state()
-
-    trump_card = CardDTO.from_domain(state["trump_card"]) if state["trump_card"] else None
-    trump_suit = state["trump_card"].suit.value if state["trump_card"] else None
-    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state["table_cards"]]
+    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card else None
+    trump_suit = state.trump_card.suit.value if state.trump_card else None
+    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state.table_cards]
 
     players: list[PlayerStateDTO] = []
-    for i, player in enumerate(game.players):
+    for i, player in enumerate(state.players):
         players.append(
             PlayerStateDTO(
                 index=i,
@@ -171,25 +188,25 @@ def _build_game_state_dto(game: BriscolaGame, server_version: int) -> GameStateD
             )
         )
 
-    teams = state.get("teams")
-    team_0_points = state.get("team_0_points")
-    team_1_points = state.get("team_1_points")
+    teams = list(state.teams) if state.teams is not None else None
+    team_0_points = sum(state.players[i].points for i in state.teams[0]) if state.teams is not None else None
+    team_1_points = sum(state.players[i].points for i in state.teams[1]) if state.teams is not None else None
 
     return GameStateDTO(
         server_version=server_version,
-        num_players=state["num_players"],
-        is_team_game=state["is_team_game"],
+        num_players=state.num_players,
+        is_team_game=state.is_team_game,
         trump_card=trump_card,
         trump_suit=trump_suit,
         table_cards=table_cards,
-        current_turn=state["current_turn"],
-        first_player=state["first_player"],
-        cards_remaining_in_deck=state["cards_remaining_in_deck"],
-        valid_actions=state["valid_actions"],
-        game_over=state["game_over"],
-        trick_in_progress=state["trick_in_progress"],
-        trick_size=state["trick_size"],
-        expected_trick_size=state["expected_trick_size"],
+        current_turn=state.current_turn,
+        first_player=state.first_player,
+        cards_remaining_in_deck=len(state.deck),
+        valid_actions=list(range(len(state.players[state.current_turn].hand))) if not state.game_over else [],
+        game_over=state.game_over,
+        trick_in_progress=len(state.table_cards) > 0,
+        trick_size=len(state.table_cards),
+        expected_trick_size=state.num_players,
         players=players,
         teams=teams,
         team_0_points=team_0_points,
@@ -251,7 +268,7 @@ app.add_middleware(
 )
 
 # Conserva le partite attive in memoria (in un'app reale, usare un database)
-active_games: Dict[str, BriscolaGame] = {}
+active_games: Dict[str, DomainGameState] = {}
 game_timestamps: Dict[str, datetime] = {}
 game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
 
@@ -276,14 +293,16 @@ async def root():
 async def create_game(config: GameConfig):
     """Crea una nuova partita di Briscola"""
     try:
-        game = BriscolaGame(config.num_players, config.player_names)
-        game.start_game()
+        # Seed per rendere riproducibile lo shuffle in fase di debugging/dataset.
+        # In produzione useremmo RNG più robusto o un seed esplicito del client.
+        seed = random.randrange(0, 2**32)
+        state = new_game_state(config.num_players, config.player_names, seed=seed)
 
         # Genera un ID univoco per la partita
         game_id = str(uuid.uuid4())
-        active_games[game_id] = game
+        active_games[game_id] = state
         game_timestamps[game_id] = datetime.now()
-        game_data[game_id] = []
+        game_data[game_id] = [{"timestamp": datetime.now().isoformat(), "event": "game_created", "seed": seed}]
         game_locks[game_id] = asyncio.Lock()
         game_versions[game_id] = 0
 
@@ -294,8 +313,8 @@ async def create_game(config: GameConfig):
             "game_id": game_id,
             "status": "created",
             "num_players": config.num_players,
-            "is_team_game": game.is_team_game,
-            "player_names": [player.name for player in game.players],
+            "is_team_game": state.is_team_game,
+            "player_names": [p.name for p in state.players],
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -331,16 +350,40 @@ async def play_action(game_id: str, action: GameAction):
     if game_id not in active_games:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
+    should_schedule_ai = False
+
     async with game_locks[game_id]:
-        game = active_games[game_id]
+        state = active_games[game_id]
 
         # Verifica che sia il turno del giocatore
-        if game.current_turn != action.player_index:
+        if state.current_turn != action.player_index:
             raise HTTPException(status_code=400, detail="Non è il tuo turno")
 
         # Esegue l'azione
-        result = game.play_action(action.card_index)
+        new_state, step_result = step(
+            state,
+            PlayCardAction(player_index=action.player_index, card_index=action.card_index),
+        )
+        if step_result.error:
+            payload = {"error": step_result.error}
+            payload["server_version"] = game_versions.get(game_id, 0)
+            return _json_safe(payload)
+
+        active_games[game_id] = new_state
         game_versions[game_id] = game_versions.get(game_id, 0) + 1
+
+        result: Dict[str, object] = {
+            "played_card": step_result.played_card,
+            "player": step_result.player,
+            "trick_completed": step_result.trick_completed,
+            "trick_winner": step_result.trick_winner,
+            "captured_cards": [],
+            "cards_dealt": step_result.cards_dealt,
+            "trick_size": len(step_result.trick_cards),
+        }
+        if step_result.trick_completed:
+            result["trick_cards"] = list(step_result.trick_cards)
+            result["captured_cards"] = [card for card, _ in step_result.trick_cards]
 
         # Aggiorna timestamp
         game_timestamps[game_id] = datetime.now()
@@ -375,6 +418,10 @@ async def play_action(game_id: str, action: GameAction):
             if game_id in connected_clients:
                 await notify_clients(game_id)
 
+        # Calcoliamo qui se dobbiamo far giocare l'IA (fuori dal lock scheduliamo solo il task).
+        if not new_state.game_over and new_state.num_players == 2 and new_state.current_turn != action.player_index:
+            should_schedule_ai = True
+
     # Modello "standard": se dopo la mossa umana tocca all'IA, il backend gioca automaticamente.
     # Nota UX: non inseriamo `asyncio.sleep()` per animazioni; il frontend gestisce i timing
     # trattenendo gli update (reveal/risultato mano) quando li riceve.
@@ -386,10 +433,8 @@ async def play_action(game_id: str, action: GameAction):
     # lock e verifica nuovamente lo stato prima di giocare. Questo pattern è safe perché:
     # 1. Il task può trovare la partita già terminata/rimossa → ritorna subito.
     # 2. Eventuali azioni concorrenti (es. reconnect) sono serializzate dal lock interno.
-    if game_id in active_games:
-        game_after = active_games[game_id]
-        if not game_after.game_over and game_after.num_players == 2 and game_after.current_turn != action.player_index:
-            asyncio.create_task(_maybe_ai_turn(game_id=game_id, human_player_index=action.player_index))
+    if should_schedule_ai:
+        asyncio.create_task(_maybe_ai_turn(game_id=game_id, human_player_index=action.player_index))
 
     payload = dict(result)
     payload["server_version"] = game_versions.get(game_id, 0)
@@ -415,12 +460,12 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int) -> None:
         async with game_locks[game_id]:
             if game_id not in active_games:
                 return
-            game = active_games[game_id]
-            if game.game_over:
+            state = active_games[game_id]
+            if state.game_over:
                 return
-            if game.num_players != 2:
+            if state.num_players != 2:
                 return
-            if game.current_turn == human_player_index:
+            if state.current_turn == human_player_index:
                 return
 
             await _execute_ai_turn_locked(game_id, human_player_index)
@@ -436,22 +481,21 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     if game_id not in active_games:
         return
 
-    game = active_games[game_id]
+    state = active_games[game_id]
 
     # Se la partita è finita o tocca al giocatore umano, non fare nulla
-    if game.game_over or game.current_turn == human_player_index:
+    if state.game_over or state.current_turn == human_player_index:
         return
 
     # AI gioca una carta casuale tra le valide
-    ai_player_index = game.current_turn
-    observation = game.get_observation_for_player(ai_player_index)
-    valid_actions = observation.get("valid_actions", [])
+    ai_player_index = state.current_turn
+    valid_actions = list(range(len(state.players[ai_player_index].hand))) if not state.game_over else []
 
     if not valid_actions:
         return
 
     card_index = random.choice(valid_actions)
-    selected_card = game.players[ai_player_index].hand[card_index]
+    selected_card = state.players[ai_player_index].hand[card_index]
 
     # Invia messaggio per rivelare la carta nella mano IA (usando DTO)
     if game_id in connected_clients:
@@ -466,8 +510,26 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
             except Exception:
                 pass
 
-    result = game.play_action(card_index)
+    new_state, step_result = step(state, PlayCardAction(player_index=ai_player_index, card_index=card_index))
+    if step_result.error:
+        return
+
+    active_games[game_id] = new_state
     game_versions[game_id] = game_versions.get(game_id, 0) + 1
+
+    result: Dict[str, object] = {
+        "played_card": step_result.played_card,
+        "player": step_result.player,
+        "trick_completed": step_result.trick_completed,
+        "trick_winner": step_result.trick_winner,
+        "captured_cards": [],
+        "cards_dealt": step_result.cards_dealt,
+        "trick_size": len(step_result.trick_cards),
+        "is_ai": True,
+    }
+    if step_result.trick_completed:
+        result["trick_cards"] = list(step_result.trick_cards)
+        result["captured_cards"] = [card for card, _ in step_result.trick_cards]
 
     # Se la mano è stata completata, invia notifica speciale
     if result.get("trick_completed"):
@@ -501,8 +563,59 @@ async def get_game_result(game_id: str):
     if game_id not in active_games:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
-    game = active_games[game_id]
-    return game.get_game_result()
+    state = active_games[game_id]
+    if not state.game_over:
+        return {"game_in_progress": True}
+
+    result: Dict[str, object] = {"game_over": True, "is_team_game": state.is_team_game}
+    if state.is_team_game and state.teams is not None:
+        team_0_points = sum(state.players[i].points for i in state.teams[0])
+        team_1_points = sum(state.players[i].points for i in state.teams[1])
+
+        if team_0_points > team_1_points:
+            winning_team = 0
+        elif team_1_points > team_0_points:
+            winning_team = 1
+        else:
+            winning_team = None
+
+        if winning_team is None:
+            winner_str = "Pareggio"
+        else:
+            team_players = state.teams[winning_team]
+            p0_name = state.players[team_players[0]].name
+            p1_name = state.players[team_players[1]].name
+            winner_str = f"Squadra {winning_team} ({p0_name} e {p1_name})"
+
+        result.update(
+            {
+                "winner": winner_str,
+                "winning_team": winning_team,
+                "team_points": {"Team 0": team_0_points, "Team 1": team_1_points},
+                "individual_points": {p.name: p.points for p in state.players},
+                "point_difference": abs(team_0_points - team_1_points),
+            }
+        )
+        return result
+
+    p0 = state.players[0].points
+    p1 = state.players[1].points
+    if p0 > p1:
+        winner_index = 0
+    elif p1 > p0:
+        winner_index = 1
+    else:
+        winner_index = None
+
+    result.update(
+        {
+            "winner": state.players[winner_index].name if winner_index is not None else "Pareggio",
+            "winner_index": winner_index,
+            "points": {p.name: p.points for p in state.players},
+            "point_difference": abs(p0 - p1),
+        }
+    )
+    return result
 
 
 @app.websocket("/ws/{game_id}/{player_index}")
@@ -512,9 +625,9 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
         await websocket.close(code=1000, reason="Partita non trovata")
         return
 
-    game = active_games[game_id]
+    state = active_games[game_id]
 
-    if player_index < 0 or player_index >= game.num_players:
+    if player_index < 0 or player_index >= state.num_players:
         await websocket.close(code=1000, reason="Indice giocatore non valido")
         return
 
@@ -527,7 +640,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
 
     try:
         # Invia lo stato iniziale della partita (usando DTO)
-        dto = _build_observation_dto(game, player_index, game_versions.get(game_id, 0))
+        dto = _build_observation_dto(state, player_index, game_versions.get(game_id, 0))
         await websocket.send_text(dto.model_dump_json())
 
         # Mantiene la connessione aperta e gestisce i messaggi
@@ -554,13 +667,13 @@ async def notify_clients(game_id: str):
     if game_id not in connected_clients:
         return
 
-    game = active_games[game_id]
+    state = active_games[game_id]
 
     # Invia lo stato aggiornato a ogni client connesso (usando DTO)
     server_version = game_versions.get(game_id, 0)
     for player_idx, websocket in connected_clients[game_id].items():
         try:
-            dto = _build_observation_dto(game, player_idx, server_version)
+            dto = _build_observation_dto(state, player_idx, server_version)
             await websocket.send_text(dto.model_dump_json())
         except Exception:
             # Gestisce client disconnessi
@@ -577,9 +690,9 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
     if game_id not in connected_clients:
         return
 
-    game = active_games[game_id]
-    if winner_index < len(game.players):
-        winner_name = game.players[winner_index].name
+    state = active_games[game_id]
+    if winner_index < len(state.players):
+        winner_name = state.players[winner_index].name
     else:
         winner_name = f"Giocatore {winner_index + 1}"
 
