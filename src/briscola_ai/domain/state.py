@@ -6,9 +6,9 @@ Obiettivo:
 - abilitare replay deterministico e pipeline ML
 - ridurre dipendenze del dominio da FastAPI/DTO/JSON
 
-Nota di migrazione:
-in una prima iterazione esisteva un modulo legacy separato (`briscola_ai.game.models`).
-Ora `Card/Rank/Suit` vivono in `briscola_ai.domain.models` per rendere il dominio autosufficiente.
+Nota storica:
+in una prima iterazione `Card/Rank/Suit` vivevano fuori da `domain/`.
+Ora vivono in `briscola_ai.domain.models` per rendere il dominio autosufficiente.
 """
 
 from __future__ import annotations

@@ -142,7 +142,7 @@ Stato (Phase 2B): ✅ completata
 - [x] Introdotto motore “funzionale” in parallelo: `GameState + step()` in `src/briscola_ai/domain/`.
 - [x] Migrato il backend (in-memory store) a `GameState` + `step`.
 - [x] Migrare gli endpoint HTTP `/actions` a DTO (rimuovere `GameJSONEncoder` e `_json_safe`).
-- [x] Spostati `Card/Rank/Suit` nel dominio (`src/briscola_ai/domain/models.py`) e rimossa la cartella legacy `src/briscola_ai/game/`.
+- [x] Spostati `Card/Rank/Suit` nel dominio (`src/briscola_ai/domain/models.py`) e rimossa la cartella `src/briscola_ai/game/`.
 
 Proposta struttura (indicativa):
 

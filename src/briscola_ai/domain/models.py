@@ -13,7 +13,7 @@ in Briscola esistono due “ordini” diversi che spesso si confondono:
 
 Obiettivo architetturale:
 questi modelli vivono in `domain/` perché sono parte delle regole del gioco e devono poter
-essere riutilizzati senza dipendere dal backend (FastAPI) o dal legacy engine OOP (`game/`).
+essere riutilizzati senza dipendere dal backend (FastAPI) o dalla UI.
 """
 
 from dataclasses import dataclass

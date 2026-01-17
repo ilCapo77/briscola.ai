@@ -27,7 +27,7 @@ class StepResult:
     """
     Output della transizione.
 
-    È pensato per uso didattico e per mantenere parità con l'API legacy:
+    È pensato per uso didattico e per mantenere parità con i payload API:
     - `played_card`: carta giocata in questo step
     - `trick_completed`: True quando la mano si completa
     - `trick_cards`: snapshot delle carte giocate nella mano (ordine di gioco)
