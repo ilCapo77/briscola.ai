@@ -236,6 +236,20 @@ Expected:
 - Nessuna duplicazione sul tavolo (es. due carte attribuite allo stesso player nella stessa mano)
 - Typecheck: `mypy src`
 
+### Debug UI (quando qualcosa “si blocca”)
+
+Se noti comportamenti strani (carte che spariscono, sequenza eventi incoerente, UI non cliccabile):
+
+- Apri DevTools → tab **Console** e copia eventuali warning/error (in particolare su `observation` e `server_version`).
+- Apri DevTools → tab **Network** → filtro **WS** e verifica:
+  - che la connessione a `/api/ws/{game_id}/{player_index}` resti attiva
+  - che arrivino messaggi con `type: "observation"` e (se presenti) eventi `ai_card_reveal` / `trick_result`
+- Controlla lo stato connessione in alto a destra:
+  - “Riconnessione…” indica che la UI sta facendo retry con backoff.
+- Modalità debug senza WebSocket (polling):
+  - apri la UI con `?polling=1` (es. `http://localhost:8000/?polling=1`)
+  - utile per capire se un bug dipende dal WS/reconnect o dalla logica UI.
+
 ## Simulazioni (headless)
 
 Per simulare N partite senza UI (utile per debug e, in futuro, generazione dataset):
@@ -246,11 +260,9 @@ python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
 
 ## Come giocare
 
-1. Nella schermata iniziale seleziona il numero di giocatori (2 o 4)
-2. Inserisci il tuo nome e scegli quale giocatore controllare
-3. Premi “Avvia partita” per iniziare
-4. Clicca su una carta in mano per giocarla
-5. L'IA risponderà automaticamente al suo turno
+1. Inserisci il tuo nome e premi “Avvia partita”
+2. Clicca su una carta in mano per giocarla
+3. L'IA risponderà automaticamente al suo turno
 
 ## Sviluppi futuri
 

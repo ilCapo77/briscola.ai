@@ -37,9 +37,28 @@ const API = (() => {
     let websocket = null;
     let pingIntervalId = null;
     let reconnectTimeoutId = null;
+    let reconnectAttempt = 0;
     let intentionalDisconnect = false;
     let currentOnMessage = null;
     let currentCallbacks = null;
+
+    /**
+     * Calcola un delay di riconnessione con backoff esponenziale (con jitter).
+     *
+     * Nota didattica:
+     * - un retry "fisso" può martellare il server e creare burst di richieste
+     * - un backoff riduce il carico e rende la UI più stabile in caso di rete ballerina
+     */
+    const _reconnectDelayMs = (attempt) => {
+        const baseMs = 600;
+        const maxMs = 10000;
+        const factor = 1.6;
+        const jitterPct = 0.2; // +/- 20%
+
+        const exp = Math.min(maxMs, Math.round(baseMs * (factor ** Math.max(0, attempt - 1))));
+        const jitter = exp * jitterPct * (Math.random() * 2 - 1);
+        return Math.max(0, Math.round(exp + jitter));
+    };
 
     const _closeActiveWebSocket = ({ resetGameInfo }) => {
         intentionalDisconnect = true;
@@ -58,6 +77,7 @@ const API = (() => {
             websocket.close(1000, STRINGS.intentionalDisconnect);
         }
         websocket = null;
+        reconnectAttempt = 0;
 
         if (resetGameInfo) {
             API.gameId = null;
@@ -209,6 +229,7 @@ const API = (() => {
 
         websocket.onopen = () => {
             console.log(STRINGS.wsEstablished);
+            reconnectAttempt = 0;
             // Salva ID partita e indice giocatore per la riconnessione
             API.gameId = gameId;
             API.playerIndex = playerIndex;
@@ -275,12 +296,19 @@ const API = (() => {
 
             // Prova a riconnettersi dopo un ritardo se non è stata una chiusura intenzionale.
             if (!intentionalDisconnect) {
+                reconnectAttempt += 1;
+                const delayMs = _reconnectDelayMs(reconnectAttempt);
+
+                if (currentCallbacks && typeof currentCallbacks.onReconnectAttempt === 'function') {
+                    currentCallbacks.onReconnectAttempt({ attempt: reconnectAttempt, delayMs });
+                }
+
                 reconnectTimeoutId = setTimeout(() => {
                     if (API.gameId !== null && API.playerIndex !== null) {
                         console.log(STRINGS.wsReconnecting);
                         connectWebSocket(API.gameId, API.playerIndex, currentCallbacks || currentOnMessage);
                     }
-                }, 1500);
+                }, delayMs);
             }
         };
 

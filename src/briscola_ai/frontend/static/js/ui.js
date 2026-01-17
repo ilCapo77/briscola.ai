@@ -129,13 +129,26 @@ const UI = (() => {
         elements.gameResult.classList.remove('hidden');
     };
 
-    const updateGameInfo = ({ gameId, connected }) => {
+    /**
+     * Aggiorna informazioni "header" della partita (id + stato connessione).
+     *
+     * Nota:
+     * - `connected` è utile come boolean base.
+     * - `statusText`/`statusClass` permettono uno stato più granulare (es. "Riconnessione...").
+     */
+    const updateGameInfo = ({ gameId, connected, statusText, statusClass }) => {
         if (gameId) {
             elements.gameId.textContent = `ID: ${gameId.substring(0, 8)}...`;
         }
-        if (connected !== undefined) {
-            elements.gameStatus.textContent = connected ? 'Connesso' : 'Non connesso';
-            elements.gameStatus.className = connected ? 'connected' : '';
+        if (connected !== undefined || statusText !== undefined || statusClass !== undefined) {
+            const text = statusText !== undefined ? statusText : (connected ? 'Connesso' : 'Non connesso');
+            elements.gameStatus.textContent = text;
+
+            // Manteniamo l'id `game-status` e usiamo classi "stateful" per i colori.
+            const classes = [];
+            if (statusClass) classes.push(statusClass);
+            else if (connected) classes.push('connected');
+            elements.gameStatus.className = classes.join(' ');
         }
     };
 
@@ -206,6 +219,20 @@ const UI = (() => {
         Array.from(cards).forEach((cardEl, idx) => {
             cardEl.classList.toggle('revealed', idx === cardIndex);
             cardEl.classList.toggle('disabled', idx !== cardIndex);
+        });
+    };
+
+    /**
+     * Ripristina lo stato visivo della mano del giocatore (rimuove highlight/disabled).
+     *
+     * Serve quando:
+     * - la connessione WS cade durante un'azione
+     * - la UI è in "hold" ma lo snapshot successivo non arriva (o arriva in ritardo)
+     */
+    const resetPlayerHandHighlights = () => {
+        elements.playerHand.querySelectorAll('.card').forEach((cardEl) => {
+            cardEl.classList.remove('revealed');
+            cardEl.classList.remove('disabled');
         });
     };
 
@@ -311,7 +338,7 @@ const UI = (() => {
         elements.playerNameDisplay.textContent = name;
     };
 
-    return {
+        return {
         init,
         showGameSetup,
         showGameBoard,
@@ -321,6 +348,7 @@ const UI = (() => {
         renderOpponentHand,
         revealOpponentCard,
         revealPlayerCard,
+        resetPlayerHandHighlights,
         removeRevealedCard,
         renderTableCards,
         renderTrumpCard,

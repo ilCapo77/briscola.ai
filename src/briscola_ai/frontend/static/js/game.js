@@ -47,6 +47,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Track last known table state to detect changes
     let lastTableCardsCount = 0;
+    let lastAppliedServerVersion = -1;
+    let pollingIntervalId = null;
+    let pollingInFlight = false;
 
     // UI hold: quando evidenziamo una carta, rinviamo il rendering dello snapshot
     // finché non è passato il tempo di reveal (evita che la carta appaia sul tavolo
@@ -68,6 +71,53 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     let pendingEvents = [];
     let flushTimeoutId = null;
+
+    /**
+     * Modalità debug: fallback polling al posto del WebSocket.
+     *
+     * Attivazione:
+     * - aggiungi `?polling=1` all'URL della UI (es. http://localhost:8000/?polling=1)
+     *
+     * Motivazione:
+     * - utile quando stai debuggando problemi di rete/reconnect e vuoi un flusso più "semplice"
+     * - non è pensato come modalità principale (il WS resta il path normale)
+     */
+    const _pollingEnabledByUrl = () => {
+        const params = new URLSearchParams(window.location.search);
+        const value = params.get('polling');
+        return value === '1' || value === 'true';
+    };
+
+    const _stopPolling = () => {
+        if (pollingIntervalId) {
+            clearInterval(pollingIntervalId);
+            pollingIntervalId = null;
+        }
+        pollingInFlight = false;
+    };
+
+    const _startPolling = (gameId, playerIndex) => {
+        _stopPolling();
+        UI.updateGameInfo({ connected: false, statusText: 'Polling (debug)', statusClass: 'connecting' });
+
+        const pollOnce = async () => {
+            if (pollingInFlight) return;
+            pollingInFlight = true;
+            try {
+                const obs = await API.getGameState(gameId, playerIndex);
+                handleGameUpdate(obs);
+            } catch (error) {
+                console.warn('Polling error:', error);
+                UI.updateGameInfo({ connected: false, statusText: 'Polling: errore rete', statusClass: 'reconnecting' });
+            } finally {
+                pollingInFlight = false;
+            }
+        };
+
+        // Primo fetch immediato, poi intervallo.
+        pollOnce();
+        pollingIntervalId = setInterval(pollOnce, 700);
+    };
 
     const _scheduleFlush = () => {
         if (flushTimeoutId) {
@@ -109,6 +159,14 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const _applyObservation = (obs) => {
+        // Guard rail: se arrivano snapshot fuori ordine (reconnect/ritardi), ignoriamo quelli vecchi.
+        const serverVersion = typeof obs?.server_version === 'number' ? obs.server_version : -1;
+        if (serverVersion !== -1 && serverVersion <= lastAppliedServerVersion) {
+            console.warn('Ignoring stale observation:', { serverVersion, lastAppliedServerVersion, obs });
+            return;
+        }
+        if (serverVersion !== -1) lastAppliedServerVersion = serverVersion;
+
         store.setState({
             observation: obs,
             gameOver: !!obs.game_over,
@@ -293,21 +351,44 @@ document.addEventListener('DOMContentLoaded', () => {
             });
 
             UI.setPlayerName(config.playerName);
-            UI.updateGameInfo({ gameId: result.game_id, connected: false });
+            UI.updateGameInfo({ gameId: result.game_id, connected: false, statusText: 'Connessione...', statusClass: 'connecting' });
             UI.showGameBoard();
 
-            // Connect WebSocket
-            API.connectWebSocket(result.game_id, 0, {
-                onMessage: handleGameUpdate,
-                onOpen: () => {
-                    store.setState({ connected: true });
-                    UI.updateGameInfo({ connected: true });
-                },
-                onClose: () => {
-                    store.setState({ connected: false });
-                    UI.updateGameInfo({ connected: false });
-                }
-            });
+            if (_pollingEnabledByUrl()) {
+                // Modalità debug: niente WS, solo polling.
+                _startPolling(result.game_id, 0);
+            } else {
+                // Connect WebSocket (path normale)
+                API.connectWebSocket(result.game_id, 0, {
+                    onMessage: handleGameUpdate,
+                    onOpen: () => {
+                        _stopPolling();
+                        store.setState({ connected: true });
+                        UI.updateGameInfo({ connected: true, statusText: 'Connesso', statusClass: 'connected' });
+                    },
+                    onClose: () => {
+                        // Se la connessione cade durante un'azione, sblocchiamo la UI e ripristiniamo la mano.
+                        const current = getState();
+                        store.setState({ connected: false, actionInFlight: false });
+                        UI.resetPlayerHandHighlights();
+                        if (current.observation) updateUI(current.observation);
+
+                        // Reset del buffer eventi: dopo reconnect useremo solo lo snapshot fresh dal server.
+                        pendingEvents = [];
+                        uiHoldUntilMs = 0;
+
+                        UI.updateGameInfo({ connected: false, statusText: 'Non connesso', statusClass: 'disconnected' });
+                    },
+                    onReconnectAttempt: ({ attempt, delayMs }) => {
+                        UI.updateGameInfo({
+                            connected: false,
+                            statusText: `Riconnessione... (tentativo ${attempt})`,
+                            statusClass: 'reconnecting'
+                        });
+                        console.log(`WS reconnect attempt ${attempt} in ${delayMs}ms`);
+                    }
+                });
+            }
 
         } catch (error) {
             alert(`Errore: ${error.message}`);
@@ -366,6 +447,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const resetGame = () => {
         API.disconnectWebSocket();
+        _stopPolling();
 
         store.setState({
             gameId: null,
@@ -378,6 +460,9 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         lastTableCardsCount = 0;
+        lastAppliedServerVersion = -1;
+        pendingEvents = [];
+        uiHoldUntilMs = 0;
         UI.showGameSetup();
     };
 

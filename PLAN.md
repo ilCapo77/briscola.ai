@@ -114,13 +114,13 @@ Step suggeriti (focus 2-player):
 - [x] Esito mano: usare `trick_result.trick_cards` dal backend per evitare race (niente duplicazioni “Tu/IA” sul tavolo).
 - [x] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
   - Documentazione: vedi `README.md` → sezione “Smoke test UI (manuale)”.
-- [ ] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
+- [x] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
 - [ ] Allineare contratto dati UI↔API:
   - [ ] definire un DTO stabile per `Card`, `GameObservation`, `GameResult` (idealmente da OpenAPI/Pydantic)
   - [ ] ridurre accoppiamento a stringhe “magiche” (es. `player_0_hand_size`) introducendo campi espliciti
-- [ ] Robustezza runtime:
-  - [ ] gestione errori in UI (banner/stato connessione, retry/backoff WS, messaggi user-friendly)
-  - [ ] fallback senza WebSocket (polling) per debug
+- [x] Robustezza runtime:
+  - [x] gestione errori in UI (banner/stato connessione, retry/backoff WS, messaggi user-friendly)
+  - [x] fallback senza WebSocket (polling) per debug (`?polling=1`)
 - [ ] Test UI:
   - [x] smoke test manuale documentato (passi + expected)
   - [ ] (opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS

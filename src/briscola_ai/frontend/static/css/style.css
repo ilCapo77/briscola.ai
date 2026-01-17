@@ -145,6 +145,22 @@ button:disabled {
     background: var(--success-color);
 }
 
+/* Stati connessione più granulari (debuggabilità UI) */
+#game-status.connecting {
+    background: var(--secondary-color);
+    color: #fff;
+}
+
+#game-status.reconnecting {
+    background: var(--warning-color);
+    color: #000;
+}
+
+#game-status.disconnected {
+    background: var(--accent-color);
+    color: #fff;
+}
+
 /* Game board layout */
 #game-board {
     flex: 1;
