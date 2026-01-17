@@ -17,7 +17,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
 
 - Runtime: **Python 3.14**, **FastAPI** + **Pydantic v2**.
 - Backend: endpoint HTTP + `WebSocket` (stato partita in memoria, cleanup via lifespan).
-- Motore: `BriscolaGame` (supporta 2 e 4, ma **focus didattico sul 2-player**).
+- Motore: `GameState + step()` (supporta 2 e 4, ma **focus didattico sul 2-player**).
 - Frontend: UI statica (`src/briscola_ai/frontend/static/`).
 - Tooling: workflow su `ruff` (lint+format; import sorting via regole `I`) + `mypy`.
 - Asset carte: immagini carte in `src/briscola_ai/frontend/static/assets/cards/` (servite a `/static/assets/cards/`).
@@ -42,13 +42,13 @@ Comandi di verifica (sempre validi):
 - test: `pytest`
 - coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
 
-## Stato iniziale (prima del refactor)
+## Stato attuale
 
 - Backend: `FastAPI` + endpoint HTTP + `WebSocket` (stato partita in memoria).
-- Motore: `BriscolaGame` in `src/briscola_ai/game/` (2 e 4 giocatori).
+- Motore (canonico): `GameState + step()` in `src/briscola_ai/domain/` (2 e 4 giocatori).
 - Frontend: asset statici in `src/briscola_ai/frontend/static/` (HTML/CSS/JS).
-- Test: assenti.
-- “AI”: bot casuale lato frontend.
+- Test: presenti in `tests/` (unit + integrazione API base).
+- “AI”: bot casuale server‑driven (backend gioca automaticamente quando è il suo turno).
 
 ## Principi guida (per un refactor “che insegna”)
 
@@ -139,10 +139,9 @@ Obiettivo: rendere chiaro “cosa è Briscola” vs “come la servo” vs “co
 
 Stato (Phase 2B):
 - [x] Introdotto motore “funzionale” in parallelo: `GameState + step()` in `src/briscola_ai/domain/`.
-- [x] Aggiunti test di parità vs `BriscolaGame` per migrazione sicura (`tests/test_domain_step_parity.py`).
-- [x] Migrato il backend (in-memory store) da `BriscolaGame` a `GameState` + `step`.
+- [x] Migrato il backend (in-memory store) a `GameState` + `step`.
 - [x] Migrare gli endpoint HTTP `/actions` a DTO (rimuovere `GameJSONEncoder` e `_json_safe`).
-- [x] Spostati `Card/Rank/Suit` nel dominio (`src/briscola_ai/domain/models.py`) mantenendo `briscola_ai.game.models` come wrapper legacy.
+- [x] Spostati `Card/Rank/Suit` nel dominio (`src/briscola_ai/domain/models.py`) e rimossa la cartella legacy `src/briscola_ai/game/`.
 
 Proposta struttura (indicativa):
 

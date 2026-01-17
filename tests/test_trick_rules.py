@@ -9,15 +9,13 @@ from typing import Optional
 
 import pytest
 
-from briscola_ai.game.game import BriscolaGame
-from briscola_ai.game.models import Card, Rank, Suit
+from briscola_ai.domain.models import Card, Rank, Suit
+from briscola_ai.domain.rules import who_wins_trick
 
 
-def _g(trump: Optional[Card] = None) -> BriscolaGame:
-    """Helper: crea un game 2p con briscola impostabile manualmente (senza start_game)."""
-    game = BriscolaGame(num_players=2, player_names=["A", "B"])
-    game.trump_card = trump
-    return game
+def _trump_suit(trump: Optional[Card]) -> Optional[Suit]:
+    """Helper: estrae il seme di briscola (o None se non definito)."""
+    return trump.suit if trump else None
 
 
 @pytest.mark.parametrize(
@@ -36,29 +34,29 @@ def _g(trump: Optional[Card] = None) -> BriscolaGame:
 )
 def test_trick_rank_order_within_same_suit(higher: Rank, lower: Rank) -> None:
     """A parità di seme, vince sempre il rank più alto secondo l'ordine Briscola."""
-    game = _g(trump=Card(Suit.CUPS, Rank.TWO))
+    trump = Card(Suit.CUPS, Rank.TWO)
     cards = [
         (Card(Suit.CLUBS, lower), 0),
         (Card(Suit.CLUBS, higher), 1),
     ]
-    assert game.who_wins_trick(cards) == 1
+    assert who_wins_trick(cards, trump_suit=_trump_suit(trump)) == 1
 
 
 def test_trump_beats_non_trump_even_if_low() -> None:
     """Una briscola, anche bassa, batte una carta non-briscola di altro seme."""
-    game = _g(trump=Card(Suit.CUPS, Rank.TWO))
+    trump = Card(Suit.CUPS, Rank.TWO)
     cards = [
         (Card(Suit.SWORDS, Rank.ACE), 0),  # seme di uscita
         (Card(Suit.CUPS, Rank.TWO), 1),  # briscola minima
     ]
-    assert game.who_wins_trick(cards) == 1
+    assert who_wins_trick(cards, trump_suit=_trump_suit(trump)) == 1
 
 
 def test_leading_suit_wins_if_no_trump_played() -> None:
     """Se nessuno gioca briscola, vale il seme di uscita (leading suit)."""
-    game = _g(trump=Card(Suit.CUPS, Rank.TWO))
+    trump = Card(Suit.CUPS, Rank.TWO)
     cards = [
         (Card(Suit.SWORDS, Rank.FOUR), 0),
         (Card(Suit.COINS, Rank.ACE), 1),  # seme diverso, non briscola
     ]
-    assert game.who_wins_trick(cards) == 0
+    assert who_wins_trick(cards, trump_suit=_trump_suit(trump)) == 0

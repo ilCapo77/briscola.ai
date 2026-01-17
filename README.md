@@ -20,9 +20,11 @@ Nota didattica: lo sviluppo “step-by-step” verso l’addestramento ML è att
 
 ## Struttura del progetto
 
-- `src/briscola_ai/game/` – logica del gioco
-  - `models.py` – classi `Card`, `Suit`, `Rank`, `Player`
-  - `game.py` – classe `BriscolaGame` con le regole
+- `src/briscola_ai/domain/` – logica del gioco (dominio canonico, “puro”)
+  - `models.py` – modelli `Card`, `Suit`, `Rank`
+  - `state.py` – stato completo (`GameState`)
+  - `engine.py` – transizione pura `step(state, action)`
+  - `rules.py` – regole isolate (es. vincitore della mano)
 - `src/briscola_ai/backend/` – server backend
   - `server.py` – server FastAPI con endpoint API e WebSocket
 - `src/briscola_ai/frontend/` – interfaccia frontend

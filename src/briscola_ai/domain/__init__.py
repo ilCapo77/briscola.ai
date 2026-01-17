@@ -1,16 +1,30 @@
 """
 Dominio "puro" (Phase 2B): stato + transizioni.
 
-Questa cartella avvia la migrazione verso un motore più adatto a ML e replay:
+Questa cartella contiene il motore canonico della Briscola, pensato per:
+- test unitari deterministici
+- replay riproducibili (seed controllato)
+- futuri use-case ML (simulazioni, self-play, dataset)
+
+Componenti principali:
 - uno stato esplicito (`GameState`)
 - una transizione pura (`step`) che ritorna un nuovo stato e un risultato
-
-Nota:
-Per ora il backend continua a usare `BriscolaGame` (stateful) e questi moduli
-vivono in parallelo, con test di parità per migrare in sicurezza.
 """
 
-from .engine import StepResult, step
+from .engine import PlayCardAction, StepResult, step
+from .models import Card, Rank, Suit
+from .rules import trick_points, who_wins_trick
 from .state import GameState, new_game_state
 
-__all__ = ["GameState", "StepResult", "new_game_state", "step"]
+__all__ = [
+    "Card",
+    "GameState",
+    "PlayCardAction",
+    "Rank",
+    "StepResult",
+    "Suit",
+    "new_game_state",
+    "step",
+    "trick_points",
+    "who_wins_trick",
+]

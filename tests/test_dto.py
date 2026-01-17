@@ -13,7 +13,7 @@ from briscola_ai.backend.dto import (
     TableCardDTO,
     TrickResultDTO,
 )
-from briscola_ai.game.models import Card, Rank, Suit
+from briscola_ai.domain.models import Card, Rank, Suit
 
 
 class TestCardDTO:

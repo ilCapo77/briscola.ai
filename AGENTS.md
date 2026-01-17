@@ -3,7 +3,7 @@
 ## Project Structure
 
 - `src/briscola_ai/` – Python package (entrypoint in `main.py`)
-  - `game/` – core rules and models (e.g., `game.py`, `models.py`)
+  - `domain/` – regole core e modelli canonici (es. `models.py`, `state.py`, `engine.py`, `rules.py`)
   - `backend/` – FastAPI server + WebSocket endpoints (`server.py`)
   - `frontend/static/` – browser UI assets (`index.html`, `css/`, `js/`)
 - `ai/` – AI implementations/strategies (currently minimal)
@@ -27,7 +27,7 @@ The app serves the UI at `http://localhost:8000` by default (`--host`, `--port` 
 ## Coding Style & Naming
 
 - Indentation: 4 spaces for Python; keep JS/CSS consistent with existing files.
-- Naming: `snake_case` for Python functions/vars, `PascalCase` for Python classes; keep modules small and scoped to `game/`, `backend/`, `frontend/`, or `ai/`.
+- Naming: `snake_case` for Python functions/vars, `PascalCase` for Python classes; keep modules small and scoped to `domain/`, `backend/`, `frontend/`, or `ai/`.
 - Documentation-first (didactic repo): add clear, detailed docstrings for all public modules/classes/functions/methods; include intent, inputs/outputs, and invariants where helpful.
 - Commenting-first (didactic repo): keep code and tests well commented; explain non-obvious logic, edge cases, and what each test scenario is asserting.
 - Agent communication: for each iteration, explain what changed and why in a didactic way (assumptions, reasoning, and how to verify locally).
@@ -50,6 +50,6 @@ The app serves the UI at `http://localhost:8000` by default (`--host`, `--port` 
 
 Git history isn’t available in this workspace snapshot, so there is no established commit style to follow. Prefer a simple conventional format:
 
-- Commits (Italiano): `type(scope): summary` (es. `feat(game): aggiungi helper punteggio`, `fix(ui): correggi animazione carte`)
+- Commits (Italiano): `type(scope): summary` (es. `feat(domain): aggiungi helper punteggio`, `fix(ui): correggi animazione carte`)
   - **IMPORTANTE**: Le descrizioni dei commit devono essere SEMPRE in italiano per finalità didattiche.
 - PRs: describe the change, include reproduction steps for bugs, and add screenshots for UI changes (`src/briscola_ai/frontend/static/`).

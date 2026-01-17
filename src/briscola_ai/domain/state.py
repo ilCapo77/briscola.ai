@@ -7,8 +7,8 @@ Obiettivo:
 - ridurre dipendenze del dominio da FastAPI/DTO/JSON
 
 Nota di migrazione:
-in una prima iterazione `Card/Rank/Suit` vivevano in `briscola_ai.game.models`.
-Ora sono stati spostati in `briscola_ai.domain.models` per rendere il dominio autosufficiente.
+in una prima iterazione esisteva un modulo legacy separato (`briscola_ai.game.models`).
+Ora `Card/Rank/Suit` vivono in `briscola_ai.domain.models` per rendere il dominio autosufficiente.
 """
 
 from __future__ import annotations

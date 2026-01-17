@@ -1,8 +1,7 @@
 """
 Transizione pura `step(state, action)` (Phase 2B).
 
-Questa implementazione replica le regole correnti di `BriscolaGame.play_action`,
-ma lavora su `GameState` immutabile.
+Questa implementazione codifica le regole della Briscola lavorando su `GameState` immutabile.
 """
 
 from __future__ import annotations
@@ -10,7 +9,8 @@ from __future__ import annotations
 from dataclasses import dataclass, replace
 from typing import Optional
 
-from .models import Card, Suit
+from .models import Card
+from .rules import who_wins_trick
 from .state import GameState, PlayerState
 
 
@@ -50,30 +50,6 @@ def _valid_actions(state: GameState) -> list[int]:
     if state.game_over:
         return []
     return list(range(len(state.players[state.current_turn].hand)))
-
-
-def _who_wins_trick(table_cards: tuple[tuple[Card, int], ...], trump_suit: Optional[Suit]) -> int:
-    """
-    Determina il vincitore della mano, replicando `BriscolaGame.who_wins_trick`.
-    """
-    if not table_cards:
-        raise ValueError("table_cards vuoto")
-
-    leading_suit = table_cards[0][0].suit
-    trump_cards = [(card, player_idx, i) for i, (card, player_idx) in enumerate(table_cards) if card.suit == trump_suit]
-
-    if trump_cards:
-        highest_trump = max(trump_cards, key=lambda x: x[0].rank.trick_strength)
-        return highest_trump[1]
-
-    leading_suit_cards = [
-        (card, player_idx, i) for i, (card, player_idx) in enumerate(table_cards) if card.suit == leading_suit
-    ]
-    if leading_suit_cards:
-        highest_leading = max(leading_suit_cards, key=lambda x: x[0].rank.trick_strength)
-        return highest_leading[1]
-
-    return table_cards[0][1]
 
 
 def step(state: GameState, action: PlayCardAction) -> tuple[GameState, StepResult]:
@@ -150,7 +126,7 @@ def step(state: GameState, action: PlayCardAction) -> tuple[GameState, StepResul
     # Mano completa: determina vincitore e aggiorna punti/carte raccolte
     trick_cards = tuple(table_cards)
     trump_suit = state.trump_card.suit if state.trump_card else None
-    winner = _who_wins_trick(trick_cards, trump_suit)
+    winner = who_wins_trick(trick_cards, trump_suit)
 
     captured_cards = [card for card, _ in trick_cards]
     winner_player = players[winner]
