@@ -40,15 +40,13 @@ def who_wins_trick(table_cards: Sequence[tuple[Card, int]], trump_suit: Optional
     # Se ci sono briscole, vince la briscola con trick_strength maggiore.
     trump_cards = [(card, player_idx) for card, player_idx in table_cards if card.suit == trump_suit]
     if trump_cards:
-        winner_card, winner_player = max(trump_cards, key=lambda pair: pair[0].rank.trick_strength)
-        _ = winner_card  # leggibilità: chiarisce cosa stiamo massimizzando
+        _winner_card, winner_player = max(trump_cards, key=lambda pair: pair[0].rank.trick_strength)
         return winner_player
 
     # Altrimenti vale il seme di uscita.
     leading_cards = [(card, player_idx) for card, player_idx in table_cards if card.suit == leading_suit]
     if leading_cards:
-        winner_card, winner_player = max(leading_cards, key=lambda pair: pair[0].rank.trick_strength)
-        _ = winner_card
+        _winner_card, winner_player = max(leading_cards, key=lambda pair: pair[0].rank.trick_strength)
         return winner_player
 
     # Caso teoricamente irraggiungibile, ma lasciamo un fallback robusto.
@@ -63,4 +61,3 @@ def trick_points(cards: Iterable[Card]) -> int:
     - in Briscola il totale punti del mazzo è sempre 120.
     """
     return sum(card.rank.points for card in cards)
-
