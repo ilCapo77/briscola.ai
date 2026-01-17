@@ -115,14 +115,14 @@ Step suggeriti (focus 2-player):
 - [x] Smoke test UI manuale (documentato): passi ripetibili + expected (utile per regressioni).
   - Documentazione: vedi `README.md` → sezione “Smoke test UI (manuale)”.
 - [x] Riprodurre e catalogare eventuali bug UI residui (console JS, tab Network, handshake WebSocket).
-- [ ] Allineare contratto dati UI↔API:
+- [x] Allineare contratto dati UI↔API:
   - [x] definire un DTO stabile per `Card` e `GameObservation` (Pydantic: `CardDTO`, `ObservationDTO`)
   - [x] definire un DTO stabile per `GameResult` (Pydantic: `GameResultDTO`)
   - [x] ridurre accoppiamento a stringhe “magiche” (es. `player_0_hand_size`) introducendo campi espliciti (es. `players[]`)
 - [x] Robustezza runtime:
   - [x] gestione errori in UI (banner/stato connessione, retry/backoff WS, messaggi user-friendly)
   - [x] fallback senza WebSocket (polling) per debug (`?polling=1`)
-- [ ] Test UI:
+- [x] Test UI:
   - [x] smoke test manuale documentato (passi + expected)
   - [ ] (futuro, opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS
 
