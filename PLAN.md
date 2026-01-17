@@ -134,11 +134,11 @@ Step suggeriti (focus 2-player):
 Deliverable minimo:
 - la UI permette di avviare una partita 2-player, giocare carte e vedere fine partita senza errori in console.
 
-### Fase 2 — Ristrutturazione architetturale (dominio vs adattatori) (3–6 sessioni)
+### Fase 2 — Ristrutturazione architetturale (dominio vs adattatori) (3–6 sessioni) ✅ (completata)
 
 Obiettivo: rendere chiaro “cosa è Briscola” vs “come la servo” vs “come la alleno”.
 
-Stato (Phase 2B):
+Stato (Phase 2B): ✅ completata
 - [x] Introdotto motore “funzionale” in parallelo: `GameState + step()` in `src/briscola_ai/domain/`.
 - [x] Migrato il backend (in-memory store) a `GameState` + `step`.
 - [x] Migrare gli endpoint HTTP `/actions` a DTO (rimuovere `GameJSONEncoder` e `_json_safe`).
