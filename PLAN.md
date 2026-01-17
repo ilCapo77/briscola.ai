@@ -165,14 +165,14 @@ Azioni chiave:
   - utile per ML e per evitare leak informativo.
 - API: trasformare oggetti Python in JSON con **Pydantic schema** invece di encoder custom.
 
-### Fase 3 — Test “seri” e qualità (parallela alle fasi 1–2)
+### Fase 3 — Test “seri” e qualità (parallela alle fasi 1–2) 🚧 (in corso)
 
 Obiettivo: coprire il motore e assicurare stabilità in evoluzione.
 
 - Unit test dominio (priorità alta):
-  - regole mano (`who_wins_trick`) con casi noti
-  - punteggi (somma punti carte catturate)
-  - invarianti: nessuna carta duplicata, mano sempre valida, turni coerenti
+  - [x] invarianti: nessuna carta duplicata, 40 carte totali, turni coerenti, tavolo coerente (`tests/test_domain_invariants.py`)
+  - [x] regole mano (`who_wins_trick`) con casi noti (`tests/test_trick_rules.py`)
+  - [x] punteggi (somma punti carte catturate) come invariante dei test dominio
 - Test di integrazione API (priorità media):
   - crea partita → gioca azione → stato cambia → fine partita
   - WebSocket: connessione + ricezione update (anche test “light”)
