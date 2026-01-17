@@ -173,6 +173,7 @@ Obiettivo: coprire il motore e assicurare stabilità in evoluzione.
   - [x] invarianti: nessuna carta duplicata, 40 carte totali, turni coerenti, tavolo coerente (`tests/test_domain_invariants.py`)
   - [x] regole mano (`who_wins_trick`) con casi noti (`tests/test_trick_rules.py`)
   - [x] punteggi (somma punti carte catturate) come invariante dei test dominio
+  - [x] casi limite: ultima carta/briscola in 2p e pareggi (2p/4p) (`tests/test_domain_endgame_cases.py`)
 - Test di integrazione API (priorità media):
   - crea partita → gioca azione → stato cambia → fine partita
   - WebSocket: connessione + ricezione update (anche test “light”)
