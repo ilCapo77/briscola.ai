@@ -124,7 +124,7 @@ Step suggeriti (focus 2-player):
   - [x] fallback senza WebSocket (polling) per debug (`?polling=1`)
 - [ ] Test UI:
   - [x] smoke test manuale documentato (passi + expected)
-  - [ ] (opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS
+  - [ ] (futuro, opzionale) E2E leggero con Playwright quando introduciamo una toolchain JS
 
 - [x] **Refactor IA → modello server-driven (standard)**:
   - Backend: rimuovere endpoint di trigger e far avanzare automaticamente la partita quando tocca all'IA
