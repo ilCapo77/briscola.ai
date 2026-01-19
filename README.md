@@ -1,39 +1,65 @@
 # Briscola AI
 
-![Coverage](https://img.shields.io/badge/coverage-56%25-red)
+![Coverage](https://img.shields.io/badge/coverage-84%25-brightgreen)
 
-Un gioco di Briscola con funzionalità di IA. Il progetto implementa la Briscola con un’interfaccia web e un giocatore controllato dall’IA. L’obiettivo è arrivare a una rete neurale che impari a giocare raccogliendo dati dalle partite dei giocatori umani.
+Un progetto didattico “end‑to‑end” nato da un’esigenza concreta: **studiare le reti neurali con un progetto reale**, non con esempi astratti.
+
+La Briscola è un ottimo “laboratorio” perché obbliga a mettere insieme tutti i pezzi:
+- un **motore di regole** corretto e testabile;
+- un **backend** che espone un contratto stabile (API/WS);
+- una **UI** che rende leggibile la sequenza delle mani;
+- una **pipeline dati** per arrivare a dataset, baseline e training.
+
+Obiettivo finale: arrivare a un’IA (rete neurale) che impari a giocare in modo riproducibile, misurabile e spiegabile.
 
 ## Funzionalità
 
 - Implementazione completa delle regole della Briscola
-- Supporto sia per 2 giocatori sia per 4 giocatori (a squadre)
+- Motore (`domain/`) con supporto **2 giocatori** e **4 giocatori** (a squadre)
 - Interfaccia utente web
 - Aggiornamenti in tempo reale via WebSocket
 - IA semplice (attualmente strategia casuale) con modello "standard" server‑driven:
   - Il backend avanza automaticamente la partita quando è il turno dell'IA
   - Il backend non introduce delay di presentazione (niente `asyncio.sleep()` per animazioni)
   - Il frontend controlla solo la presentazione (hold/animazioni) degli update ricevuti via WS
-- Raccolta dati per machine learning
+- Base per raccolta dati (roadmap ML in `PLAN.md`)
 
-Nota didattica: lo sviluppo “step-by-step” verso l’addestramento ML è attualmente focalizzato sulla modalità **2 giocatori**; il 4‑player rimane come supporto e regressione.
+Nota didattica:
+- la UI attuale è pensata e testata soprattutto in **modalità 2 giocatori** (è la modalità “principale”);
+- il 4‑player è supportato dal motore e usato come supporto/regressione, ma **non è ancora pienamente supportato dal frontend**.
+
+## Quick start
+
+Questo progetto usa [uv](https://github.com/astral-sh/uv).
+
+Requisiti:
+- Python **3.14**
+- `uv`
+
+Comandi tipici:
+- Crea env: `uv venv -p python3.14`
+- Installa (editable): `uv pip install -e .`
+- Dev deps: `uv pip install -e ".[dev]"`
+- Avvia server: `briscola-server --reload`
+- Apri UI: `http://localhost:8000`
 
 ## Struttura del progetto
 
-- `src/briscola_ai/domain/` – logica del gioco (dominio canonico, “puro”)
+- `src/briscola_ai/domain/` – dominio canonico: **regole e stato** (puro, testabile)
   - `models.py` – modelli `Card`, `Suit`, `Rank`
   - `state.py` – stato completo (`GameState`)
-  - `engine.py` – transizione pura `step(state, action)`
+  - `engine.py` – transizione `step(state, action)` (deterministica dato seed/stato)
   - `rules.py` – regole isolate (es. vincitore della mano)
-- `src/briscola_ai/backend/` – server backend
-  - `server.py` – server FastAPI con endpoint API e WebSocket
-- `src/briscola_ai/frontend/` – interfaccia frontend
-  - `static/` – asset statici (HTML, CSS, JavaScript)
-- `src/briscola_ai/ai/` – implementazione IA (in espansione)
-- `tests/` – test unitari e d’integrazione (pytest)
-- `scripts/` – script di utilità
-  - `simulate_games.py` – simulazioni headless (self‑play casuale)
-- `PLAN.md` – piano di refactoring e roadmap didattica (sempre aggiornato)
+- `src/briscola_ai/backend/` – adattatore HTTP/WS (FastAPI)
+  - `dto.py` – DTO Pydantic v2 (contratto dati)
+  - `server.py` – endpoint REST + WebSocket, gestione partite in memoria
+- `src/briscola_ai/frontend/static/` – UI (HTML/CSS/JS)
+  - `assets/cards/` – immagini carte (front `{suit}_{rank}.png`, back `card_back.png`)
+- `src/briscola_ai/ai/` – baseline AI (in evoluzione)
+- `tests/` – test unitari + integrazione API/WS (pytest)
+- `scripts/` – utilità (simulazioni headless)
+  - `scripts/simulate_games.py` – simulazioni senza UI
+- `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
 
 ## Architettura comunicazione Backend ↔ Frontend
 
@@ -54,7 +80,6 @@ Il sistema usa un'architettura ibrida HTTP + WebSocket:
 **Scelta ibrida:**
 - **REST** per le *azioni* del client → semantica chiara, stateless, facile debug
 - **WebSocket** per gli *aggiornamenti* dal server → tempo reale, push, efficiente
-
 
 ### Endpoint HTTP (REST)
 
@@ -135,75 +160,29 @@ Il backend avanza automaticamente la partita quando è il turno dell'IA (pattern
 
 Questa scelta mantiene separata la **logica di presentazione** (frontend) dalla **logica di gioco** (backend), evitando al contempo che la UI debba “pilotare” il dominio con chiamate dedicate.
 
-## Installazione
+## Cosa è stato fatto (stato attuale)
 
-Questo progetto usa [uv](https://github.com/astral-sh/uv) come package manager, per una gestione dell’ambiente e delle dipendenze più veloce e affidabile rispetto agli strumenti tradizionali.
+- Dominio canonico isolato in `domain/` (motore `GameState + step()`), con regole testate.
+- Backend FastAPI + DTO Pydantic v2 (contratto più esplicito e testabile).
+- Contratto WS stabilizzato: snapshot `type: "observation"` + eventi (`ai_card_reveal`, `trick_result`, `pong`) e `server_version` monotona.
+- UI resa più robusta: gestione reconnect/backoff, modalità polling `?polling=1`, sequenza mano più leggibile.
+- Asset carte e proporzioni: UI mantiene aspect ratio immagini (177x285), retro carta `card_back.png`, placeholder stabili per briscola/mazzo a fine mazzo (niente “salti” layout).
+- Test: unit (dominio) + integrazione (API/WS); coverage attuale **84%** su `briscola_ai`.
 
-Requisiti:
-- Python **3.14**
-- `uv`
+Dettaglio completo e roadmap: vedi `PLAN.md`.
 
-1. Clona il repository:
-   ```
-   git clone https://github.com/yourusername/briscola.ai.git
-   cd briscola.ai
-   ```
+## Cosa rimane da fare (prossimi step consigliati)
 
-2. Crea un virtual environment con uv:
-   ```
-   uv venv -p python3.14
-   ```
+La prossima fase “vera” è trasformare il progetto in un ambiente addestrabile (data pipeline + baseline):
 
-3. Attiva il virtual environment:
-   - Su Windows:
-     ```
-     .venv\Scripts\activate
-     ```
-   - Su macOS/Linux:
-     ```
-     source .venv/bin/activate
-     ```
+- **Persistenza “da laboratorio” (SQLite)**: event log append‑only di partite/azioni/osservazioni (riproducibilità e debug).
+- **Export dataset** (SQLite → JSONL/Parquet) con schema versionato.
+- **Self‑play batch** (random + euristica semplice) per generare dati e metriche.
+- **Valutazione**: win‑rate su seed fissi; opzionale ELO/TrueSkill.
 
-4. Installa il pacchetto con uv:
-   ```
-   uv pip install -e .
-   ```
-
-   Per lo sviluppo puoi installare anche le dipendenze dev:
-   ```
-   uv pip install -e ".[dev]"
-   ```
-
-   Se non hai uv installato, segui le istruzioni su [https://github.com/astral-sh/uv](https://github.com/astral-sh/uv).
-
-   Nota: se modifichi `pyproject.toml`, reinstalla il pacchetto per rendere effettive le modifiche:
-   ```
-   uv pip install -e .
-   ```
-
-## Esecuzione dell’applicazione
-
-Dopo l’installazione assicurati che il virtual environment sia attivo (dovresti vedere `(.venv)` nel prompt). Poi puoi avviare il server con lo script installato:
-
-```
-briscola-server
-```
-
-Oppure direttamente tramite il modulo Python:
-
-```
-python -m briscola_ai.main
-```
-
-Opzioni da linea di comando:
-- `--host` – host su cui esporre il server (default: 0.0.0.0)
-- `--port` – porta su cui esporre il server (default: 8000)
-- `--reload` – abilita l’auto-reload per lo sviluppo
-
-Quando il server è avviato, apri il browser su:
-```
-http://localhost:8000
-```
+Non urgenti / futuri:
+- lint/format JS (decisione di toolchain) e, se utile, un E2E leggero (Playwright).
+- estendere la parte ML al 4-player (team‑play, osservazioni parziali, reward).
 
 ## Sviluppo (test, lint, typecheck)
 
@@ -211,7 +190,7 @@ Con il virtual environment attivo e le dipendenze dev installate (`uv pip instal
 
 - Test: `pytest`
 - Coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
-- Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README.
+- Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README (Shields.io).
 - Lint: `ruff check src tests scripts`
 - Format: `ruff format src tests scripts`
 
@@ -263,6 +242,8 @@ python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
 1. Inserisci il tuo nome e premi “Avvia partita”
 2. Clicca su una carta in mano per giocarla
 3. L'IA risponderà automaticamente al suo turno
+
+Nota: la UI attuale avvia una partita **2-player**. Per testare flussi 4-player (senza UI) usa gli script headless o le API.
 
 ## Sviluppi futuri
 

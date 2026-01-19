@@ -34,6 +34,7 @@ The app serves the UI at `http://localhost:8000` by default (`--host`, `--port` 
 - Planning hygiene: keep `PLAN.md` continuously updated so it’s always clear what’s done, what’s in progress, and what’s next.
 - Planning hygiene (commit gate): before every commit, check `PLAN.md` and update it if needed so the plan stays aligned with the actual repo state.
 - Quality gate (commit): before every commit, if the changes affect Python code/tests, run `ruff check src tests scripts` and `pytest` (and fix issues) before committing.
+- README hygiene (coverage badge): when the project coverage changes materially, update the Shields.io badge percentage in `README.md` accordingly.
 - Doc hygiene: keep `AGENTS.md` itself updated as the working agreement evolves (update it whenever we introduce new tooling, conventions, or expectations).
 - Tooling (dev deps):
   - Canonical: `ruff format src tests scripts` and `ruff check --fix src tests scripts` (includes import sorting via `I` rules), plus `mypy src`.
