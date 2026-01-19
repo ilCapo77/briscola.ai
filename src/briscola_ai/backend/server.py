@@ -17,6 +17,7 @@ Nel refactor profondo previsto in `PLAN.md` sposteremo verso:
 
 import asyncio
 import json
+import os
 import random
 import uuid
 from contextlib import asynccontextmanager
@@ -42,6 +43,7 @@ from .dto import (
     TableCardDTO,
     TrickResultDTO,
 )
+from .event_log import EventLog, EventLogConfig, parse_event_db_path
 
 
 def _build_observation_dto(state: DomainGameState, player_index: int, server_version: int) -> ObservationDTO:
@@ -205,6 +207,57 @@ class GameState(BaseModel):
     player_index: Optional[int] = None
 
 
+def _get_event_log() -> Optional[EventLog]:
+    """
+    Helper per accedere al logger dalla app FastAPI.
+
+    Per semplicità, il riferimento vive in `app.state.event_log` e viene inizializzato
+    nel lifespan. Se la feature non è configurata, ritorniamo `None`.
+    """
+    return getattr(app.state, "event_log", None)
+
+
+def _safe_log_event(
+    game_id: str,
+    event_type: str,
+    payload: dict,
+    *,
+    server_version: Optional[int] = None,
+    player_index: Optional[int] = None,
+) -> None:
+    """
+    Wrapper “best-effort” per loggare eventi.
+
+    Il logging è un optional feature: se il DB non è configurato o se una scrittura fallisce
+    non vogliamo interrompere la partita.
+    """
+    log = _get_event_log()
+    if log is None:
+        return
+
+    try:
+        # Garantiamo che la partita esista nella tabella `games` (idempotente).
+        state = active_games.get(game_id)
+        if state is not None:
+            # Compatibilità: se il dominio non espone `seed`, proviamo a prenderlo dal payload.
+            seed = getattr(state, "seed", None)
+            if seed is None:
+                seed_from_payload = payload.get("seed")
+                seed = seed_from_payload if isinstance(seed_from_payload, int) else None
+
+            log.ensure_game(game_id, num_players=state.num_players, seed=seed)
+        log.log_event(
+            game_id,
+            event_type,
+            payload,
+            server_version=server_version,
+            player_index=player_index,
+        )
+    except Exception:
+        # Best-effort: non propaghiamo eccezioni lato API/WS.
+        print(f"Event log SQLite: errore scrittura evento {event_type!r} (game_id={game_id}).")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -212,6 +265,22 @@ async def lifespan(app: FastAPI):
 
     Usiamo un task in background per fare periodicamente cleanup delle partite inattive.
     """
+    # Inizializzazione event log (Phase 4).
+    #
+    # Nota: lo configuriamo tramite env/CLI. Se non è configurato, la feature resta spenta.
+    # Questo evita effetti collaterali quando il modulo viene importato solo per test.
+    raw_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
+    event_log: Optional[EventLog] = None
+    if raw_path is not None:
+        try:
+            event_log = EventLog(EventLogConfig(path=raw_path))
+        except Exception:
+            # Il logger è un "optional feature": se fallisce non vogliamo bloccare il server.
+            print("Event log SQLite: inizializzazione fallita, feature disabilitata.")
+            event_log = None
+
+    app.state.event_log = event_log
+
     cleanup_task = asyncio.create_task(cleanup_inactive_games())
     try:
         yield
@@ -221,6 +290,8 @@ async def lifespan(app: FastAPI):
             await cleanup_task
         except asyncio.CancelledError:
             pass
+        if event_log is not None:
+            event_log.close()
 
 
 # Crea l'app FastAPI
@@ -276,6 +347,19 @@ async def create_game(config: GameConfig):
 
         # Inizializza il dizionario delle connessioni WebSocket per questa partita
         connected_clients[game_id] = {}
+
+        # Event log (opzionale): metadati partita.
+        _safe_log_event(
+            game_id,
+            "game_created",
+            {
+                "seed": seed,
+                "num_players": config.num_players,
+                "player_names": [p.name for p in state.players],
+                "is_team_game": state.is_team_game,
+            },
+            server_version=0,
+        )
 
         return {
             "game_id": game_id,
@@ -375,6 +459,20 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
                 # Salviamo il DTO (JSON-friendly) invece di oggetti di dominio.
                 "result": action_result_dto.model_dump(exclude_none=True),
             }
+        )
+
+        # Event log (opzionale): azione umana + risultato.
+        _safe_log_event(
+            game_id,
+            "action_play_card",
+            {
+                "is_ai": False,
+                "player_index": action.player_index,
+                "card_index": action.card_index,
+                "result": action_result_dto.model_dump(exclude_none=True),
+            },
+            server_version=server_version,
+            player_index=action.player_index,
         )
 
         # Se la mano è stata completata dall'umano, invia notifica con carte e vincitore.
@@ -480,6 +578,13 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
             card_index=card_index,
             card=CardDTO.from_domain(selected_card),
         )
+        _safe_log_event(
+            game_id,
+            "ai_card_reveal",
+            reveal_dto.model_dump(),
+            server_version=game_versions.get(game_id, 0),
+            player_index=ai_player_index,
+        )
         reveal_json = reveal_dto.model_dump_json()
         for client in connected_clients[game_id].values():
             try:
@@ -493,20 +598,29 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
 
     active_games[game_id] = new_state
     game_versions[game_id] = game_versions.get(game_id, 0) + 1
+    server_version = game_versions.get(game_id, 0)
 
-    result: Dict[str, object] = {
-        "played_card": step_result.played_card,
-        "player": step_result.player,
-        "trick_completed": step_result.trick_completed,
-        "trick_winner": step_result.trick_winner,
-        "captured_cards": [],
-        "cards_dealt": step_result.cards_dealt,
-        "trick_size": len(step_result.trick_cards),
-        "is_ai": True,
-    }
+    # Event log + game_data: usiamo un DTO JSON-friendly anche per le mosse IA.
+    trick_cards_dto: list[TableCardDTO] | None = None
+    captured_cards_dto: list[CardDTO] = []
     if step_result.trick_completed:
-        result["trick_cards"] = list(step_result.trick_cards)
-        result["captured_cards"] = [card for card, _ in step_result.trick_cards]
+        trick_cards_dto = [TableCardDTO.from_domain(card, idx) for card, idx in step_result.trick_cards]
+        captured_cards_dto = [CardDTO.from_domain(card) for card, _ in step_result.trick_cards]
+
+    if step_result.played_card is None or step_result.player is None:
+        return
+
+    ai_action_result_dto = PlayActionResultDTO(
+        server_version=server_version,
+        played_card=CardDTO.from_domain(step_result.played_card),
+        player=step_result.player,
+        trick_completed=step_result.trick_completed,
+        trick_winner=step_result.trick_winner,
+        trick_size=len(step_result.trick_cards),
+        cards_dealt=step_result.cards_dealt,
+        trick_cards=trick_cards_dto,
+        captured_cards=captured_cards_dto,
+    )
 
     # Se la mano è stata completata, invia notifica speciale
     if step_result.trick_completed:
@@ -527,9 +641,22 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
             "timestamp": datetime.now().isoformat(),
             "player_index": ai_player_index,
             "card_index": card_index,
-            "result": result,
+            "result": ai_action_result_dto.model_dump(exclude_none=True),
             "is_ai": True,
         }
+    )
+
+    _safe_log_event(
+        game_id,
+        "action_play_card",
+        {
+            "is_ai": True,
+            "player_index": ai_player_index,
+            "card_index": card_index,
+            "result": ai_action_result_dto.model_dump(exclude_none=True),
+        },
+        server_version=server_version,
+        player_index=ai_player_index,
     )
     return
 
@@ -627,6 +754,20 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     try:
         # Invia lo stato iniziale della partita (usando DTO)
         dto = _build_observation_dto(state, player_index, game_versions.get(game_id, 0))
+        _safe_log_event(
+            game_id,
+            "ws_connected",
+            {"player_index": player_index},
+            server_version=game_versions.get(game_id, 0),
+            player_index=player_index,
+        )
+        _safe_log_event(
+            game_id,
+            "observation_sent",
+            dto.model_dump(),
+            server_version=game_versions.get(game_id, 0),
+            player_index=player_index,
+        )
         await websocket.send_text(dto.model_dump_json())
 
         # Mantiene la connessione aperta e gestisce i messaggi
@@ -646,6 +787,13 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
         # Rimuove la connessione quando il client si disconnette
         if game_id in connected_clients and player_index in connected_clients[game_id]:
             del connected_clients[game_id][player_index]
+        _safe_log_event(
+            game_id,
+            "ws_disconnected",
+            {"player_index": player_index},
+            server_version=game_versions.get(game_id, 0),
+            player_index=player_index,
+        )
 
 
 async def notify_clients(game_id: str):
@@ -660,6 +808,13 @@ async def notify_clients(game_id: str):
     for player_idx, websocket in connected_clients[game_id].items():
         try:
             dto = _build_observation_dto(state, player_idx, server_version)
+            _safe_log_event(
+                game_id,
+                "observation_sent",
+                dto.model_dump(),
+                server_version=server_version,
+                player_index=player_idx,
+            )
             await websocket.send_text(dto.model_dump_json())
         except Exception:
             # Gestisce client disconnessi
@@ -689,6 +844,12 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
         winner_index=winner_index,
         winner_name=winner_name,
         points=points,
+        server_version=game_versions.get(game_id, 0),
+    )
+    _safe_log_event(
+        game_id,
+        "trick_result",
+        trick_result_dto.model_dump(),
         server_version=game_versions.get(game_id, 0),
     )
     trick_result_json = trick_result_dto.model_dump_json()

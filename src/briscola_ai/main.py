@@ -60,6 +60,15 @@ def run_server(host="0.0.0.0", port=8000, reload=False):
         parser.add_argument("--host", default="0.0.0.0", help="Host su cui esporre il server")
         parser.add_argument("--port", type=int, default=8000, help="Porta su cui esporre il server")
         parser.add_argument("--reload", action="store_true", help="Abilita auto-reload per lo sviluppo")
+        parser.add_argument(
+            "--event-db",
+            default="./data/briscola_events.sqlite3",
+            help=(
+                "Percorso del DB SQLite per l'event log (Phase 4). "
+                "Default: ./data/briscola_events.sqlite3. "
+                "Usa stringa vuota per disabilitare (es. --event-db '')."
+            ),
+        )
 
         args = parser.parse_args()
 
@@ -69,6 +78,14 @@ def run_server(host="0.0.0.0", port=8000, reload=False):
         host = args.host
         port = args.port
         reload = args.reload
+
+        # Configurazione event log:
+        # - CLI è la fonte più esplicita
+        # - il backend legge la variabile d'ambiente nel lifespan
+        if args.event_db.strip() == "":
+            os.environ.pop("BRISCOLA_EVENT_DB_PATH", None)
+        else:
+            os.environ["BRISCOLA_EVENT_DB_PATH"] = args.event_db
 
     uvicorn.run("briscola_ai.main:app", host=host, port=port, reload=reload)
 

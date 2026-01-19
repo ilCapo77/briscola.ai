@@ -194,6 +194,15 @@ Con il virtual environment attivo e le dipendenze dev installate (`uv pip instal
 - Lint: `ruff check src tests scripts`
 - Format: `ruff format src tests scripts`
 
+### Event log (SQLite “da laboratorio”)
+
+Quando avvii il server con lo script `briscola-server`, per default viene scritto un event log su:
+- `./data/briscola_events.sqlite3`
+
+Per cambiare percorso (o disabilitare) puoi usare:
+- CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
+- Env: `BRISCOLA_EVENT_DB_PATH=./data/mio_log.sqlite3 briscola-server`
+
 ### Smoke test UI (manuale)
 
 Obiettivo: una verifica rapida (2–3 minuti) per capire subito se una modifica ha rotto il flusso principale della UI.

@@ -137,4 +137,3 @@ def test_random_game_preserves_invariants_and_terminates(num_players: int, seed:
     assert safety > 0, "La partita dovrebbe terminare in un numero finito di mosse"
     assert state.game_over is True
     assert sum(p.points for p in state.players) == 120
-

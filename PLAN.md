@@ -188,6 +188,9 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
 - Introdurre una persistenza “da laboratorio” (SQLite):
   - tabella partite, step/azioni, osservazioni, metadati (seed, versione regole, versione codice)
   - scrittura append-only (stile event log) per semplificare debug e riproducibilità
+  - Stato attuale:
+    - [x] event log SQLite (schema + writer append-only) configurabile via env/CLI (`BRISCOLA_EVENT_DB_PATH`, `--event-db`)
+    - [ ] definire metadati “stabili” (versione regole/codice) da salvare sempre per partita
 - Definire un comando di export dataset (per training):
   - da SQLite → JSONL/Parquet con schema versionato
   - campi minimi: `state` (osservazione), `valid_actions`, `action`, `reward`, `done`, `metadata`
