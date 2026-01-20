@@ -15,6 +15,12 @@ __pycache__/
 coverage.xml
 coverage.svg
 
+# Runtime data (SQLite event log, exports, ecc.)
+data/
+*.sqlite3
+*.sqlite3-wal
+*.sqlite3-shm
+
 *.egg-info/
 build/
 dist/

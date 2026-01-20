@@ -267,19 +267,49 @@ async def lifespan(app: FastAPI):
     """
     # Inizializzazione event log (Phase 4).
     #
-    # Nota: lo configuriamo tramite env/CLI. Se non è configurato, la feature resta spenta.
-    # Questo evita effetti collaterali quando il modulo viene importato solo per test.
+    # Nota importante: questo backend può essere eseguito in due modi:
+    # - direttamente (`TestClient(server.app)` / uvicorn su `briscola_ai.backend.server:app`)
+    # - montato dentro l'app principale (`briscola_ai.main:app`)
+    #
+    # In alcuni setup i mounted sub-app non ricevono eventi lifespan; per questo motivo,
+    # l'app principale può inizializzare `app.state.event_log` in anticipo.
+    #
+    # Qui adottiamo quindi una regola semplice:
+    # - se `app.state.event_log` esiste già, non lo tocchiamo (né lo chiudiamo).
+    # - altrimenti, proviamo a crearlo da env.
+    event_log_created_here = False
     raw_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
-    event_log: Optional[EventLog] = None
-    if raw_path is not None:
+
+    existing_event_log = getattr(app.state, "event_log", None)
+    event_log: Optional[EventLog] = existing_event_log
+
+    # Se il path cambia tra due startup (tipico nei test), ricreiamo la connessione.
+    # Se il path è disabilitato, chiudiamo e azzeriamo.
+    if event_log is not None:
+        if raw_path is None:
+            try:
+                event_log.close()
+            except Exception:
+                pass
+            event_log = None
+            app.state.event_log = None
+        elif event_log.path != raw_path:
+            try:
+                event_log.close()
+            except Exception:
+                pass
+            event_log = None
+            app.state.event_log = None
+
+    if event_log is None and raw_path is not None:
         try:
             event_log = EventLog(EventLogConfig(path=raw_path))
+            event_log_created_here = True
         except Exception:
             # Il logger è un "optional feature": se fallisce non vogliamo bloccare il server.
             print("Event log SQLite: inizializzazione fallita, feature disabilitata.")
             event_log = None
-
-    app.state.event_log = event_log
+        app.state.event_log = event_log
 
     cleanup_task = asyncio.create_task(cleanup_inactive_games())
     try:
@@ -290,8 +320,9 @@ async def lifespan(app: FastAPI):
             await cleanup_task
         except asyncio.CancelledError:
             pass
-        if event_log is not None:
+        if event_log is not None and event_log_created_here:
             event_log.close()
+            app.state.event_log = None
 
 
 # Crea l'app FastAPI

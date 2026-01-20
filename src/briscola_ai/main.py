@@ -11,23 +11,84 @@ Per avviare in locale:
   - oppure `python -m briscola_ai.main --reload`
 """
 
+import asyncio
 import os
+from contextlib import asynccontextmanager
 
 import uvicorn
 from fastapi import FastAPI
 from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
-from .backend.server import app as api_app
+from .backend import server as backend_server
+from .backend.event_log import EventLog, EventLogConfig, parse_event_db_path
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """
+    Startup/shutdown dell'app principale.
+
+    Nota importante:
+    l'API backend è montata come sub-app (`/api`). In alcuni setup i mounted sub-app
+    non ricevono eventi lifespan. Per evitare che features come cleanup e event log
+    restino disabilitate, le inizializziamo esplicitamente qui.
+    """
+    event_log_created_here = False
+    raw_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
+
+    existing_event_log = getattr(backend_server.app.state, "event_log", None)
+    event_log = existing_event_log
+
+    # Se il path cambia tra due startup (tipico nei test), ricreiamo la connessione.
+    # Se il path è disabilitato, chiudiamo e azzeriamo.
+    if event_log is not None:
+        if raw_path is None:
+            try:
+                event_log.close()
+            except Exception:
+                pass
+            event_log = None
+            backend_server.app.state.event_log = None
+        elif event_log.path != raw_path:
+            try:
+                event_log.close()
+            except Exception:
+                pass
+            event_log = None
+            backend_server.app.state.event_log = None
+
+    if event_log is None and raw_path is not None:
+        try:
+            event_log = EventLog(EventLogConfig(path=raw_path))
+            backend_server.app.state.event_log = event_log
+            event_log_created_here = True
+        except Exception:
+            print("Event log SQLite: inizializzazione fallita, feature disabilitata.")
+            backend_server.app.state.event_log = None
+
+    cleanup_task = asyncio.create_task(backend_server.cleanup_inactive_games())
+    try:
+        yield
+    finally:
+        cleanup_task.cancel()
+        try:
+            await cleanup_task
+        except asyncio.CancelledError:
+            pass
+        if event_log is not None and event_log_created_here:
+            event_log.close()
+            backend_server.app.state.event_log = None
+
 
 # Crea l'applicazione FastAPI principale
-app = FastAPI(title="Briscola AI", version="0.1.0")
+app = FastAPI(title="Briscola AI", version="0.1.0", lifespan=lifespan)
 
 # Ottiene la directory del file corrente
 current_dir = os.path.dirname(os.path.abspath(__file__))
 
 # Monta l'app API sotto /api
-app.mount("/api", api_app)
+app.mount("/api", backend_server.app)
 
 # Monta i file statici
 static_dir = os.path.join(current_dir, "frontend", "static")
@@ -50,42 +111,41 @@ async def favicon():
 
 def run_server(host="0.0.0.0", port=8000, reload=False):
     """Avvia il server con uvicorn"""
-    # Se chiamato direttamente come entry point, fa il parsing degli argomenti da riga di comando
-    import sys
+    # Parsing argomenti CLI:
+    # - usiamo i parametri della funzione come default (così `run_server(host=..., ...)` resta possibile)
+    # - se l'utente passa argomenti, li rispettiamo.
+    import argparse
 
-    if len(sys.argv) > 1:
-        import argparse
+    parser = argparse.ArgumentParser(description="Avvia il server di Briscola AI")
+    parser.add_argument("--host", default=host, help="Host su cui esporre il server")
+    parser.add_argument("--port", type=int, default=port, help="Porta su cui esporre il server")
+    parser.add_argument("--reload", action="store_true", default=reload, help="Abilita auto-reload per lo sviluppo")
+    parser.add_argument(
+        "--event-db",
+        default=os.getenv("BRISCOLA_EVENT_DB_PATH", "./data/briscola_events.sqlite3"),
+        help=(
+            "Percorso del DB SQLite per l'event log (Phase 4). "
+            "Default: ./data/briscola_events.sqlite3. "
+            "Usa stringa vuota per disabilitare (es. --event-db '')."
+        ),
+    )
 
-        parser = argparse.ArgumentParser(description="Avvia il server di Briscola AI")
-        parser.add_argument("--host", default="0.0.0.0", help="Host su cui esporre il server")
-        parser.add_argument("--port", type=int, default=8000, help="Porta su cui esporre il server")
-        parser.add_argument("--reload", action="store_true", help="Abilita auto-reload per lo sviluppo")
-        parser.add_argument(
-            "--event-db",
-            default="./data/briscola_events.sqlite3",
-            help=(
-                "Percorso del DB SQLite per l'event log (Phase 4). "
-                "Default: ./data/briscola_events.sqlite3. "
-                "Usa stringa vuota per disabilitare (es. --event-db '')."
-            ),
-        )
+    args = parser.parse_args()
 
-        args = parser.parse_args()
+    print(f"Avvio server Briscola AI su {args.host}:{args.port}")
+    print("Premi Ctrl+C per fermare il server")
 
-        print(f"Avvio server Briscola AI su {args.host}:{args.port}")
-        print("Premi Ctrl+C per fermare il server")
+    host = args.host
+    port = args.port
+    reload = args.reload
 
-        host = args.host
-        port = args.port
-        reload = args.reload
-
-        # Configurazione event log:
-        # - CLI è la fonte più esplicita
-        # - il backend legge la variabile d'ambiente nel lifespan
-        if args.event_db.strip() == "":
-            os.environ.pop("BRISCOLA_EVENT_DB_PATH", None)
-        else:
-            os.environ["BRISCOLA_EVENT_DB_PATH"] = args.event_db
+    # Configurazione event log:
+    # - CLI è la fonte più esplicita
+    # - l'app (main/backend) legge la variabile d'ambiente nel lifespan
+    if args.event_db.strip() == "":
+        os.environ.pop("BRISCOLA_EVENT_DB_PATH", None)
+    else:
+        os.environ["BRISCOLA_EVENT_DB_PATH"] = args.event_db
 
     uvicorn.run("briscola_ai.main:app", host=host, port=port, reload=reload)
 

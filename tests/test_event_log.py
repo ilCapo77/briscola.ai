@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from briscola_ai.backend import server
+from briscola_ai.main import app as main_app
 
 
 def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -56,6 +57,50 @@ def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.Monke
         assert action.status_code == 200
 
     # Verifica contenuto DB dopo lo shutdown (connessione chiusa e flush su disco).
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT event_type FROM events WHERE game_id = ? ORDER BY id ASC;",
+            (game_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    event_types = [r[0] for r in rows]
+    assert "game_created" in event_types
+    assert "action_play_card" in event_types
+
+
+def test_event_log_works_when_api_is_mounted_under_main_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Regressione: quando l'API è montata sotto `briscola_ai.main:app`, vogliamo che il lifespan
+    inizializzi comunque event log e cleanup.
+
+    Questo test replica più da vicino il modo in cui si avvia il server con `briscola-server`.
+    """
+    db_path = tmp_path / "events_mounted.sqlite3"
+    monkeypatch.setenv("BRISCOLA_EVENT_DB_PATH", str(db_path))
+
+    # Pulizia stato globale per evitare interferenze.
+    server.active_games.clear()
+    server.game_timestamps.clear()
+    server.game_data.clear()
+    server.game_locks.clear()
+    server.game_versions.clear()
+    server.connected_clients.clear()
+
+    with TestClient(main_app) as client:
+        create = client.post("/api/games", json={"num_players": 2, "player_names": ["A", "B"]})
+        assert create.status_code == 200
+        game_id = create.json()["game_id"]
+
+        obs = client.get(f"/api/games/{game_id}", params={"player_index": 0}).json()
+        action = client.post(
+            f"/api/games/{game_id}/actions",
+            json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},
+        )
+        assert action.status_code == 200
+
     conn = sqlite3.connect(db_path)
     try:
         rows = conn.execute(
