@@ -194,6 +194,9 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
 - Definire un comando di export dataset (per training):
   - da SQLite → JSONL/Parquet con schema versionato
   - campi minimi: `state` (osservazione), `valid_actions`, `action`, `reward`, `done`, `metadata`
+  - Stato attuale:
+    - [x] export SQLite → JSONL (script `scripts/export_dataset.py`)
+    - [ ] decidere schema “finale” per training (es. reward shaping, include/exclude info IA)
 - Implementare un simulatore “self‑play”:
   - due agenti baseline (random + heuristic)
   - generazione di partite in batch con seed

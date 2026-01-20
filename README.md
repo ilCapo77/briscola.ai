@@ -247,6 +247,23 @@ Per simulare N partite senza UI (utile per debug e, in futuro, generazione datas
 python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
 ```
 
+## Export dataset (JSONL)
+
+Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:
+
+```
+python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl
+```
+
+Default didattico (coerente con la UI attuale):
+- esporta solo le azioni del `player_index=0`;
+- esclude le azioni dell'IA.
+
+Opzioni utili:
+- tutti i player: `--all-players`
+- includi anche IA: `--include-ai`
+- export “supervised only” (senza `next_observation`): `--no-next-state`
+
 ## Come giocare
 
 1. Inserisci il tuo nome e premi “Avvia partita”
