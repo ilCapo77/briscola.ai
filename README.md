@@ -198,6 +198,7 @@ Con il virtual environment attivo e le dipendenze dev installate (`uv pip instal
 
 Quando avvii il server con lo script `briscola-server`, per default viene scritto un event log su:
 - `./data/briscola_events.sqlite3`
+  - Nota: `data/` e i file `*.sqlite3*` sono ignorati da git (sono output runtime, non sorgenti).
 
 Per cambiare percorso (o disabilitare) puoi usare:
 - CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
