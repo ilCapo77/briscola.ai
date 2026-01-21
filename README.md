@@ -304,6 +304,8 @@ Seed suite (regressioni confrontabili nel tempo):
 - suite versionate nel repo: `--seed-suite small` (1000 seed) oppure `--seed-suite medium` (5000 seed)
 - suite custom: `--seed-suite-file path/to/seeds.txt`
 - per benchmark “big” senza file enorme: `--seed-suite-range-start 0` (genera i seed con `range()`)
+- preset benchmark: `--benchmark small|medium|big` (imposta `--num-games` + una seed suite coerente, ed è sempre seat-fair)
+- export risultati: `--out-json /path/to/out.json`
 
 Taglie consigliate (benchmark):
 - `small=2000` (feedback veloce)

@@ -212,6 +212,7 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
     - [x] taglie benchmark: `small=2000`, `medium=10000`, `big=100000` (tutte seat-fair)
     - [x] supporto a “suite seed” per regressioni ripetibili (seed da file via `--seed-suite-file`)
     - [x] suite canoniche versionate: `small=1000 seed` e `medium=5000 seed` (file in `seed_suites/`)
+    - [x] preset `--benchmark` + export risultati JSON (script `scripts/evaluate_agents.py`)
     - [ ] per `big`: decidere se versionare anche 50k seed o usare suite “range()” (generata via CLI)
 
 ### Fase 5 — Modelli e training step-by-step (8+ sessioni, incrementale)

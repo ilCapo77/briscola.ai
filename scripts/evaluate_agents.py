@@ -9,11 +9,14 @@ Esempi:
     --agent0 heuristic_v1 --agent1 random
   python scripts/evaluate_agents.py --seat-fair --num-games 100000 --seed-suite-range-start 0 \\
     --agent0 heuristic_v1 --agent1 random
+  python scripts/evaluate_agents.py --benchmark medium --agent0 heuristic_v1 --agent1 random --out-json /tmp/medium.json
 """
 
 from __future__ import annotations
 
 import argparse
+import json
+from dataclasses import asdict
 from pathlib import Path
 
 from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, RandomAgent
@@ -94,7 +97,17 @@ def _build_agent(name: str):
 def main() -> int:
     """Entry point CLI."""
     parser = argparse.ArgumentParser(description="Valuta agenti Briscola (dominio-only)")
-    parser.add_argument("--num-games", type=int, default=1000, help="Numero partite da simulare")
+    benchmark_group = parser.add_mutually_exclusive_group()
+    benchmark_group.add_argument(
+        "--benchmark",
+        choices=["small", "medium", "big"],
+        default=None,
+        help=(
+            "Preset benchmark (tutti seat-fair): small=2000, medium=10000, big=100000. "
+            "Imposta anche una seed suite coerente (small/medium versionate, big via range)."
+        ),
+    )
+    benchmark_group.add_argument("--num-games", type=int, default=1000, help="Numero partite da simulare")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
     parser.add_argument(
         "--agent0",
@@ -115,6 +128,11 @@ def main() -> int:
             "Valutazione seat-fair: per ogni seed si giocano due partite con agenti scambiati "
             "(riduce il bias dovuto a chi inizia = player 0). Richiede num-games pari."
         ),
+    )
+    parser.add_argument(
+        "--out-json",
+        default="",
+        help="Se valorizzato, salva risultati e configurazione in JSON (oltre alla stampa a schermo).",
     )
     seed_group = parser.add_mutually_exclusive_group()
     seed_group.add_argument(
@@ -152,6 +170,23 @@ def main() -> int:
     )
     args = parser.parse_args()
 
+    if args.benchmark is not None:
+        args.seat_fair = True
+        if args.benchmark == "small":
+            args.num_games = 2000
+            if not (args.seed_suite or args.seed_suite_file.strip() or args.seed_suite_range_start is not None):
+                args.seed_suite = "small"
+        elif args.benchmark == "medium":
+            args.num_games = 10000
+            if not (args.seed_suite or args.seed_suite_file.strip() or args.seed_suite_range_start is not None):
+                args.seed_suite = "medium"
+        elif args.benchmark == "big":
+            args.num_games = 100000
+            if not (args.seed_suite or args.seed_suite_file.strip() or args.seed_suite_range_start is not None):
+                args.seed_suite_range_start = 0
+        else:
+            raise ValueError(f"Benchmark non supportato: {args.benchmark!r}")
+
     agent0 = _build_agent(args.agent0)
     agent1 = _build_agent(args.agent1)
 
@@ -184,6 +219,23 @@ def main() -> int:
         print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
         print(f"- avg points A: {stats.avg_points_agent_a:.2f} | avg points B: {stats.avg_points_agent_b:.2f}")
         print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
+        if args.out_json.strip():
+            payload = {
+                "mode": "seat_fair",
+                "benchmark": args.benchmark,
+                "num_games": args.num_games,
+                "seed": args.seed,
+                "seed_suite": {
+                    "name": args.seed_suite,
+                    "file": args.seed_suite_file.strip() or None,
+                    "range_start": args.seed_suite_range_start,
+                    "range_step": args.seed_suite_range_step if args.seed_suite_range_start is not None else None,
+                    "num_seeds_used": len(game_seeds) if game_seeds is not None else None,
+                },
+                "agents": {"agent0": agent0.name, "agent1": agent1.name},
+                "stats": asdict(stats),
+            }
+            Path(args.out_json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return 0
 
     stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed, game_seeds=game_seeds)
@@ -192,6 +244,23 @@ def main() -> int:
     print(f"- wins P0: {stats.wins_agent0} | wins P1: {stats.wins_agent1} | draws: {stats.draws}")
     print(f"- avg points P0: {stats.avg_points_agent0:.2f} | avg points P1: {stats.avg_points_agent1:.2f}")
     print(f"- avg point diff (P0-P1): {stats.avg_point_diff_agent0_minus_agent1:.2f}")
+    if args.out_json.strip():
+        payload = {
+            "mode": "plain",
+            "benchmark": args.benchmark,
+            "num_games": args.num_games,
+            "seed": args.seed,
+            "seed_suite": {
+                "name": args.seed_suite,
+                "file": args.seed_suite_file.strip() or None,
+                "range_start": args.seed_suite_range_start,
+                "range_step": args.seed_suite_range_step if args.seed_suite_range_start is not None else None,
+                "num_seeds_used": len(game_seeds) if game_seeds is not None else None,
+            },
+            "agents": {"agent0": agent0.name, "agent1": agent1.name},
+            "stats": asdict(stats),
+        }
+        Path(args.out_json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return 0
 
 
