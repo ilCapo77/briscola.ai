@@ -34,6 +34,12 @@ Questo export è una base “minima ma utile” per:
 - imitation learning (supervised): basta `observation` + `action`;
 - RL: si può usare anche `reward` + `next_observation` + `done`.
 
+Focus attuale:
+- il progetto (UI e percorso didattico) è focalizzato sul **2-player** (umano vs IA);
+- in 4-player (a squadre) il formato observation resta valido, ma il reward “signed” (pro/contro il singolo player)
+  è una semplificazione: per un training “team-play” conviene usare reward per squadra e osservazioni parziali
+  progettate esplicitamente (vedi `PLAN.md`).
+
 Uso
 ---
   python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl
@@ -307,7 +313,12 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Export dataset da SQLite (event log) a JSONL")
     parser.add_argument("--db", default="./data/briscola_events.sqlite3", help="Path DB SQLite (event log)")
     parser.add_argument("--out", default="./data/dataset.jsonl", help="Path output JSONL")
-    parser.add_argument("--player-index", type=int, default=0, help="Player da esportare (default: 0)")
+    parser.add_argument(
+        "--player-index",
+        type=int,
+        default=0,
+        help="Player da esportare (default: 0; in UI 2-player è l'umano).",
+    )
     parser.add_argument("--all-players", action="store_true", help="Esporta azioni di tutti i player")
     parser.add_argument("--include-ai", action="store_true", help="Includi anche le azioni dell'IA")
     parser.add_argument(

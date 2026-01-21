@@ -256,6 +256,7 @@ python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./dat
 ```
 
 Default didattico (coerente con la UI attuale):
+- la UI attuale avvia e testa principalmente partite **2-player** (tu vs IA);
 - esporta solo le azioni del `player_index=0`;
 - esclude le azioni dell'IA.
 
@@ -263,6 +264,9 @@ Opzioni utili:
 - tutti i player: `--all-players`
 - includi anche IA: `--include-ai`
 - export “supervised only” (senza `next_observation`): `--no-next-state`
+
+Nota: lo schema export v1 è pensato soprattutto per il 2-player. In 4-player (a squadre) la nozione di reward
+e l'interpretazione del “vincitore della mano” vanno adattate a livello di team (vedi `PLAN.md`).
 
 ## Come giocare
 

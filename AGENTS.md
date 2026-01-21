@@ -53,4 +53,11 @@ Git history isn’t available in this workspace snapshot, so there is no establi
 
 - Commits (Italiano): `type(scope): summary` (es. `feat(domain): aggiungi helper punteggio`, `fix(ui): correggi animazione carte`)
   - **IMPORTANTE**: Le descrizioni dei commit devono essere SEMPRE in italiano per finalità didattiche.
+- Versioning (SemVer, pre-1.0):
+  - La versione canonica del pacchetto vive in `pyproject.toml` (`[project].version`).
+  - Finché siamo in `0.x`, usiamo una regola semplice:
+    - `0.1.x` (patch): fix/refactor/test/doc/performance senza cambiare contratti pubblici.
+    - `0.(n+1).0` (minor): nuove feature “visibili” o cambi rilevanti a componenti/pipeline.
+    - Cambi “breaking” a contratti pubblici (API/WS/DTO o schema dataset/export): bump di `minor` e nota esplicita nel commit/README.
+  - L’agente deve segnalare quando un change merita bump e proporre la nuova versione, ma la decisione finale resta al maintainer.
 - PRs: describe the change, include reproduction steps for bugs, and add screenshots for UI changes (`src/briscola_ai/frontend/static/`).
