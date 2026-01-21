@@ -295,6 +295,11 @@ python scripts/evaluate_agents.py --seat-fair --num-games 10000 --seed 42 --agen
 
 Nota: `--seat-fair` richiede `--num-games` pari (si gioca a coppie).
 
+Taglie consigliate (benchmark):
+- `small=2000` (feedback veloce)
+- `medium=10000` (numero “standard” per confronti)
+- `big=100000` (misura stabile, più lenta)
+
 ## Export dataset (JSONL)
 
 Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:

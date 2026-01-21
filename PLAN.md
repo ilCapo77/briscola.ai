@@ -209,6 +209,7 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
   - Stato attuale:
     - [x] valutazione offline dominio-only (script `scripts/evaluate_agents.py`)
     - [x] baseline euristica semplice (es. `heuristic_v1`) per confronto vs random
+    - [x] taglie benchmark: `small=2000`, `medium=10000`, `big=100000` (tutte seat-fair)
     - [ ] decidere una “suite seed” fissa (es. 100/500 seed) per regressioni ripetibili
 
 ### Fase 5 — Modelli e training step-by-step (8+ sessioni, incrementale)
