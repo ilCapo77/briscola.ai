@@ -22,6 +22,9 @@ data/
 *.sqlite3-wal
 *.sqlite3-shm
 
+# Local benchmark outputs
+benchmarks/
+
 *.egg-info/
 build/
 dist/
