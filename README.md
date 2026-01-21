@@ -284,6 +284,14 @@ python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 random --a
 python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
 ```
 
+Nota importante (bias “chi inizia”):
+- nel dominio attuale il player 0 inizia sempre la partita;
+- per confronti più corretti conviene usare la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
+
+```
+python scripts/evaluate_agents.py --seat-fair --num-games 10000 --seed 42 --agent0 random --agent1 random
+```
+
 ## Export dataset (JSONL)
 
 Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:

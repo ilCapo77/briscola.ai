@@ -11,7 +11,7 @@ Non testiamo che un agente sia "forte": testiamo l'infrastruttura.
 from __future__ import annotations
 
 from briscola_ai.ai.agents import RandomAgent
-from briscola_ai.ai.evaluation import evaluate_match_2p
+from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 
 
 def test_evaluate_match_is_deterministic_for_fixed_seed() -> None:
@@ -41,3 +41,13 @@ def test_evaluate_match_counts_are_consistent() -> None:
     # In 2-player il totale punti per partita è 120, quindi la media per giocatore deve stare in [0, 120].
     assert 0.0 <= stats.avg_points_agent0 <= 120.0
     assert 0.0 <= stats.avg_points_agent1 <= 120.0
+
+
+def test_seat_fair_evaluate_is_deterministic_for_fixed_seed() -> None:
+    """Stesso input → stesso aggregato (anche in modalità seat-fair)."""
+    a0 = RandomAgent()
+    a1 = RandomAgent()
+
+    stats1 = evaluate_seat_fair_match_2p(a0, a1, num_games=100, seed=123)
+    stats2 = evaluate_seat_fair_match_2p(a0, a1, num_games=100, seed=123)
+    assert stats1 == stats2

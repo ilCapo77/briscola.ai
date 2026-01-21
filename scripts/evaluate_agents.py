@@ -12,7 +12,7 @@ from __future__ import annotations
 import argparse
 
 from briscola_ai.ai.agents import GreedyPointsAgent, RandomAgent
-from briscola_ai.ai.evaluation import evaluate_match_2p
+from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 
 
 def _build_agent(name: str):
@@ -36,13 +36,29 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
     parser.add_argument("--agent0", default="random", choices=["random", "greedy_points"], help="Agente per player 0")
     parser.add_argument("--agent1", default="random", choices=["random", "greedy_points"], help="Agente per player 1")
+    parser.add_argument(
+        "--seat-fair",
+        action="store_true",
+        help=(
+            "Valutazione seat-fair: per ogni seed si giocano due partite con agenti scambiati "
+            "(riduce il bias dovuto a chi inizia = player 0). Richiede num-games pari."
+        ),
+    )
     args = parser.parse_args()
 
     agent0 = _build_agent(args.agent0)
     agent1 = _build_agent(args.agent1)
 
-    stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed)
+    if args.seat_fair:
+        stats = evaluate_seat_fair_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed)
+        print(f"Match 2-player (seat-fair): {stats.agent_a_name} (A) vs {stats.agent_b_name} (B)")
+        print(f"- games: {stats.num_games} (seed={args.seed})")
+        print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
+        print(f"- avg points A: {stats.avg_points_agent_a:.2f} | avg points B: {stats.avg_points_agent_b:.2f}")
+        print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
+        return 0
 
+    stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed)
     print(f"Match 2-player: {stats.agent0_name} (P0) vs {stats.agent1_name} (P1)")
     print(f"- games: {stats.num_games} (seed={args.seed})")
     print(f"- wins P0: {stats.wins_agent0} | wins P1: {stats.wins_agent1} | draws: {stats.draws}")

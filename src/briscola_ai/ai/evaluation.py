@@ -45,6 +45,29 @@ class MatchStats:
     avg_point_diff_agent0_minus_agent1: float
 
 
+@dataclass(frozen=True)
+class SeatFairStats:
+    """
+    Risultati aggregati “seat-fair” (l'agente A gioca metà partite come P0 e metà come P1).
+
+    In pratica, per ogni seed di partita giochiamo due game:
+    1) A = player 0, B = player 1
+    2) B = player 0, A = player 1
+
+    Questo riduce drasticamente il bias dovuto a “chi inizia” (player 0 nel dominio).
+    """
+
+    num_games: int
+    agent_a_name: str
+    agent_b_name: str
+    wins_agent_a: int
+    wins_agent_b: int
+    draws: int
+    avg_points_agent_a: float
+    avg_points_agent_b: float
+    avg_point_diff_agent_a_minus_agent_b: float
+
+
 def _winner_index_2p(state: GameState) -> Optional[int]:
     """Ritorna 0/1 se c'è un vincitore, altrimenti None (pareggio)."""
     p0 = state.players[0].points
@@ -141,4 +164,77 @@ def evaluate_match_2p(
         avg_points_agent0=sum0 / num_games if num_games else 0.0,
         avg_points_agent1=sum1 / num_games if num_games else 0.0,
         avg_point_diff_agent0_minus_agent1=sum_diff / num_games if num_games else 0.0,
+    )
+
+
+def evaluate_seat_fair_match_2p(
+    agent_a: Agent,
+    agent_b: Agent,
+    *,
+    num_games: int,
+    seed: int,
+) -> SeatFairStats:
+    """
+    Valuta `agent_a` vs `agent_b` in 2-player eliminando il bias di posto.
+
+    `num_games` deve essere pari, perché lo interpretiamo come:
+    - `num_pairs = num_games // 2`
+    - per ogni pair giochiamo 2 partite con lo stesso `game_seed` ma agenti scambiati.
+    """
+    if num_games % 2 != 0:
+        raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari (giochiamo a coppie).")
+
+    rng = random.Random(seed)
+    num_pairs = num_games // 2
+
+    wins_a = 0
+    wins_b = 0
+    draws = 0
+    sum_a = 0
+    sum_b = 0
+    sum_diff = 0
+
+    for _ in range(num_pairs):
+        game_seed = rng.randrange(0, 2**32)
+
+        # Game 1: A=P0, B=P1
+        s1 = play_one_game_2p(agent_a, agent_b, rng=rng, game_seed=game_seed)
+        p0, p1 = s1.players[0].points, s1.players[1].points
+        sum_a += p0
+        sum_b += p1
+        sum_diff += p0 - p1
+        w = _winner_index_2p(s1)
+        if w is None:
+            draws += 1
+        elif w == 0:
+            wins_a += 1
+        else:
+            wins_b += 1
+
+        # Game 2: B=P0, A=P1 (swap)
+        s2 = play_one_game_2p(agent_b, agent_a, rng=rng, game_seed=game_seed)
+        p0, p1 = s2.players[0].points, s2.players[1].points
+        # Qui A è player 1.
+        sum_a += p1
+        sum_b += p0
+        sum_diff += p1 - p0
+        w = _winner_index_2p(s2)
+        if w is None:
+            draws += 1
+        elif w == 0:
+            # winner = player 0 = agent B
+            wins_b += 1
+        else:
+            wins_a += 1
+
+    return SeatFairStats(
+        num_games=num_games,
+        agent_a_name=agent_a.name,
+        agent_b_name=agent_b.name,
+        wins_agent_a=wins_a,
+        wins_agent_b=wins_b,
+        draws=draws,
+        avg_points_agent_a=sum_a / num_games if num_games else 0.0,
+        avg_points_agent_b=sum_b / num_games if num_games else 0.0,
+        avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
     )
