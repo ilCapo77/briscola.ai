@@ -286,11 +286,13 @@ python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_poi
 
 Nota importante (bias “chi inizia”):
 - nel dominio attuale il player 0 inizia sempre la partita;
-- per confronti più corretti conviene usare la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
+- per confronti più corretti (e per le valutazioni future) **usa sempre** la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
 
 ```
 python scripts/evaluate_agents.py --seat-fair --num-games 10000 --seed 42 --agent0 random --agent1 random
 ```
+
+Nota: `--seat-fair` richiede `--num-games` pari (si gioca a coppie).
 
 ## Export dataset (JSONL)
 
