@@ -138,10 +138,23 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
     conn = sqlite3.connect(str(config.db_path))
     conn.row_factory = sqlite3.Row
 
-    games = {
-        row["game_id"]: {"num_players": row["num_players"], "seed": row["seed"]}
-        for row in conn.execute("SELECT game_id, num_players, seed FROM games;")
-    }
+    # Compatibilità: DB creati prima dell'introduzione di `code_version`/`rules_version`
+    # potrebbero non avere queste colonne. Interroghiamo lo schema e selezioniamo solo ciò che esiste.
+    game_columns = {r[1] for r in conn.execute("PRAGMA table_info(games);").fetchall()}
+    select_cols = [c for c in ("game_id", "num_players", "seed", "code_version", "rules_version") if c in game_columns]
+    select_sql = f"SELECT {', '.join(select_cols)} FROM games;"
+    games: dict[str, dict[str, Any]] = {}
+    for row in conn.execute(select_sql):
+        meta: dict[str, Any] = {}
+        if "num_players" in row.keys():
+            meta["num_players"] = row["num_players"]
+        if "seed" in row.keys():
+            meta["seed"] = row["seed"]
+        if "code_version" in row.keys():
+            meta["code_version"] = row["code_version"]
+        if "rules_version" in row.keys():
+            meta["rules_version"] = row["rules_version"]
+        games[row["game_id"]] = meta
 
     counters = {
         "rows_total": 0,

@@ -15,12 +15,14 @@ from .engine import PlayCardAction, StepResult, step
 from .models import Card, Rank, Suit
 from .rules import trick_points, who_wins_trick
 from .state import GameState, new_game_state
+from .version import RULES_VERSION
 
 __all__ = [
     "Card",
     "GameState",
     "PlayCardAction",
     "Rank",
+    "RULES_VERSION",
     "StepResult",
     "Suit",
     "new_game_state",

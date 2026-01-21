@@ -94,7 +94,9 @@ class EventLog:
                     game_id TEXT PRIMARY KEY,
                     created_at REAL NOT NULL,
                     num_players INTEGER NOT NULL,
-                    seed INTEGER
+                    seed INTEGER,
+                    code_version TEXT,
+                    rules_version TEXT
                 );
                 """
             )
@@ -114,9 +116,32 @@ class EventLog:
             )
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_game_id ON events(game_id);")
             self._conn.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);")
+            # Compatibilità DB già esistenti (created prima di aggiungere colonne).
+            self._ensure_column("games", "code_version", "TEXT")
+            self._ensure_column("games", "rules_version", "TEXT")
             self._conn.commit()
 
-    def ensure_game(self, game_id: str, *, num_players: int, seed: Optional[int] = None) -> None:
+    def _ensure_column(self, table: str, column: str, col_type: str) -> None:
+        """
+        Migrazione minimale: aggiunge una colonna se manca.
+
+        SQLite supporta `ALTER TABLE ... ADD COLUMN` per aggiunte semplici.
+        Questo è sufficiente per un progetto didattico e mantiene compatibilità con DB già creati.
+        """
+        existing = {row[1] for row in self._conn.execute(f"PRAGMA table_info({table});").fetchall()}
+        if column in existing:
+            return
+        self._conn.execute(f"ALTER TABLE {table} ADD COLUMN {column} {col_type};")
+
+    def ensure_game(
+        self,
+        game_id: str,
+        *,
+        num_players: int,
+        seed: Optional[int] = None,
+        code_version: Optional[str] = None,
+        rules_version: Optional[str] = None,
+    ) -> None:
         """
         Inserisce la riga della partita (idempotente).
 
@@ -126,10 +151,10 @@ class EventLog:
         with self._lock:
             self._conn.execute(
                 """
-                INSERT OR IGNORE INTO games(game_id, created_at, num_players, seed)
-                VALUES(?, ?, ?, ?);
+                INSERT OR IGNORE INTO games(game_id, created_at, num_players, seed, code_version, rules_version)
+                VALUES(?, ?, ?, ?, ?, ?);
                 """,
-                (game_id, now, num_players, seed),
+                (game_id, now, num_players, seed, code_version, rules_version),
             )
             self._conn.commit()
 

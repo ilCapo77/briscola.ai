@@ -204,6 +204,11 @@ Per cambiare percorso (o disabilitare) puoi usare:
 - CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
 - Env: `BRISCOLA_EVENT_DB_PATH=./data/mio_log.sqlite3 briscola-server`
 
+Metadati salvati per partita:
+- `seed`
+- `code_version` (override possibile con `BRISCOLA_CODE_VERSION`)
+- `rules_version` (versione semantica del dominio)
+
 ### Smoke test UI (manuale)
 
 Obiettivo: una verifica rapida (2–3 minuti) per capire subito se una modifica ha rotto il flusso principale della UI.
@@ -245,6 +250,14 @@ Per simulare N partite senza UI (utile per debug e, in futuro, generazione datas
 
 ```
 python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
+```
+
+## Self-play (dominio → SQLite)
+
+Per generare molte partite velocemente (senza server/UI) e salvarle nel DB:
+
+```
+python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 100 --seed 42 --num-players 2
 ```
 
 ## Export dataset (JSONL)

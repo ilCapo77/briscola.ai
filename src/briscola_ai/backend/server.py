@@ -31,157 +31,17 @@ from pydantic import BaseModel
 from ..domain.engine import PlayCardAction, step
 from ..domain.state import GameState as DomainGameState
 from ..domain.state import new_game_state
+from ..versioning import get_code_version, get_rules_version
 from .dto import (
     AiCardRevealDTO,
     CardDTO,
     GameResultDTO,
-    GameStateDTO,
-    ObservationDTO,
     PlayActionResultDTO,
-    PlayerInfoDTO,
-    PlayerStateDTO,
     TableCardDTO,
     TrickResultDTO,
 )
 from .event_log import EventLog, EventLogConfig, parse_event_db_path
-
-
-def _build_observation_dto(state: DomainGameState, player_index: int, server_version: int) -> ObservationDTO:
-    """
-    Costruisce un ObservationDTO dal dominio (stato puro).
-
-    Questa funzione centralizza la conversione da stato di gioco a payload WS/HTTP (Phase 2B),
-    garantendo che il formato sia sempre coerente con il contratto DTO.
-    Supporta sia modalità 2-player che 4-player.
-    """
-    if player_index < 0 or player_index >= state.num_players:
-        raise ValueError(f"L'indice giocatore deve essere compreso tra 0 e {state.num_players - 1}")
-
-    me = state.players[player_index]
-    my_turn = state.current_turn == player_index
-
-    # Converti carte in mano
-    my_hand = [CardDTO.from_domain(card) for card in me.hand]
-
-    # Carta di briscola:
-    # - In 2-player la briscola scoperta è "sotto il mazzo" e viene pescata per ultima.
-    # - Quando il mazzo è vuoto, mostrare anche la carta qui può risultare confusivo perché
-    #   la stessa carta può essere già finita nella mano di un giocatore.
-    #   In quel caso inviamo solo `trump_suit` (sempre) e lasciamo `trump_card=None`.
-    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card and len(state.deck) > 0 else None
-    trump_suit = state.trump_card.suit.value if state.trump_card else None
-
-    # Converti carte sul tavolo
-    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state.table_cards]
-
-    # Costruisci lista players (sostituisce player_{n}_* dinamici)
-    players: list[PlayerInfoDTO] = []
-    for i, player in enumerate(state.players):
-        players.append(
-            PlayerInfoDTO(
-                index=i,
-                name=player.name,
-                points=player.points,
-                hand_size=len(player.hand),
-            )
-        )
-
-    # Campi 4-player (None se 2-player)
-    my_team = None
-    teammate_index = None
-    teammate_points = None
-    my_team_points = None
-    opponent_team_points = None
-    if state.is_team_game and state.teams is not None:
-        if player_index in state.teams[0]:
-            my_team = 0
-            teammate_index = state.teams[0][0] if state.teams[0][1] == player_index else state.teams[0][1]
-        else:
-            my_team = 1
-            teammate_index = state.teams[1][0] if state.teams[1][1] == player_index else state.teams[1][1]
-
-        teammate_points = state.players[teammate_index].points if teammate_index is not None else 0
-        my_team_points = sum(state.players[i].points for i in state.teams[my_team]) if my_team is not None else 0
-        opponent_team_points = (
-            sum(state.players[i].points for i in state.teams[1 - my_team]) if my_team is not None else 0
-        )
-
-    return ObservationDTO(
-        server_version=server_version,
-        my_index=player_index,
-        my_hand=my_hand,
-        my_points=me.points,
-        my_turn=my_turn,
-        trump_card=trump_card,
-        trump_suit=trump_suit,
-        table_cards=table_cards,
-        cards_remaining_in_deck=len(state.deck),
-        valid_actions=list(range(len(me.hand))) if my_turn and not state.game_over else [],
-        game_over=state.game_over,
-        num_players=state.num_players,
-        is_team_game=state.is_team_game,
-        players=players,
-        my_team=my_team,
-        teammate_index=teammate_index,
-        teammate_points=teammate_points,
-        my_team_points=my_team_points,
-        opponent_team_points=opponent_team_points,
-    )
-
-
-def _build_game_state_dto(state: DomainGameState, server_version: int) -> GameStateDTO:
-    """
-    Costruisce un GameStateDTO (stato completo) dal dominio.
-
-    Uso previsto:
-    - endpoint HTTP `GET /games/{id}` senza `player_index` (debug/spectator)
-
-    Nota sicurezza/fair-play:
-    Questo payload contiene tutte le mani e quindi NON deve essere usato da un client
-    che rappresenta un singolo giocatore umano.
-    """
-    # Stesso criterio di `ObservationDTO`: se il mazzo è vuoto, non ripetiamo la carta di briscola.
-    trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card and len(state.deck) > 0 else None
-    trump_suit = state.trump_card.suit.value if state.trump_card else None
-    table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state.table_cards]
-
-    players: list[PlayerStateDTO] = []
-    for i, player in enumerate(state.players):
-        players.append(
-            PlayerStateDTO(
-                index=i,
-                name=player.name,
-                points=player.points,
-                hand=[CardDTO.from_domain(card) for card in player.hand],
-                hand_size=len(player.hand),
-                captured_cards=[CardDTO.from_domain(card) for card in player.captured_cards],
-            )
-        )
-
-    teams = list(state.teams) if state.teams is not None else None
-    team_0_points = sum(state.players[i].points for i in state.teams[0]) if state.teams is not None else None
-    team_1_points = sum(state.players[i].points for i in state.teams[1]) if state.teams is not None else None
-
-    return GameStateDTO(
-        server_version=server_version,
-        num_players=state.num_players,
-        is_team_game=state.is_team_game,
-        trump_card=trump_card,
-        trump_suit=trump_suit,
-        table_cards=table_cards,
-        current_turn=state.current_turn,
-        first_player=state.first_player,
-        cards_remaining_in_deck=len(state.deck),
-        valid_actions=list(range(len(state.players[state.current_turn].hand))) if not state.game_over else [],
-        game_over=state.game_over,
-        trick_in_progress=len(state.table_cards) > 0,
-        trick_size=len(state.table_cards),
-        expected_trick_size=state.num_players,
-        players=players,
-        teams=teams,
-        team_0_points=team_0_points,
-        team_1_points=team_1_points,
-    )
+from .observation_builder import build_game_state_dto, build_observation_dto
 
 
 # Modelli per richieste e risposte API
@@ -245,7 +105,13 @@ def _safe_log_event(
                 seed_from_payload = payload.get("seed")
                 seed = seed_from_payload if isinstance(seed_from_payload, int) else None
 
-            log.ensure_game(game_id, num_players=state.num_players, seed=seed)
+            log.ensure_game(
+                game_id,
+                num_players=state.num_players,
+                seed=seed,
+                code_version=get_code_version(),
+                rules_version=get_rules_version(),
+            )
         log.log_event(
             game_id,
             event_type,
@@ -385,6 +251,8 @@ async def create_game(config: GameConfig):
             "game_created",
             {
                 "seed": seed,
+                "code_version": get_code_version(),
+                "rules_version": get_rules_version(),
                 "num_players": config.num_players,
                 "player_names": [p.name for p in state.players],
                 "is_team_game": state.is_team_game,
@@ -417,13 +285,13 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
     if player_index is not None:
         # Restituisce una vista specifica per il giocatore (stesso formato dei messaggi WS)
         try:
-            observation_dto = _build_observation_dto(game, player_index, game_versions.get(game_id, 0))
+            observation_dto = build_observation_dto(game, player_index, game_versions.get(game_id, 0))
             return observation_dto.model_dump()
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
         # Restituisce lo stato completo (per spettatori o debugging) come DTO Pydantic.
-        game_state_dto = _build_game_state_dto(game, game_versions.get(game_id, 0))
+        game_state_dto = build_game_state_dto(game, game_versions.get(game_id, 0))
         return game_state_dto.model_dump()
 
 
@@ -784,7 +652,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
 
     try:
         # Invia lo stato iniziale della partita (usando DTO)
-        dto = _build_observation_dto(state, player_index, game_versions.get(game_id, 0))
+        dto = build_observation_dto(state, player_index, game_versions.get(game_id, 0))
         _safe_log_event(
             game_id,
             "ws_connected",
@@ -838,7 +706,7 @@ async def notify_clients(game_id: str):
     server_version = game_versions.get(game_id, 0)
     for player_idx, websocket in connected_clients[game_id].items():
         try:
-            dto = _build_observation_dto(state, player_idx, server_version)
+            dto = build_observation_dto(state, player_idx, server_version)
             _safe_log_event(
                 game_id,
                 "observation_sent",

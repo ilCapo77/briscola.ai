@@ -190,7 +190,7 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
   - scrittura append-only (stile event log) per semplificare debug e riproducibilità
   - Stato attuale:
     - [x] event log SQLite (schema + writer append-only) configurabile via env/CLI (`BRISCOLA_EVENT_DB_PATH`, `--event-db`)
-    - [ ] definire metadati “stabili” (versione regole/codice) da salvare sempre per partita
+    - [x] metadati “stabili” salvati per partita: `code_version` + `rules_version` (tabella `games` + payload `game_created`)
 - Definire un comando di export dataset (per training):
   - da SQLite → JSONL/Parquet con schema versionato
   - campi minimi: `state` (osservazione), `valid_actions`, `action`, `reward`, `done`, `metadata`
@@ -201,6 +201,8 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
   - due agenti baseline (random + heuristic)
   - generazione di partite in batch con seed
   - scrittura su SQLite + export dataset + metriche
+  - Stato attuale:
+    - [x] self-play random → SQLite (script `scripts/self_play_to_db.py`)
 - Introdurre una baseline di valutazione:
   - win-rate su set di seed
   - ELO/TrueSkill (opzionale)
