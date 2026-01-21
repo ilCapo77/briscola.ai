@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import argparse
 
-from briscola_ai.ai.agents import GreedyPointsAgent, RandomAgent
+from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, RandomAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 
 
@@ -26,6 +26,8 @@ def _build_agent(name: str):
         return RandomAgent()
     if name == "greedy_points":
         return GreedyPointsAgent()
+    if name == "heuristic_v1":
+        return HeuristicAgentV1()
     raise ValueError(f"Agente non supportato: {name!r}")
 
 
@@ -34,8 +36,18 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta agenti Briscola (dominio-only)")
     parser.add_argument("--num-games", type=int, default=1000, help="Numero partite da simulare")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
-    parser.add_argument("--agent0", default="random", choices=["random", "greedy_points"], help="Agente per player 0")
-    parser.add_argument("--agent1", default="random", choices=["random", "greedy_points"], help="Agente per player 1")
+    parser.add_argument(
+        "--agent0",
+        default="random",
+        choices=["random", "greedy_points", "heuristic_v1"],
+        help="Agente per player 0",
+    )
+    parser.add_argument(
+        "--agent1",
+        default="random",
+        choices=["random", "greedy_points", "heuristic_v1"],
+        help="Agente per player 1",
+    )
     parser.add_argument(
         "--seat-fair",
         action="store_true",

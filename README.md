@@ -282,6 +282,7 @@ Per confrontare agenti in modo riproducibile (senza UI/server):
 ```
 python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 random --agent1 random
 python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
+python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random
 ```
 
 Nota importante (bias “chi inizia”):

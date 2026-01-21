@@ -18,7 +18,8 @@ import random
 from dataclasses import dataclass
 from typing import Protocol
 
-from ..domain.models import Card
+from ..domain.models import Card, Suit
+from ..domain.rules import trick_points, who_wins_trick
 from ..domain.state import GameState
 
 
@@ -87,3 +88,138 @@ def card_to_short_string(card: Card) -> str:
     """
 
     return f"{card.suit.value}_{card.rank.name}"
+
+
+@dataclass(frozen=True)
+class HeuristicAgentV1:
+    """
+    Euristica “v1”: regole semplici e spiegabili (2-player).
+
+    Idea generale:
+    - Se siamo secondi di mano e possiamo prendere con una carta “economica”, prendiamo.
+    - Se la mano contiene punti alti (es. Asso/Tre) proviamo a prenderla, ma evitando
+      di sprecare briscole alte quando i punti in palio sono pochi.
+    - Se non conviene prendere, scartiamo una carta “economica” (bassi punti, non briscola).
+
+    Nota didattica:
+    Questa policy è volutamente semplice e NON usa informazione nascosta (es. mano avversaria).
+    Vede solo: la propria mano, le carte sul tavolo e il seme di briscola.
+    """
+
+    name: str = "heuristic_v1"
+
+    def choose_card_index(self, state: GameState, player_index: int, *, rng: random.Random) -> int:
+        hand = state.players[player_index].hand
+        if not hand:
+            raise ValueError("Mano vuota: nessuna azione possibile")
+
+        trump_suit: Suit | None = state.trump_card.suit if state.trump_card else None
+
+        # In Briscola 2-player la mano sul tavolo è lunga 0 (si apre) o 1 (si risponde).
+        # Non implementiamo qui un comportamento “team-play” (4-player).
+        if state.num_players != 2:
+            return rng.randrange(len(hand))
+
+        # Se siamo i primi a giocare nella mano (tavolo vuoto).
+        if not state.table_cards:
+            return self._choose_lead_card_index(hand, trump_suit=trump_suit, cards_remaining_in_deck=len(state.deck))
+
+        # Se siamo secondi di mano: vediamo la carta avversaria sul tavolo.
+        lead_card, lead_player = state.table_cards[0]
+        return self._choose_response_card_index(
+            hand,
+            player_index=player_index,
+            lead_card=lead_card,
+            lead_player=lead_player,
+            trump_suit=trump_suit,
+            cards_remaining_in_deck=len(state.deck),
+            rng=rng,
+        )
+
+    def _choose_lead_card_index(
+        self, hand: tuple[Card, ...], *, trump_suit: Suit | None, cards_remaining_in_deck: int
+    ) -> int:
+        """
+        Scelta quando siamo primi di mano.
+
+        Strategia minimale:
+        - inizio partita: preferisci scartare carte con 0 punti e non briscole;
+        - endgame (mazzo vuoto): tende a giocare più “forte” (perché non ci sono più pescate).
+        """
+        if cards_remaining_in_deck <= 0:
+            # Endgame: senza pescate successive, dare valore a prendere la mano.
+            # Giochiamo la carta più forte (trick_strength alta); a parità, quella con più punti.
+            best = max(
+                range(len(hand)),
+                key=lambda i: (hand[i].rank.trick_strength, hand[i].rank.points),
+            )
+            return best
+
+        # Early/mid game: scarta “economico” (0 punti, non briscola, debole).
+        def lead_key(i: int) -> tuple[int, int, int]:
+            card = hand[i]
+            is_trump = 1 if trump_suit is not None and card.suit == trump_suit else 0
+            return (card.rank.points, is_trump, card.rank.trick_strength)
+
+        return min(range(len(hand)), key=lead_key)
+
+    def _choose_response_card_index(
+        self,
+        hand: tuple[Card, ...],
+        *,
+        player_index: int,
+        lead_card: Card,
+        lead_player: int,
+        trump_suit: Suit | None,
+        cards_remaining_in_deck: int,
+        rng: random.Random,
+    ) -> int:
+        """
+        Scelta quando rispondiamo (secondi di mano).
+
+        Obiettivo:
+        - se conviene, prendi la mano usando la carta più “economica” che vince;
+        - altrimenti scarta la carta più economica (evitando briscole).
+        """
+        winning_candidates: list[int] = []
+        for i, card in enumerate(hand):
+            trick_cards = [(lead_card, lead_player), (card, player_index)]
+            winner = who_wins_trick(trick_cards, trump_suit)
+            if winner == player_index:
+                winning_candidates.append(i)
+
+        if winning_candidates:
+            # Scegli la carta che vince con costo minimo:
+            # - preferisci non briscola
+            # - preferisci pochi punti
+            # - preferisci forza bassa (non sprecare carte alte)
+            def win_cost(i: int) -> tuple[int, int, int]:
+                card = hand[i]
+                is_trump = 1 if trump_suit is not None and card.suit == trump_suit else 0
+                return (is_trump, card.rank.points, card.rank.trick_strength)
+
+            best_win = min(winning_candidates, key=win_cost)
+            best_win_card = hand[best_win]
+
+            total_trick_points = trick_points([lead_card, best_win_card])
+
+            # Regola di convenienza (molto semplice):
+            # - se ci sono punti “alti” sul tavolo (>=10) proviamo a prenderli;
+            # - se è endgame (mazzo vuoto), tendiamo a prendere più spesso;
+            # - se la carta per prendere è “gratis” (0 punti e non briscola), prendiamo comunque.
+            best_is_trump = trump_suit is not None and best_win_card.suit == trump_suit
+            best_is_free = (best_win_card.rank.points == 0) and (not best_is_trump)
+
+            if total_trick_points >= 10 or cards_remaining_in_deck <= 0 or best_is_free:
+                return best_win
+
+        # Altrimenti: scarta economico.
+        # Se l'avversario ha giocato briscola e non possiamo prenderla, è ancora più importante
+        # evitare di buttare una briscola nostra (meglio scartare un non-trump a 0 punti).
+        def discard_key(i: int) -> tuple[int, int, int]:
+            card = hand[i]
+            is_trump = 1 if trump_suit is not None and card.suit == trump_suit else 0
+            return (card.rank.points, is_trump, card.rank.trick_strength)
+
+        cheapest = min(range(len(hand)), key=discard_key)
+        return cheapest

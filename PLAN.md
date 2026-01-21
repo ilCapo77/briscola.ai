@@ -208,6 +208,7 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
   - ELO/TrueSkill (opzionale)
   - Stato attuale:
     - [x] valutazione offline dominio-only (script `scripts/evaluate_agents.py`)
+    - [x] baseline euristica semplice (es. `heuristic_v1`) per confronto vs random
     - [ ] decidere una “suite seed” fissa (es. 100/500 seed) per regressioni ripetibili
 
 ### Fase 5 — Modelli e training step-by-step (8+ sessioni, incrementale)
