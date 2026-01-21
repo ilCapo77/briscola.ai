@@ -285,6 +285,11 @@ python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_poi
 python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random
 ```
 
+Agenti disponibili (baseline):
+- `random`: sceglie una carta casuale tra quelle in mano (baseline “zero”).
+- `greedy_points`: gioca la carta con più punti in mano (euristica minimale e spiegabile).
+- `heuristic_v1`: euristica 2-player che prova a prendere “a basso costo” quando conviene e scarta in modo economico quando non conviene.
+
 Nota importante (bias “chi inizia”):
 - nel dominio attuale il player 0 inizia sempre la partita;
 - per confronti più corretti (e per le valutazioni future) **usa sempre** la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
