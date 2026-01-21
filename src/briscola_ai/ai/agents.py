@@ -32,7 +32,13 @@ class Agent(Protocol):
     è sempre `range(len(hand))` (finché la partita non è finita).
     """
 
-    name: str
+    # Nota mypy:
+    # definiamo `name` come proprietà in sola lettura. Se lo mettessimo come campo
+    # (`name: str`), mypy lo tratterebbe come attributo "settable" e andrebbe in
+    # conflitto con agenti implementati come `@dataclass(frozen=True)` (attributi read-only).
+    @property
+    def name(self) -> str:
+        """Nome leggibile dell'agente (usato in CLI/log/metriche)."""
 
     def choose_card_index(self, state: GameState, player_index: int, *, rng: random.Random) -> int:
         """Sceglie l'indice della carta da giocare per `player_index`."""
