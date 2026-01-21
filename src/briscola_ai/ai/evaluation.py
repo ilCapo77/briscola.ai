@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, Sequence
 
 from ..domain.engine import PlayCardAction, step
 from ..domain.state import GameState, new_game_state
@@ -119,15 +119,18 @@ def evaluate_match_2p(
     *,
     num_games: int,
     seed: int,
+    game_seeds: Optional[Sequence[int]] = None,
 ) -> MatchStats:
     """
     Valuta `agent0` vs `agent1` in 2-player.
 
     Scelta di design:
-    - Usiamo un RNG “master” per generare `game_seed` (shuffle) e per tutte le scelte agenti.
-      In questo modo la valutazione è riproducibile dato `seed`.
+    - Separiamo RNG “game” (shuffle) da RNG “action” (scelte agenti), così cambiamenti nella policy
+      non alterano la sequenza di shuffle.
+    - Se `game_seeds` è fornito, usiamo quella suite (random ma fissata) per gli shuffle.
     """
-    rng = random.Random(seed)
+    rng_game = random.Random(seed)
+    rng_action = random.Random(seed ^ 0x9E3779B9)
 
     wins0 = 0
     wins1 = 0
@@ -136,9 +139,13 @@ def evaluate_match_2p(
     sum1 = 0
     sum_diff = 0
 
-    for _ in range(num_games):
-        game_seed = rng.randrange(0, 2**32)
-        final_state = play_one_game_2p(agent0, agent1, rng=rng, game_seed=game_seed)
+    seeds = list(game_seeds) if game_seeds is not None else [rng_game.randrange(0, 2**32) for _ in range(num_games)]
+    if len(seeds) < num_games:
+        raise ValueError(f"game_seeds insufficiente: attesi >= {num_games}, ottenuti {len(seeds)}")
+
+    for i in range(num_games):
+        game_seed = seeds[i]
+        final_state = play_one_game_2p(agent0, agent1, rng=rng_action, game_seed=game_seed)
 
         p0 = final_state.players[0].points
         p1 = final_state.players[1].points
@@ -173,6 +180,7 @@ def evaluate_seat_fair_match_2p(
     *,
     num_games: int,
     seed: int,
+    game_seeds: Optional[Sequence[int]] = None,
 ) -> SeatFairStats:
     """
     Valuta `agent_a` vs `agent_b` in 2-player eliminando il bias di posto.
@@ -184,8 +192,13 @@ def evaluate_seat_fair_match_2p(
     if num_games % 2 != 0:
         raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari (giochiamo a coppie).")
 
-    rng = random.Random(seed)
+    rng_game = random.Random(seed)
+    rng_action = random.Random(seed ^ 0x9E3779B9)
     num_pairs = num_games // 2
+
+    seeds = list(game_seeds) if game_seeds is not None else [rng_game.randrange(0, 2**32) for _ in range(num_pairs)]
+    if len(seeds) < num_pairs:
+        raise ValueError(f"game_seeds insufficiente: attesi >= {num_pairs}, ottenuti {len(seeds)}")
 
     wins_a = 0
     wins_b = 0
@@ -194,11 +207,11 @@ def evaluate_seat_fair_match_2p(
     sum_b = 0
     sum_diff = 0
 
-    for _ in range(num_pairs):
-        game_seed = rng.randrange(0, 2**32)
+    for i in range(num_pairs):
+        game_seed = seeds[i]
 
         # Game 1: A=P0, B=P1
-        s1 = play_one_game_2p(agent_a, agent_b, rng=rng, game_seed=game_seed)
+        s1 = play_one_game_2p(agent_a, agent_b, rng=rng_action, game_seed=game_seed)
         p0, p1 = s1.players[0].points, s1.players[1].points
         sum_a += p0
         sum_b += p1
@@ -212,7 +225,7 @@ def evaluate_seat_fair_match_2p(
             wins_b += 1
 
         # Game 2: B=P0, A=P1 (swap)
-        s2 = play_one_game_2p(agent_b, agent_a, rng=rng, game_seed=game_seed)
+        s2 = play_one_game_2p(agent_b, agent_a, rng=rng_action, game_seed=game_seed)
         p0, p1 = s2.players[0].points, s2.players[1].points
         # Qui A è player 1.
         sum_a += p1

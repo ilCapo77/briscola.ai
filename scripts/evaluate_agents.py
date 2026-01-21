@@ -10,9 +10,28 @@ Esempi:
 from __future__ import annotations
 
 import argparse
+from pathlib import Path
 
 from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, RandomAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
+
+
+def _load_seed_suite(path: Path) -> list[int]:
+    """
+    Carica una suite di seed (uno per riga).
+
+    Formato:
+    - righe vuote ignorate
+    - righe che iniziano con `#` ignorate (commenti)
+    - ogni riga valida deve essere un intero (base 10)
+    """
+    seeds: list[int] = []
+    for raw in path.read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#"):
+            continue
+        seeds.append(int(line))
+    return seeds
 
 
 def _build_agent(name: str):
@@ -56,13 +75,35 @@ def main() -> int:
             "(riduce il bias dovuto a chi inizia = player 0). Richiede num-games pari."
         ),
     )
+    parser.add_argument(
+        "--seed-suite-file",
+        default="",
+        help=(
+            "Path a una suite di seed per lo shuffle (uno per riga). "
+            "Se presente, rende la valutazione confrontabile nel tempo. "
+            "In seat-fair serve una seed per coppia (num-games/2)."
+        ),
+    )
     args = parser.parse_args()
 
     agent0 = _build_agent(args.agent0)
     agent1 = _build_agent(args.agent1)
 
+    game_seeds = None
+    if args.seed_suite_file.strip():
+        suite_path = Path(args.seed_suite_file)
+        game_seeds = _load_seed_suite(suite_path)
+
     if args.seat_fair:
-        stats = evaluate_seat_fair_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed)
+        needed = args.num_games // 2
+        suite_slice = game_seeds[:needed] if game_seeds is not None else None
+        stats = evaluate_seat_fair_match_2p(
+            agent0,
+            agent1,
+            num_games=args.num_games,
+            seed=args.seed,
+            game_seeds=suite_slice,
+        )
         print(f"Match 2-player (seat-fair): {stats.agent_a_name} (A) vs {stats.agent_b_name} (B)")
         print(f"- games: {stats.num_games} (seed={args.seed})")
         print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
@@ -70,7 +111,8 @@ def main() -> int:
         print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
         return 0
 
-    stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed)
+    suite_slice = game_seeds[: args.num_games] if game_seeds is not None else None
+    stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed, game_seeds=suite_slice)
     print(f"Match 2-player: {stats.agent0_name} (P0) vs {stats.agent1_name} (P1)")
     print(f"- games: {stats.num_games} (seed={args.seed})")
     print(f"- wins P0: {stats.wins_agent0} | wins P1: {stats.wins_agent1} | draws: {stats.draws}")
