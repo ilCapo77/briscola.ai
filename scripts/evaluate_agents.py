@@ -5,6 +5,10 @@ Valuta agenti offline (dominio-only).
 Esempi:
   python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 random --agent1 random
   python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
+  python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small \\
+    --agent0 heuristic_v1 --agent1 random
+  python scripts/evaluate_agents.py --seat-fair --num-games 100000 --seed-suite-range-start 0 \\
+    --agent0 heuristic_v1 --agent1 random
 """
 
 from __future__ import annotations
@@ -14,6 +18,11 @@ from pathlib import Path
 
 from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, RandomAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
+
+
+def _repo_root() -> Path:
+    """Ritorna la root del repo (assumendo `scripts/` direttamente sotto root)."""
+    return Path(__file__).resolve().parents[1]
 
 
 def _load_seed_suite(path: Path) -> list[int]:
@@ -32,6 +41,38 @@ def _load_seed_suite(path: Path) -> list[int]:
             continue
         seeds.append(int(line))
     return seeds
+
+
+def _load_bundled_seed_suite(name: str) -> list[int]:
+    """
+    Carica una seed suite “versionata” nel repo.
+
+    Nota:
+    le suite vivono in `seed_suites/` e sono pensate per benchmark/regressioni.
+    """
+    if name == "small":
+        path = _repo_root() / "seed_suites" / "small_1000.txt"
+        return _load_seed_suite(path)
+    if name == "medium":
+        path = _repo_root() / "seed_suites" / "medium_5000.txt"
+        return _load_seed_suite(path)
+    raise ValueError(f"Seed suite non supportata: {name!r}")
+
+
+def _make_range_seed_suite(*, start: int, step: int, count: int) -> list[int]:
+    """
+    Genera una seed suite tramite un range aritmetico.
+
+    È utile per “big” (es. 50k seed) per evitare file molto grandi versionati.
+
+    Nota:
+    normalizziamo i seed su 32 bit per allinearci all'uso tipico di `random.Random(seed)`.
+    """
+    if count < 0:
+        raise ValueError(f"count deve essere >= 0, ottenuto {count}")
+    if step <= 0:
+        raise ValueError(f"step deve essere > 0, ottenuto {step}")
+    return [((start + i * step) & 0xFFFFFFFF) for i in range(count)]
 
 
 def _build_agent(name: str):
@@ -75,7 +116,17 @@ def main() -> int:
             "(riduce il bias dovuto a chi inizia = player 0). Richiede num-games pari."
         ),
     )
-    parser.add_argument(
+    seed_group = parser.add_mutually_exclusive_group()
+    seed_group.add_argument(
+        "--seed-suite",
+        choices=["small", "medium"],
+        default=None,
+        help=(
+            "Usa una seed suite versionata nel repo (benchmark/regressioni). "
+            "In seat-fair serve una seed per coppia (num-games/2)."
+        ),
+    )
+    seed_group.add_argument(
         "--seed-suite-file",
         default="",
         help=(
@@ -84,25 +135,49 @@ def main() -> int:
             "In seat-fair serve una seed per coppia (num-games/2)."
         ),
     )
+    seed_group.add_argument(
+        "--seed-suite-range-start",
+        type=int,
+        default=None,
+        help=(
+            "Genera seed con `range()` a partire da START (utile per benchmark big senza file). "
+            "In seat-fair genera num-games/2 seed, altrimenti num-games."
+        ),
+    )
+    parser.add_argument(
+        "--seed-suite-range-step",
+        type=int,
+        default=1,
+        help="Step per `--seed-suite-range-start` (default: 1).",
+    )
     args = parser.parse_args()
 
     agent0 = _build_agent(args.agent0)
     agent1 = _build_agent(args.agent1)
 
+    if args.seed_suite_range_start is None and args.seed_suite_range_step != 1:
+        raise ValueError("`--seed-suite-range-step` richiede anche `--seed-suite-range-start`.")
+
+    needed = args.num_games // 2 if args.seat_fair else args.num_games
     game_seeds = None
-    if args.seed_suite_file.strip():
-        suite_path = Path(args.seed_suite_file)
-        game_seeds = _load_seed_suite(suite_path)
+    if args.seed_suite is not None:
+        game_seeds = _load_bundled_seed_suite(args.seed_suite)[:needed]
+    elif args.seed_suite_file.strip():
+        game_seeds = _load_seed_suite(Path(args.seed_suite_file))[:needed]
+    elif args.seed_suite_range_start is not None:
+        game_seeds = _make_range_seed_suite(
+            start=args.seed_suite_range_start,
+            step=args.seed_suite_range_step,
+            count=needed,
+        )
 
     if args.seat_fair:
-        needed = args.num_games // 2
-        suite_slice = game_seeds[:needed] if game_seeds is not None else None
         stats = evaluate_seat_fair_match_2p(
             agent0,
             agent1,
             num_games=args.num_games,
             seed=args.seed,
-            game_seeds=suite_slice,
+            game_seeds=game_seeds,
         )
         print(f"Match 2-player (seat-fair): {stats.agent_a_name} (A) vs {stats.agent_b_name} (B)")
         print(f"- games: {stats.num_games} (seed={args.seed})")
@@ -111,8 +186,7 @@ def main() -> int:
         print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
         return 0
 
-    suite_slice = game_seeds[: args.num_games] if game_seeds is not None else None
-    stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed, game_seeds=suite_slice)
+    stats = evaluate_match_2p(agent0, agent1, num_games=args.num_games, seed=args.seed, game_seeds=game_seeds)
     print(f"Match 2-player: {stats.agent0_name} (P0) vs {stats.agent1_name} (P1)")
     print(f"- games: {stats.num_games} (seed={args.seed})")
     print(f"- wins P0: {stats.wins_agent0} | wins P1: {stats.wins_agent1} | draws: {stats.draws}")

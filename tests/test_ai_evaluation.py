@@ -10,7 +10,9 @@ Non testiamo che un agente sia "forte": testiamo l'infrastruttura.
 
 from __future__ import annotations
 
-from briscola_ai.ai.agents import RandomAgent
+import pytest
+
+from briscola_ai.ai.agents import HeuristicAgentV1, RandomAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 
 
@@ -51,3 +53,37 @@ def test_seat_fair_evaluate_is_deterministic_for_fixed_seed() -> None:
     stats1 = evaluate_seat_fair_match_2p(a0, a1, num_games=100, seed=123)
     stats2 = evaluate_seat_fair_match_2p(a0, a1, num_games=100, seed=123)
     assert stats1 == stats2
+
+
+def test_evaluate_match_with_explicit_game_seeds_is_stable_for_deterministic_agents() -> None:
+    """
+    Se forniamo una suite di shuffle esplicita, la parte “game RNG” è fissata.
+
+    Usiamo agenti deterministici (HeuristicAgentV1) così che cambiare `seed`
+    (che controlla l'RNG delle scelte agente) non cambi l'esito aggregato.
+    """
+    a0 = HeuristicAgentV1()
+    a1 = HeuristicAgentV1()
+
+    game_seeds = list(range(100))
+    stats1 = evaluate_match_2p(a0, a1, num_games=50, seed=1, game_seeds=game_seeds)
+    stats2 = evaluate_match_2p(a0, a1, num_games=50, seed=999, game_seeds=game_seeds)
+
+    assert stats1 == stats2
+
+
+def test_evaluate_raises_if_game_seeds_is_insufficient() -> None:
+    """
+    Se la suite di seed è più corta del necessario, deve fallire esplicitamente.
+
+    Questo evita regressioni “silenziose” dove un benchmark usa meno partite del previsto.
+    """
+    a0 = RandomAgent()
+    a1 = RandomAgent()
+
+    with pytest.raises(ValueError, match="game_seeds insufficiente"):
+        evaluate_match_2p(a0, a1, num_games=10, seed=0, game_seeds=[1, 2, 3])
+
+    # In seat-fair serve una seed per coppia: num_pairs = num_games // 2.
+    with pytest.raises(ValueError, match="game_seeds insufficiente"):
+        evaluate_seat_fair_match_2p(a0, a1, num_games=10, seed=0, game_seeds=[1, 2])

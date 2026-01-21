@@ -211,7 +211,8 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
     - [x] baseline euristica semplice (es. `heuristic_v1`) per confronto vs random
     - [x] taglie benchmark: `small=2000`, `medium=10000`, `big=100000` (tutte seat-fair)
     - [x] supporto a “suite seed” per regressioni ripetibili (seed da file via `--seed-suite-file`)
-    - [ ] decidere e versionare una “suite seed” fissa (es. 100/500 seed) come baseline canonica
+    - [x] suite canoniche versionate: `small=1000 seed` e `medium=5000 seed` (file in `seed_suites/`)
+    - [ ] per `big`: decidere se versionare anche 50k seed o usare suite “range()” (generata via CLI)
 
 ### Fase 5 — Modelli e training step-by-step (8+ sessioni, incrementale)
 
