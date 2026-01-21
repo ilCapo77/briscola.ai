@@ -206,6 +206,9 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
 - Introdurre una baseline di valutazione:
   - win-rate su set di seed
   - ELO/TrueSkill (opzionale)
+  - Stato attuale:
+    - [x] valutazione offline dominio-only (script `scripts/evaluate_agents.py`)
+    - [ ] decidere una “suite seed” fissa (es. 100/500 seed) per regressioni ripetibili
 
 ### Fase 5 — Modelli e training step-by-step (8+ sessioni, incrementale)
 
