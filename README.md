@@ -290,8 +290,25 @@ Agenti disponibili (baseline):
 - `greedy_points`: gioca la carta con più punti in mano (euristica minimale e spiegabile).
 - `heuristic_v1`: euristica 2-player che prova a prendere “a basso costo” quando conviene e scarta in modo economico quando non conviene.
 
-Nota anti-cheat:
-- gli agenti ricevono una `PlayerObservation` (vista parziale lecita), non il `GameState` completo: niente lettura di mazzo/mani avversarie.
+### Anti-cheat: osservazione parziale (information set)
+
+Perché serve:
+- nel dominio `GameState` contiene informazione **completa** (es. ordine del mazzo e mani di tutti);
+- se un agente/una rete riceve `GameState`, può “barare” leggendo informazione nascosta (anche involontariamente), rendendo i benchmark non significativi.
+
+Cosa facciamo:
+- gli agenti ricevono una `PlayerObservation`, cioè una vista **parziale e lecita** dello stato;
+- l’osservazione è costruita con `make_player_observation(state, player_index)` e poi passata a `Agent.choose_card_index(observation, rng=...)`.
+
+Cosa contiene (alta-level):
+- la mano del giocatore osservante, carte sul tavolo, briscola scoperta, `deck_size`, punteggi e dimensioni delle mani.
+
+Cosa NON contiene:
+- il mazzo come sequenza di carte (`state.deck`) e le carte specifiche in mano agli avversari.
+
+Riferimenti utili:
+- implementazione: `src/briscola_ai/domain/observation.py`
+- test anti-regressione: `tests/test_domain_observation.py`
 
 Nota importante (bias “chi inizia”):
 - nel dominio attuale il player 0 inizia sempre la partita;
