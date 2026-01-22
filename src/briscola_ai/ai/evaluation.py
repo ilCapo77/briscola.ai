@@ -20,6 +20,7 @@ from dataclasses import dataclass
 from typing import Optional, Sequence
 
 from ..domain.engine import PlayCardAction, step
+from ..domain.observation import make_player_observation
 from ..domain.state import GameState, new_game_state
 from .agents import Agent
 
@@ -101,7 +102,8 @@ def play_one_game_2p(
         safety -= 1
         current = state.current_turn
         agent = agent0 if current == 0 else agent1
-        card_index = agent.choose_card_index(state, current, rng=rng)
+        observation = make_player_observation(state, current)
+        card_index = agent.choose_card_index(observation, rng=rng)
 
         state, result = step(state, PlayCardAction(player_index=current, card_index=card_index))
         if result.error:

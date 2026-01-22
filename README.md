@@ -290,6 +290,9 @@ Agenti disponibili (baseline):
 - `greedy_points`: gioca la carta con più punti in mano (euristica minimale e spiegabile).
 - `heuristic_v1`: euristica 2-player che prova a prendere “a basso costo” quando conviene e scarta in modo economico quando non conviene.
 
+Nota anti-cheat:
+- gli agenti ricevono una `PlayerObservation` (vista parziale lecita), non il `GameState` completo: niente lettura di mazzo/mani avversarie.
+
 Nota importante (bias “chi inizia”):
 - nel dominio attuale il player 0 inizia sempre la partita;
 - per confronti più corretti (e per le valutazioni future) **usa sempre** la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:

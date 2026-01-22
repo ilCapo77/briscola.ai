@@ -10,6 +10,12 @@ Prima delle reti neurali, conviene avere:
 
 Questo modulo definisce alcune policy “plug-in” usabili sia in self-play offline,
 sia (in futuro) nel backend come IA.
+
+Anti-cheat (importante)
+-----------------------
+Gli agenti NON ricevono `GameState` completo: ricevono una `PlayerObservation`,
+cioè la vista parziale lecita dal punto di vista di un giocatore.
+Questo evita che una IA possa barare leggendo l'ordine del mazzo o la mano avversaria.
 """
 
 from __future__ import annotations
@@ -19,8 +25,8 @@ from dataclasses import dataclass
 from typing import Protocol
 
 from ..domain.models import Card, Suit
+from ..domain.observation import PlayerObservation
 from ..domain.rules import trick_points, who_wins_trick
-from ..domain.state import GameState
 
 
 class Agent(Protocol):
@@ -40,8 +46,8 @@ class Agent(Protocol):
     def name(self) -> str:
         """Nome leggibile dell'agente (usato in CLI/log/metriche)."""
 
-    def choose_card_index(self, state: GameState, player_index: int, *, rng: random.Random) -> int:
-        """Sceglie l'indice della carta da giocare per `player_index`."""
+    def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
+        """Sceglie l'indice della carta da giocare per il giocatore osservante."""
 
 
 @dataclass(frozen=True)
@@ -56,8 +62,8 @@ class RandomAgent:
 
     name: str = "random"
 
-    def choose_card_index(self, state: GameState, player_index: int, *, rng: random.Random) -> int:
-        hand_size = len(state.players[player_index].hand)
+    def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
+        hand_size = len(observation.hand)
         if hand_size <= 0:
             raise ValueError("Mano vuota: nessuna azione possibile")
         return rng.randrange(hand_size)
@@ -75,8 +81,8 @@ class GreedyPointsAgent:
 
     name: str = "greedy_points"
 
-    def choose_card_index(self, state: GameState, player_index: int, *, rng: random.Random) -> int:
-        hand = state.players[player_index].hand
+    def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
+        hand = observation.hand
         if not hand:
             raise ValueError("Mano vuota: nessuna azione possibile")
 
@@ -114,31 +120,33 @@ class HeuristicAgentV1:
 
     name: str = "heuristic_v1"
 
-    def choose_card_index(self, state: GameState, player_index: int, *, rng: random.Random) -> int:
-        hand = state.players[player_index].hand
+    def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
+        hand = observation.hand
         if not hand:
             raise ValueError("Mano vuota: nessuna azione possibile")
 
-        trump_suit: Suit | None = state.trump_card.suit if state.trump_card else None
+        trump_suit: Suit | None = observation.trump_card.suit if observation.trump_card else None
 
         # In Briscola 2-player la mano sul tavolo è lunga 0 (si apre) o 1 (si risponde).
         # Non implementiamo qui un comportamento “team-play” (4-player).
-        if state.num_players != 2:
+        if observation.num_players != 2:
             return rng.randrange(len(hand))
 
         # Se siamo i primi a giocare nella mano (tavolo vuoto).
-        if not state.table_cards:
-            return self._choose_lead_card_index(hand, trump_suit=trump_suit, cards_remaining_in_deck=len(state.deck))
+        if not observation.table_cards:
+            return self._choose_lead_card_index(
+                hand, trump_suit=trump_suit, cards_remaining_in_deck=observation.deck_size
+            )
 
         # Se siamo secondi di mano: vediamo la carta avversaria sul tavolo.
-        lead_card, lead_player = state.table_cards[0]
+        lead_card, lead_player = observation.table_cards[0]
         return self._choose_response_card_index(
             hand,
-            player_index=player_index,
+            player_index=observation.player_index,
             lead_card=lead_card,
             lead_player=lead_player,
             trump_suit=trump_suit,
-            cards_remaining_in_deck=len(state.deck),
+            cards_remaining_in_deck=observation.deck_size,
             rng=rng,
         )
 

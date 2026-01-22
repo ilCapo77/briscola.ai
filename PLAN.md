@@ -164,6 +164,8 @@ Azioni chiave:
   - isolare RNG in un componente iniettato (es. `random.Random(seed)`)
 - Separare “osservazione per giocatore” da “stato completo”:
   - utile per ML e per evitare leak informativo.
+  - Stato attuale:
+    - [x] introdotta `PlayerObservation` e usata nelle valutazioni offline (agenti non vedono `GameState` completo)
 - API: trasformare oggetti Python in JSON con **Pydantic schema** invece di encoder custom.
 
 ### Fase 3 — Test “seri” e qualità (parallela alle fasi 1–2) ✅ (completata)
