@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Callable, Protocol
+from typing import Callable, ClassVar, Protocol
 
 from ..domain.models import Card, Suit
 from ..domain.observation import PlayerObservation
@@ -50,6 +50,25 @@ class Agent(Protocol):
         """Sceglie l'indice della carta da giocare per il giocatore osservante."""
 
 
+@dataclass(frozen=True, slots=True)
+class AgentSpec:
+    """
+    Metadati “didattici” di un agente.
+
+    Scopo:
+    - avere una sorgente unica di verità per nome/descrizione dell'agente
+    - poter esporre questi metadati a UI/CLI senza duplicare stringhe nel frontend
+
+    Nota di design:
+    Manteniamo `AgentSpec` *vicino* all'agente: ogni classe agente espone un attributo di classe `spec`.
+    In questo modo implementazione e metadati rimangono coerenti e non possono “driftare” facilmente.
+    """
+
+    name: str
+    label: str
+    description_it: str
+
+
 @dataclass(frozen=True)
 class RandomAgent:
     """
@@ -60,6 +79,14 @@ class RandomAgent:
     - avere un punto di riferimento per valutare euristiche e modelli.
     """
 
+    spec: ClassVar[AgentSpec] = AgentSpec(
+        name="random",
+        label="Random",
+        description_it=(
+            "Sceglie una carta a caso tra quelle in mano. "
+            "È una baseline semplice per verificare che tutto funzioni e misurare i miglioramenti."
+        ),
+    )
     name: str = "random"
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
@@ -79,6 +106,14 @@ class GreedyPointsAgent:
     ma è una policy deterministica e “spiegabile”, utile come esempio.
     """
 
+    spec: ClassVar[AgentSpec] = AgentSpec(
+        name="greedy_points",
+        label="Greedy (punti)",
+        description_it=(
+            "Gioca sempre la carta con più punti tra quelle in mano. "
+            "È deterministico e spiegabile, ma spesso sub-ottimale (tende a sprecare carichi)."
+        ),
+    )
     name: str = "greedy_points"
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
@@ -114,10 +149,18 @@ class HeuristicAgentV1:
     - Se non conviene prendere, scartiamo una carta “economica” (bassi punti, non briscola).
 
     Nota didattica:
-    Questa policy è volutamente semplice e NON usa informazione nascosta (es. mano avversaria).
-    Vede solo: la propria mano, le carte sul tavolo e il seme di briscola.
+    Questa policy è volutamente semplice e “spiegabile”.
+    Come tutti gli agenti del progetto, vede solo una `PlayerObservation` (vista parziale lecita).
     """
 
+    spec: ClassVar[AgentSpec] = AgentSpec(
+        name="heuristic_v1",
+        label="Euristica v1",
+        description_it=(
+            "Euristica 2-player: prova a prendere quando conviene (a basso costo) e a scartare in modo economico "
+            "quando non conviene."
+        ),
+    )
     name: str = "heuristic_v1"
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
@@ -239,52 +282,10 @@ class HeuristicAgentV1:
         return cheapest
 
 
-@dataclass(frozen=True, slots=True)
-class AgentSpec:
-    """
-    Metadati “didattici” di un agente.
-
-    Scopo:
-    - avere una sorgente unica di verità per nome/descrizione dell'agente
-    - poter esporre questi metadati a UI/CLI senza duplicare stringhe nel frontend
-    """
-
-    name: str
-    label: str
-    description_it: str
-
-
 _AGENT_BUILDERS: dict[str, Callable[[], Agent]] = {
     "random": RandomAgent,
     "greedy_points": GreedyPointsAgent,
     "heuristic_v1": HeuristicAgentV1,
-}
-
-_AGENT_SPECS: dict[str, AgentSpec] = {
-    "random": AgentSpec(
-        name="random",
-        label="Random",
-        description_it=(
-            "Sceglie una carta a caso tra quelle in mano. "
-            "È una baseline semplice per verificare che tutto funzioni e misurare i miglioramenti."
-        ),
-    ),
-    "greedy_points": AgentSpec(
-        name="greedy_points",
-        label="Greedy (punti)",
-        description_it=(
-            "Gioca sempre la carta con più punti tra quelle in mano. "
-            "È deterministico e spiegabile, ma spesso sub-ottimale (tende a sprecare carichi)."
-        ),
-    ),
-    "heuristic_v1": AgentSpec(
-        name="heuristic_v1",
-        label="Euristica v1",
-        description_it=(
-            "Euristica 2-player: prova a prendere quando conviene (a basso costo) e a scartare in modo economico "
-            "quando non conviene."
-        ),
-    ),
 }
 
 AI_AGENTS_COMMON_NOTE_IT = (
@@ -295,8 +296,7 @@ AI_AGENTS_COMMON_NOTE_IT = (
 
 def list_agent_specs() -> list[AgentSpec]:
     """Ritorna la lista di agenti disponibili con metadati (ordine stabile)."""
-    order = ("random", "greedy_points", "heuristic_v1")
-    return [_AGENT_SPECS[name] for name in order]
+    return [RandomAgent.spec, GreedyPointsAgent.spec, HeuristicAgentV1.spec]
 
 
 def build_agent(name: str) -> Agent:
