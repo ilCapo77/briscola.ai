@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Callable, ClassVar, Protocol
+from typing import ClassVar, Protocol
 
 from ..domain.models import Card, Suit
 from ..domain.observation import PlayerObservation
@@ -250,10 +250,10 @@ class HeuristicAgentV1:
             # - preferisci non briscola
             # - preferisci pochi punti
             # - preferisci forza bassa (non sprecare carte alte)
-            def win_cost(i: int) -> tuple[int, int, int]:
-                card = hand[i]
-                is_trump = 1 if trump_suit is not None and card.suit == trump_suit else 0
-                return (is_trump, card.rank.points, card.rank.trick_strength)
+            def win_cost(idx: int) -> tuple[int, int, int]:
+                c = hand[idx]
+                is_trump = 1 if trump_suit is not None and c.suit == trump_suit else 0
+                return (is_trump, c.rank.points, c.rank.trick_strength)
 
             best_win = min(winning_candidates, key=win_cost)
             best_win_card = hand[best_win]
@@ -273,16 +273,16 @@ class HeuristicAgentV1:
         # Altrimenti: scarta economico.
         # Se l'avversario ha giocato briscola e non possiamo prenderla, è ancora più importante
         # evitare di buttare una briscola nostra (meglio scartare un non-trump a 0 punti).
-        def discard_key(i: int) -> tuple[int, int, int]:
-            card = hand[i]
-            is_trump = 1 if trump_suit is not None and card.suit == trump_suit else 0
-            return (card.rank.points, is_trump, card.rank.trick_strength)
+        def discard_key(idx: int) -> tuple[int, int, int]:
+            c = hand[idx]
+            is_trump = 1 if trump_suit is not None and c.suit == trump_suit else 0
+            return c.rank.points, is_trump, c.rank.trick_strength
 
         cheapest = min(range(len(hand)), key=discard_key)
         return cheapest
 
 
-_AGENT_BUILDERS: dict[str, Callable[[], Agent]] = {
+_AGENT_BUILDERS: dict[str, type[Agent]] = {
     "random": RandomAgent,
     "greedy_points": GreedyPointsAgent,
     "heuristic_v1": HeuristicAgentV1,

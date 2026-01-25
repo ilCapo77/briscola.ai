@@ -198,11 +198,11 @@ def main() -> int:
     data_path = Path(args.data)
     out_path = Path(args.out)
 
-    x, m, y = _build_training_examples(data_path)
+    x_all, mask_all, y_all = _build_training_examples(data_path)
 
     rng = np.random.default_rng(args.seed)
-    n = x.shape[0]
-    d = x.shape[1]
+    n = x_all.shape[0]
+    d = x_all.shape[1]
 
     # Split train/val (semplice e didattico).
     idx = np.arange(n)
@@ -211,8 +211,8 @@ def main() -> int:
     val_idx = idx[:val_size]
     train_idx = idx[val_size:]
 
-    x_train, m_train, y_train = x[train_idx], m[train_idx], y[train_idx]
-    x_val, m_val, y_val = x[val_idx], m[val_idx], y[val_idx]
+    x_train, mask_train, y_train = x_all[train_idx], mask_all[train_idx], y_all[train_idx]
+    x_val, mask_val, y_val = x_all[val_idx], mask_all[val_idx], y_all[val_idx]
 
     # Inizializzazione pesi (piccola).
     w = rng.normal(loc=0.0, scale=0.01, size=(d, 40)).astype(np.float32)
@@ -223,7 +223,7 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         train_losses = []
         train_accs = []
-        for batch in _iter_minibatches(x_train, m_train, y_train, batch_size=args.batch_size, rng=rng):
+        for batch in _iter_minibatches(x_train, mask_train, y_train, batch_size=args.batch_size, rng=rng):
             loss, grad_w, grad_b, masked = _loss_and_grad(batch.x, batch.mask, batch.y, w, b)
             w -= float(args.lr) * grad_w
             b -= float(args.lr) * grad_b
@@ -232,7 +232,7 @@ def main() -> int:
             train_accs.append(_accuracy(masked, batch.y))
 
         # Val (full batch: semplice).
-        val_loss, _, _, val_masked = _loss_and_grad(x_val, m_val, y_val, w, b)
+        val_loss, _, _, val_masked = _loss_and_grad(x_val, mask_val, y_val, w, b)
         val_acc = _accuracy(val_masked, y_val)
 
         row = TrainMetrics(
@@ -257,7 +257,7 @@ def main() -> int:
         "seed": int(args.seed),
         "data_path": str(data_path),
         "encoder": "encode_observation_2p:v1",
-        "metrics": [asdict(m) for m in metrics],
+        "metrics": [asdict(metric) for metric in metrics],
     }
     np.savez(out_path, w=w, b=b, metadata_json=json.dumps(payload, ensure_ascii=False, indent=2))
     print(f"Saved model: {out_path}")
