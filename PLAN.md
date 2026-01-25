@@ -130,6 +130,7 @@ Step suggeriti (focus 2-player):
 - [x] **Refactor IA → modello server-driven (standard)**:
   - Backend: rimuovere endpoint di trigger e far avanzare automaticamente la partita quando tocca all'IA
   - Frontend: mantenere UX invariata con hold/coda eventi (no dipendenza da un trigger client)
+  - Backend/UI: scelta dell'agente IA all'avvio (`ai_agent`) e policy basata su osservazione parziale (anti-cheat)
   - Obiettivo: UI didattica leggibile senza `asyncio.sleep()` nel backend
 
 Deliverable minimo:

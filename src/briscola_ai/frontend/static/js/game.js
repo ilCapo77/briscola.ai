@@ -333,11 +333,19 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const startGame = async (config) => {
         try {
-            const playerNames = [config.playerName, 'Avversario IA'];
+            const _aiLabel = (aiAgent) => {
+                if (aiAgent === 'heuristic_v1') return 'Euristica v1';
+                if (aiAgent === 'greedy_points') return 'Greedy (punti)';
+                return 'Random';
+            };
+
+            const aiAgent = config.aiAgent || 'random';
+            const playerNames = [config.playerName, `IA (${_aiLabel(aiAgent)})`];
 
             const result = await API.createGame({
                 num_players: 2,
-                player_names: playerNames
+                player_names: playerNames,
+                ai_agent: aiAgent
             });
 
             store.setState({

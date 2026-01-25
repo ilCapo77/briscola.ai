@@ -8,6 +8,7 @@ Nota: puliamo sempre lo stato globale con una fixture `autouse` per evitare
 interferenze tra casi di test.
 """
 
+import asyncio
 from collections.abc import Generator
 
 import pytest
@@ -33,6 +34,8 @@ def _clean_server_state() -> Generator[None, None, None]:
     server.game_data.clear()
     server.game_locks.clear()
     server.game_versions.clear()
+    server.game_ai_agents.clear()
+    server.game_action_rngs.clear()
     server.connected_clients.clear()
     yield
     server.active_games.clear()
@@ -40,6 +43,8 @@ def _clean_server_state() -> Generator[None, None, None]:
     server.game_data.clear()
     server.game_locks.clear()
     server.game_versions.clear()
+    server.game_ai_agents.clear()
+    server.game_action_rngs.clear()
     server.connected_clients.clear()
 
 
@@ -492,3 +497,57 @@ def test_server_lifespan_cancels_cleanup_task(monkeypatch: pytest.MonkeyPatch) -
         pass
 
     assert cancelled["value"] is True
+
+
+def test_create_game_allows_selecting_ai_agent_and_ai_turn_uses_observation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Regressione anti-cheat:
+    - il client può scegliere l'agente IA all'avvio (`ai_agent`)
+    - quando l'IA gioca, la policy riceve una `PlayerObservation` (non `GameState`)
+    """
+
+    async def _no_ai(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(server, "_maybe_ai_turn", _no_ai)
+
+    class CheatDetectingAgent:
+        name = "cheat_detector"
+
+        def choose_card_index(self, observation, *, rng):  # noqa: ANN001
+            assert observation.player_index == 1
+            assert not hasattr(observation, "deck")
+            assert not hasattr(observation, "players")
+            assert observation.deck_size >= 0
+            assert len(observation.hand) > 0
+            return 0
+
+    client = TestClient(server.app)
+    create = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["Alice", "IA"], "ai_agent": "heuristic_v1"},
+    )
+    assert create.status_code == 200
+    game_id = create.json()["game_id"]
+
+    # Verifica che la selezione sia stata applicata (per la UI: player 1 è l'IA).
+    assert server.game_ai_agents[game_id][1].name == "heuristic_v1"
+
+    # Sostituiamo l'agente con uno che fallisce se vede informazione nascosta.
+    server.game_ai_agents[game_id][1] = CheatDetectingAgent()
+
+    # Giochiamo una mossa umana per passare il turno all'IA.
+    obs0 = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+    assert obs0["my_turn"] is True
+    play = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 0, "card_index": obs0["valid_actions"][0]},
+    )
+    assert play.status_code == 200
+
+    # Eseguiamo una mossa IA (sincrona per test) sotto lock.
+    async def _run_ai_once() -> None:
+        async with server.game_locks[game_id]:
+            await server._execute_ai_turn_locked(game_id, human_player_index=0)
+
+    asyncio.run(_run_ai_once())

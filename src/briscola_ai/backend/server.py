@@ -22,13 +22,15 @@ import random
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Dict, List, Literal, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
+from ..ai.agents import Agent, GreedyPointsAgent, HeuristicAgentV1, RandomAgent
 from ..domain.engine import PlayCardAction, step
+from ..domain.observation import make_player_observation
 from ..domain.state import GameState as DomainGameState
 from ..domain.state import new_game_state
 from ..versioning import get_code_version, get_rules_version
@@ -50,6 +52,7 @@ class GameConfig(BaseModel):
 
     num_players: int
     player_names: Optional[List[str]] = None
+    ai_agent: Optional[Literal["random", "greedy_points", "heuristic_v1"]] = None
 
 
 class GameAction(BaseModel):
@@ -215,8 +218,34 @@ game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
 game_locks: Dict[str, asyncio.Lock] = {}
 game_versions: Dict[str, int] = {}
 
+# Config IA per partita (2-player UI: umano=0, IA=1).
+#
+# Nota:
+# - gli agenti sono stateless: li istanziamo una volta per partita e li riusiamo.
+# - l'RNG delle scelte IA è separato dallo shuffle del mazzo (seed partita), per riproducibilità.
+game_ai_agents: Dict[str, dict[int, Agent]] = {}
+game_action_rngs: Dict[str, random.Random] = {}
+
 # Connessioni WebSocket
 connected_clients: Dict[str, Dict[int, WebSocket]] = {}
+
+_DEFAULT_AI_AGENT_NAME = "random"
+
+
+def _build_ai_agent(name: str) -> Agent:
+    """
+    Costruisce un agente IA a partire dal nome.
+
+    Nota:
+    usiamo una mappa esplicita (no import dinamici) per semplicità e riproducibilità.
+    """
+    if name == "random":
+        return RandomAgent()
+    if name == "greedy_points":
+        return GreedyPointsAgent()
+    if name == "heuristic_v1":
+        return HeuristicAgentV1()
+    raise ValueError(f"Agente IA non supportato: {name!r}")
 
 
 @app.get("/")
@@ -238,7 +267,21 @@ async def create_game(config: GameConfig):
         game_id = str(uuid.uuid4())
         active_games[game_id] = state
         game_timestamps[game_id] = datetime.now()
-        game_data[game_id] = [{"timestamp": datetime.now().isoformat(), "event": "game_created", "seed": seed}]
+        ai_agent_name = config.ai_agent or _DEFAULT_AI_AGENT_NAME
+
+        # Config IA (solo 2-player, come la UI attuale).
+        if config.num_players == 2:
+            game_ai_agents[game_id] = {1: _build_ai_agent(ai_agent_name)}
+            game_action_rngs[game_id] = random.Random(seed ^ 0x9E3779B9)
+
+        game_data[game_id] = [
+            {
+                "timestamp": datetime.now().isoformat(),
+                "event": "game_created",
+                "seed": seed,
+                "ai_agent": ai_agent_name if config.num_players == 2 else None,
+            }
+        ]
         game_locks[game_id] = asyncio.Lock()
         game_versions[game_id] = 0
 
@@ -256,6 +299,7 @@ async def create_game(config: GameConfig):
                 "num_players": config.num_players,
                 "player_names": [p.name for p in state.players],
                 "is_team_game": state.is_team_game,
+                "ai_agent": ai_agent_name if config.num_players == 2 else None,
             },
             server_version=0,
         )
@@ -266,6 +310,7 @@ async def create_game(config: GameConfig):
             "num_players": config.num_players,
             "is_team_game": state.is_team_game,
             "player_names": [p.name for p in state.players],
+            "ai_agent": ai_agent_name if config.num_players == 2 else None,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
@@ -461,14 +506,28 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     if state.game_over or state.current_turn == human_player_index:
         return
 
-    # AI gioca una carta casuale tra le valide
+    # AI gioca una carta usando l'agente configurato.
+    #
+    # Nota anti-cheat:
+    # la policy riceve `PlayerObservation` (vista parziale lecita), non `GameState` completo.
     ai_player_index = state.current_turn
     valid_actions = list(range(len(state.players[ai_player_index].hand))) if not state.game_over else []
 
     if not valid_actions:
         return
 
-    card_index = random.choice(valid_actions)
+    rng = game_action_rngs.get(game_id, random.Random())
+    agent = game_ai_agents.get(game_id, {}).get(ai_player_index)
+
+    if agent is None:
+        card_index = rng.randrange(len(valid_actions))
+    else:
+        observation = make_player_observation(state, ai_player_index)
+        card_index = agent.choose_card_index(observation, rng=rng)
+        if card_index not in valid_actions:
+            # Fallback di sicurezza: se un agente ritorna un indice invalido, non blocchiamo la partita.
+            card_index = rng.randrange(len(valid_actions))
+
     selected_card = state.players[ai_player_index].hand[card_index]
 
     # Invia messaggio per rivelare la carta nella mano IA (usando DTO)
@@ -782,6 +841,10 @@ async def cleanup_inactive_games():
                 del game_versions[game_id]
             if game_id in game_locks:
                 del game_locks[game_id]
+            if game_id in game_ai_agents:
+                del game_ai_agents[game_id]
+            if game_id in game_action_rngs:
+                del game_action_rngs[game_id]
             if game_id in connected_clients:
                 # Chiude tutte le connessioni WebSocket
                 for websocket in connected_clients[game_id].values():

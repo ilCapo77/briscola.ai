@@ -20,6 +20,7 @@ const UI = (() => {
         gameResult: document.getElementById('game-result'),
         gameForm: document.getElementById('game-form'),
         playerNameInput: document.getElementById('player-name-input'),
+        aiAgentSelect: document.getElementById('ai-agent-select'),
         gameId: document.getElementById('game-id'),
         gameStatus: document.getElementById('game-status'),
         opponentName: document.getElementById('opponent-name'),
@@ -102,7 +103,8 @@ const UI = (() => {
         elements.gameForm.addEventListener('submit', (e) => {
             e.preventDefault();
             callbacks.onStartGame?.({
-                playerName: elements.playerNameInput.value || 'Giocatore'
+                playerName: elements.playerNameInput.value || 'Giocatore',
+                aiAgent: elements.aiAgentSelect?.value || 'random'
             });
         });
 
