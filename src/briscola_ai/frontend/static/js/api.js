@@ -114,6 +114,42 @@ const API = (() => {
     };
 
     /**
+     * Elenca gli agenti IA disponibili (metadati per UI).
+     *
+     * Ritorna un oggetto del tipo:
+     * {
+     *   common_note_it: string,
+     *   agents: [{ name: string, label: string, description_it: string }, ...]
+     * }
+     *
+     * Nota compatibilità:
+     * se il backend ritorna una lista (vecchio formato), normalizziamo a `{ agents, common_note_it: '' }`.
+     */
+    const getAiAgents = async () => {
+        _requireServedOverHttp();
+        try {
+            const response = await fetch(`${API_URL}/ai/agents`);
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Impossibile caricare la lista agenti IA');
+            }
+
+            const payload = await response.json();
+            if (Array.isArray(payload)) {
+                return { common_note_it: '', agents: payload };
+            }
+            return {
+                common_note_it: payload?.common_note_it || '',
+                agents: Array.isArray(payload?.agents) ? payload.agents : []
+            };
+        } catch (error) {
+            console.error('Errore caricando agenti IA:', error);
+            throw error;
+        }
+    };
+
+    /**
      * Ottiene lo stato corrente di una partita
      * @param {string} gameId - ID della partita
      * @param {number} playerIndex - Indice del giocatore per una vista specifica
@@ -327,6 +363,7 @@ const API = (() => {
         gameId,
         playerIndex,
         createGame,
+        getAiAgents,
         getGameState,
         playCard,
         getGameResult,

@@ -21,6 +21,8 @@ const UI = (() => {
         gameForm: document.getElementById('game-form'),
         playerNameInput: document.getElementById('player-name-input'),
         aiAgentSelect: document.getElementById('ai-agent-select'),
+        aiAgentDescription: document.getElementById('ai-agent-description'),
+        aiAgentCommonNote: document.getElementById('ai-agent-common-note'),
         gameId: document.getElementById('game-id'),
         gameStatus: document.getElementById('game-status'),
         opponentName: document.getElementById('opponent-name'),
@@ -38,6 +40,17 @@ const UI = (() => {
         trickResult: document.getElementById('trick-result'),
         resultContent: document.getElementById('result-content'),
         newGame: document.getElementById('new-game')
+    };
+
+    // Metadati agenti IA caricati dal backend (source of truth: modulo Python).
+    let aiAgentMetaByName = {};
+    let aiAgentCommonNoteIt = '';
+
+    const _updateAiAgentDescription = () => {
+        const name = elements.aiAgentSelect?.value;
+        const meta = name ? aiAgentMetaByName[name] : null;
+        if (elements.aiAgentDescription) elements.aiAgentDescription.textContent = meta?.description_it || '';
+        if (elements.aiAgentCommonNote) elements.aiAgentCommonNote.textContent = aiAgentCommonNoteIt || '';
     };
 
     /**
@@ -104,13 +117,45 @@ const UI = (() => {
             e.preventDefault();
             callbacks.onStartGame?.({
                 playerName: elements.playerNameInput.value || 'Giocatore',
-                aiAgent: elements.aiAgentSelect?.value || 'random'
+                aiAgent: elements.aiAgentSelect?.value || 'random',
+                aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random'
             });
         });
+
+        elements.aiAgentSelect?.addEventListener('change', _updateAiAgentDescription);
 
         elements.newGame.addEventListener('click', () => {
             callbacks.onNewGame?.();
         });
+    };
+
+    const setAiAgents = (catalog) => {
+        const agents = Array.isArray(catalog) ? catalog : (catalog?.agents || []);
+        aiAgentCommonNoteIt = Array.isArray(catalog) ? '' : (catalog?.common_note_it || '');
+
+        if (!elements.aiAgentSelect || !Array.isArray(agents) || agents.length === 0) {
+            _updateAiAgentDescription();
+            return;
+        }
+
+        aiAgentMetaByName = {};
+        agents.forEach((a) => {
+            if (a?.name) aiAgentMetaByName[a.name] = a;
+        });
+
+        elements.aiAgentSelect.innerHTML = '';
+        agents.forEach((a) => {
+            if (!a?.name) return;
+            const option = document.createElement('option');
+            option.value = a.name;
+            option.textContent = a.label || a.name;
+            elements.aiAgentSelect.appendChild(option);
+        });
+
+        // Default: se esiste heuristic_v1 la pre-selezioniamo, altrimenti il primo.
+        const hasHeuristic = !!aiAgentMetaByName.heuristic_v1;
+        elements.aiAgentSelect.value = hasHeuristic ? 'heuristic_v1' : (agents[0]?.name || 'random');
+        _updateAiAgentDescription();
     };
 
     const showGameSetup = () => {
@@ -368,8 +413,9 @@ const UI = (() => {
         elements.playerNameDisplay.textContent = name;
     };
 
-        return {
+    return {
         init,
+        setAiAgents,
         showGameSetup,
         showGameBoard,
         showGameResult,

@@ -56,6 +56,29 @@ def test_backend_root_healthcheck() -> None:
     assert r.json()["message"]
 
 
+def test_list_ai_agents_exposes_metadata_in_italian() -> None:
+    """`GET /ai/agents` deve esporre nomi e descrizioni (in italiano) per la UI."""
+    client = TestClient(server.app)
+    r = client.get("/ai/agents")
+    assert r.status_code == 200
+    payload = r.json()
+    assert isinstance(payload, dict)
+    assert isinstance(payload.get("common_note_it"), str)
+    assert payload["common_note_it"]
+
+    agents = payload.get("agents")
+    assert isinstance(agents, list)
+    assert agents
+
+    by_name = {a["name"]: a for a in agents}
+    assert "random" in by_name
+    assert "greedy_points" in by_name
+    assert "heuristic_v1" in by_name
+
+    assert isinstance(by_name["heuristic_v1"].get("description_it"), str)
+    assert by_name["heuristic_v1"]["description_it"]
+
+
 def test_create_game_get_state_and_play_action_happy_path() -> None:
     """Happy path: crea partita, legge observation e gioca una carta valida."""
     client = TestClient(server.app)

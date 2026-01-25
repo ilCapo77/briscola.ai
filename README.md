@@ -356,6 +356,7 @@ e l'interpretazione del “vincitore della mano” vanno adattate a livello di t
 ## Come giocare
 
 1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”
+   - La UI mostra una breve descrizione dell’IA selezionata (dai metadati del backend).
 2. Clicca su una carta in mano per giocarla
 3. L'IA risponderà automaticamente al suo turno
 

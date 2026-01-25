@@ -22,7 +22,7 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
-from typing import Protocol
+from typing import Callable, Protocol
 
 from ..domain.models import Card, Suit
 from ..domain.observation import PlayerObservation
@@ -237,3 +237,76 @@ class HeuristicAgentV1:
 
         cheapest = min(range(len(hand)), key=discard_key)
         return cheapest
+
+
+@dataclass(frozen=True, slots=True)
+class AgentSpec:
+    """
+    Metadati “didattici” di un agente.
+
+    Scopo:
+    - avere una sorgente unica di verità per nome/descrizione dell'agente
+    - poter esporre questi metadati a UI/CLI senza duplicare stringhe nel frontend
+    """
+
+    name: str
+    label: str
+    description_it: str
+
+
+_AGENT_BUILDERS: dict[str, Callable[[], Agent]] = {
+    "random": RandomAgent,
+    "greedy_points": GreedyPointsAgent,
+    "heuristic_v1": HeuristicAgentV1,
+}
+
+_AGENT_SPECS: dict[str, AgentSpec] = {
+    "random": AgentSpec(
+        name="random",
+        label="Random",
+        description_it=(
+            "Sceglie una carta a caso tra quelle in mano. "
+            "È una baseline semplice per verificare che tutto funzioni e misurare i miglioramenti."
+        ),
+    ),
+    "greedy_points": AgentSpec(
+        name="greedy_points",
+        label="Greedy (punti)",
+        description_it=(
+            "Gioca sempre la carta con più punti tra quelle in mano. "
+            "È deterministico e spiegabile, ma spesso sub-ottimale (tende a sprecare carichi)."
+        ),
+    ),
+    "heuristic_v1": AgentSpec(
+        name="heuristic_v1",
+        label="Euristica v1",
+        description_it=(
+            "Euristica 2-player: prova a prendere quando conviene (a basso costo) e a scartare in modo economico "
+            "quando non conviene."
+        ),
+    ),
+}
+
+AI_AGENTS_COMMON_NOTE_IT = (
+    "Nota anti-cheat: tutte le IA ricevono solo un’osservazione parziale (PlayerObservation). "
+    "Non possono leggere l’ordine del mazzo né le carte specifiche in mano all’avversario."
+)
+
+
+def list_agent_specs() -> list[AgentSpec]:
+    """Ritorna la lista di agenti disponibili con metadati (ordine stabile)."""
+    order = ("random", "greedy_points", "heuristic_v1")
+    return [_AGENT_SPECS[name] for name in order]
+
+
+def build_agent(name: str) -> Agent:
+    """
+    Costruisce un agente a partire dal nome canonico.
+
+    Nota:
+    usiamo una mappa esplicita (no import dinamici) per semplicità e riproducibilità.
+    """
+    try:
+        return _AGENT_BUILDERS[name]()
+    except KeyError as exc:
+        raise ValueError(f"Agente non supportato: {name!r}") from exc

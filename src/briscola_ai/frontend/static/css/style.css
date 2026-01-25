@@ -98,6 +98,13 @@ select:focus {
     border-color: var(--secondary-color);
 }
 
+.help-text {
+    margin-top: 8px;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    line-height: 1.35;
+}
+
 button {
     background: linear-gradient(135deg, var(--secondary-color), #2980b9);
     color: white;

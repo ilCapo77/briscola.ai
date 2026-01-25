@@ -22,13 +22,13 @@ import random
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ..ai.agents import Agent, GreedyPointsAgent, HeuristicAgentV1, RandomAgent
+from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
 from ..domain.engine import PlayCardAction, step
 from ..domain.observation import make_player_observation
 from ..domain.state import GameState as DomainGameState
@@ -52,7 +52,7 @@ class GameConfig(BaseModel):
 
     num_players: int
     player_names: Optional[List[str]] = None
-    ai_agent: Optional[Literal["random", "greedy_points", "heuristic_v1"]] = None
+    ai_agent: Optional[str] = None
 
 
 class GameAction(BaseModel):
@@ -232,20 +232,16 @@ connected_clients: Dict[str, Dict[int, WebSocket]] = {}
 _DEFAULT_AI_AGENT_NAME = "random"
 
 
-def _build_ai_agent(name: str) -> Agent:
-    """
-    Costruisce un agente IA a partire dal nome.
-
-    Nota:
-    usiamo una mappa esplicita (no import dinamici) per semplicità e riproducibilità.
-    """
-    if name == "random":
-        return RandomAgent()
-    if name == "greedy_points":
-        return GreedyPointsAgent()
-    if name == "heuristic_v1":
-        return HeuristicAgentV1()
-    raise ValueError(f"Agente IA non supportato: {name!r}")
+@app.get("/ai/agents", response_model=Dict)
+async def list_ai_agents():
+    """Elenca gli agenti IA disponibili (metadati per UI)."""
+    return {
+        "common_note_it": AI_AGENTS_COMMON_NOTE_IT,
+        "agents": [
+            {"name": spec.name, "label": spec.label, "description_it": spec.description_it}
+            for spec in list_agent_specs()
+        ],
+    }
 
 
 @app.get("/")
@@ -271,7 +267,7 @@ async def create_game(config: GameConfig):
 
         # Config IA (solo 2-player, come la UI attuale).
         if config.num_players == 2:
-            game_ai_agents[game_id] = {1: _build_ai_agent(ai_agent_name)}
+            game_ai_agents[game_id] = {1: build_agent(ai_agent_name)}
             game_action_rngs[game_id] = random.Random(seed ^ 0x9E3779B9)
 
         game_data[game_id] = [

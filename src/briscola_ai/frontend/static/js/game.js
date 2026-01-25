@@ -45,6 +45,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getState = () => store.getState();
 
+    const loadAiAgentMetadata = async () => {
+        try {
+            const agents = await API.getAiAgents();
+            UI.setAiAgents(agents);
+        } catch (error) {
+            console.warn('Impossibile caricare metadati agenti IA:', error);
+        }
+    };
+
     // Track last known table state to detect changes
     let lastTableCardsCount = 0;
     let lastAppliedServerVersion = -1;
@@ -333,14 +342,9 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const startGame = async (config) => {
         try {
-            const _aiLabel = (aiAgent) => {
-                if (aiAgent === 'heuristic_v1') return 'Euristica v1';
-                if (aiAgent === 'greedy_points') return 'Greedy (punti)';
-                return 'Random';
-            };
-
             const aiAgent = config.aiAgent || 'random';
-            const playerNames = [config.playerName, `IA (${_aiLabel(aiAgent)})`];
+            const aiAgentLabel = config.aiAgentLabel || aiAgent;
+            const playerNames = [config.playerName, `IA (${aiAgentLabel})`];
 
             const result = await API.createGame({
                 num_players: 2,
@@ -479,6 +483,8 @@ document.addEventListener('DOMContentLoaded', () => {
         onStartGame: startGame,
         onNewGame: resetGame
     });
+
+    loadAiAgentMetadata();
 
     UI.showGameSetup();
 });
