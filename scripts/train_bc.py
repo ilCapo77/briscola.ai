@@ -20,9 +20,15 @@ Da questi due campi ricaviamo:
 
 Modello
 -------
-Baseline estremamente semplice:
-- regressione logistica multinomiale (softmax) con SGD
-- logits mascherati: il modello può scegliere solo tra carte in mano
+Supportiamo due varianti (stesso encoder, stessa action mask):
+
+1) `linear` (default)
+   - regressione logistica multinomiale (softmax) con SGD
+   - logits mascherati: il modello può scegliere solo tra carte in mano
+
+2) `mlp`
+   - MLP minimale con 1 hidden layer + ReLU + testa lineare su 40 azioni
+   - ottimizzazione con Adam (più stabile del SGD puro su reti non-lineari)
 
 Nota didattica:
 Questo NON è un modello "forte". Serve come primo passo:
@@ -158,7 +164,7 @@ class TrainMetrics:
     val_acc: float
 
 
-def _loss_and_grad(x: np.ndarray, mask: np.ndarray, y: np.ndarray, w: np.ndarray, b: np.ndarray):
+def _loss_and_grad_linear(x: np.ndarray, mask: np.ndarray, y: np.ndarray, w: np.ndarray, b: np.ndarray):
     """
     Cross-entropy mascherata + gradienti per softmax linear.
 
@@ -178,19 +184,143 @@ def _loss_and_grad(x: np.ndarray, mask: np.ndarray, y: np.ndarray, w: np.ndarray
     dlogits = probs
     dlogits[np.arange(bsz), y] -= 1.0
     dlogits /= float(bsz)
+    # Azioni non valide: gradient ≈ 0 per costruzione (prob ~0), ma rendiamolo esplicito.
+    dlogits[~mask] = 0.0
 
     grad_w = x.T @ dlogits  # (D, 40)
     grad_b = np.sum(dlogits, axis=0)  # (40,)
     return loss, grad_w, grad_b, masked
 
 
+def _relu(x: np.ndarray) -> np.ndarray:
+    """ReLU: max(0, x)."""
+    return np.maximum(x, 0.0)
+
+
+def _loss_and_grad_mlp(
+    x: np.ndarray,
+    mask: np.ndarray,
+    y: np.ndarray,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    *,
+    weight_decay: float,
+):
+    """
+    Cross-entropy mascherata + gradienti per MLP 1-hidden-layer.
+
+    Architettura:
+    - z1 = x W1 + b1
+    - h  = relu(z1)
+    - logits = h W2 + b2
+    - masked_logits = mask(logits)
+
+    Nota:
+    questa rete è volutamente minimale e serve solo ad introdurre non-linearità
+    rispetto al modello lineare.
+    """
+    z1 = x @ w1 + b1  # (B, H)
+    h = _relu(z1)  # (B, H)
+    logits = h @ w2 + b2  # (B, 40)
+    masked = _masked_logits(logits, mask)
+    probs = _softmax(masked)
+
+    bsz = x.shape[0]
+    loss = -np.log(probs[np.arange(bsz), y] + 1e-12).mean()
+
+    # L2 weight decay (solo sui pesi, non sui bias).
+    if weight_decay > 0.0:
+        loss += 0.5 * float(weight_decay) * (float(np.sum(w1 * w1)) + float(np.sum(w2 * w2)))
+
+    dlogits = probs
+    dlogits[np.arange(bsz), y] -= 1.0
+    dlogits /= float(bsz)
+    dlogits[~mask] = 0.0
+
+    grad_w2 = h.T @ dlogits  # (H, 40)
+    grad_b2 = np.sum(dlogits, axis=0)  # (40,)
+
+    dh = dlogits @ w2.T  # (B, H)
+    dz1 = dh * (z1 > 0.0)  # ReLU grad
+    grad_w1 = x.T @ dz1  # (D, H)
+    grad_b1 = np.sum(dz1, axis=0)  # (H,)
+
+    if weight_decay > 0.0:
+        grad_w1 += float(weight_decay) * w1
+        grad_w2 += float(weight_decay) * w2
+
+    return loss, grad_w1, grad_b1, grad_w2, grad_b2, masked
+
+
+@dataclass
+class AdamState:
+    """Stato Adam per un singolo tensore."""
+
+    m: np.ndarray
+    v: np.ndarray
+
+
+def _adam_init(param: np.ndarray) -> AdamState:
+    """Inizializza `m` e `v` a zero, stessa shape del parametro."""
+    return AdamState(m=np.zeros_like(param), v=np.zeros_like(param))
+
+
+def _adam_update(
+    param: np.ndarray,
+    grad: np.ndarray,
+    *,
+    state: AdamState,
+    lr: float,
+    t: int,
+    beta1: float = 0.9,
+    beta2: float = 0.999,
+    eps: float = 1e-8,
+) -> None:
+    """
+    Step Adam in-place.
+
+    Nota:
+    Implementazione didattica minimale (niente fancy features).
+    """
+    state.m = beta1 * state.m + (1.0 - beta1) * grad
+    state.v = beta2 * state.v + (1.0 - beta2) * (grad * grad)
+    m_hat = state.m / (1.0 - beta1**t)
+    v_hat = state.v / (1.0 - beta2**t)
+    param -= float(lr) * m_hat / (np.sqrt(v_hat) + eps)
+
+
 def main() -> int:
     parser = argparse.ArgumentParser(description="Train Behavior Cloning (40 carte + action mask)")
     parser.add_argument("--data", required=True, help="Path JSONL (output di scripts/export_dataset.py)")
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
+    parser.add_argument(
+        "--model",
+        choices=["linear", "mlp"],
+        default="linear",
+        help="Tipo modello: linear (softmax) oppure mlp (1 hidden layer + ReLU).",
+    )
+    parser.add_argument(
+        "--hidden-dim",
+        type=int,
+        default=128,
+        help="Dimensione hidden layer per `--model mlp`.",
+    )
     parser.add_argument("--epochs", type=int, default=10, help="Numero epoche")
     parser.add_argument("--batch-size", type=int, default=256, help="Batch size")
-    parser.add_argument("--lr", type=float, default=0.5, help="Learning rate (SGD)")
+    parser.add_argument(
+        "--lr",
+        type=float,
+        default=None,
+        help="Learning rate. Default: 0.5 per linear (SGD), 1e-3 per mlp (Adam).",
+    )
+    parser.add_argument(
+        "--weight-decay",
+        type=float,
+        default=0.0,
+        help="L2 weight decay (solo per `--model mlp`, default: 0).",
+    )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG")
     parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione validation (0..1)")
     args = parser.parse_args()
@@ -214,25 +344,110 @@ def main() -> int:
     x_train, mask_train, y_train = x_all[train_idx], mask_all[train_idx], y_all[train_idx]
     x_val, mask_val, y_val = x_all[val_idx], mask_all[val_idx], y_all[val_idx]
 
-    # Inizializzazione pesi (piccola).
-    w = rng.normal(loc=0.0, scale=0.01, size=(d, 40)).astype(np.float32)
-    b = np.zeros((40,), dtype=np.float32)
+    lr = float(args.lr) if args.lr is not None else (0.5 if args.model == "linear" else 1e-3)
 
     metrics: list[TrainMetrics] = []
+
+    if args.model == "linear":
+        # Inizializzazione pesi (piccola).
+        w = rng.normal(loc=0.0, scale=0.01, size=(d, 40)).astype(np.float32)
+        b = np.zeros((40,), dtype=np.float32)
+
+        for epoch in range(1, args.epochs + 1):
+            train_losses = []
+            train_accs = []
+            for batch in _iter_minibatches(x_train, mask_train, y_train, batch_size=args.batch_size, rng=rng):
+                loss, grad_w, grad_b, masked = _loss_and_grad_linear(batch.x, batch.mask, batch.y, w, b)
+                w -= float(lr) * grad_w
+                b -= float(lr) * grad_b
+
+                train_losses.append(loss)
+                train_accs.append(_accuracy(masked, batch.y))
+
+            # Val (full batch: semplice).
+            val_loss, _, _, val_masked = _loss_and_grad_linear(x_val, mask_val, y_val, w, b)
+            val_acc = _accuracy(val_masked, y_val)
+
+            row = TrainMetrics(
+                epoch=epoch,
+                train_loss=float(np.mean(train_losses)),
+                train_acc=float(np.mean(train_accs)),
+                val_loss=float(val_loss),
+                val_acc=float(val_acc),
+            )
+            metrics.append(row)
+            print(
+                f"epoch {epoch:02d} | "
+                f"train loss {row.train_loss:.4f} acc {row.train_acc:.3f} | "
+                f"val loss {row.val_loss:.4f} acc {row.val_acc:.3f}"
+            )
+
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "format": "linear_softmax_bc_v1",
+            "feature_dim": int(d),
+            "action_dim": 40,
+            "seed": int(args.seed),
+            "data_path": str(data_path),
+            "encoder": "encode_observation_2p:v1",
+            "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
+            "metrics": [asdict(metric) for metric in metrics],
+        }
+        np.savez(out_path, w=w, b=b, metadata_json=json.dumps(payload, ensure_ascii=False, indent=2))
+        print(f"Saved model: {out_path}")
+        return 0
+
+    if args.hidden_dim <= 0:
+        raise ValueError("--hidden-dim deve essere > 0")
+
+    # MLP: inizializzazione piccola (stile Xavier/He molto semplificata).
+    hdim = int(args.hidden_dim)
+    w1 = (rng.normal(loc=0.0, scale=0.02, size=(d, hdim))).astype(np.float32)
+    b1 = np.zeros((hdim,), dtype=np.float32)
+    w2 = (rng.normal(loc=0.0, scale=0.02, size=(hdim, 40))).astype(np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+
+    # Adam state.
+    st_w1 = _adam_init(w1)
+    st_b1 = _adam_init(b1)
+    st_w2 = _adam_init(w2)
+    st_b2 = _adam_init(b2)
+    t = 0
 
     for epoch in range(1, args.epochs + 1):
         train_losses = []
         train_accs = []
         for batch in _iter_minibatches(x_train, mask_train, y_train, batch_size=args.batch_size, rng=rng):
-            loss, grad_w, grad_b, masked = _loss_and_grad(batch.x, batch.mask, batch.y, w, b)
-            w -= float(args.lr) * grad_w
-            b -= float(args.lr) * grad_b
+            t += 1
+            loss, gw1, gb1, gw2, gb2, masked = _loss_and_grad_mlp(
+                batch.x,
+                batch.mask,
+                batch.y,
+                w1,
+                b1,
+                w2,
+                b2,
+                weight_decay=float(args.weight_decay),
+            )
+            _adam_update(w1, gw1, state=st_w1, lr=lr, t=t)
+            _adam_update(b1, gb1, state=st_b1, lr=lr, t=t)
+            _adam_update(w2, gw2, state=st_w2, lr=lr, t=t)
+            _adam_update(b2, gb2, state=st_b2, lr=lr, t=t)
 
             train_losses.append(loss)
             train_accs.append(_accuracy(masked, batch.y))
 
         # Val (full batch: semplice).
-        val_loss, _, _, val_masked = _loss_and_grad(x_val, mask_val, y_val, w, b)
+        val_loss, _, _, _, _, val_masked = _loss_and_grad_mlp(
+            x_val,
+            mask_val,
+            y_val,
+            w1,
+            b1,
+            w2,
+            b2,
+            weight_decay=float(args.weight_decay),
+        )
         val_acc = _accuracy(val_masked, y_val)
 
         row = TrainMetrics(
@@ -251,15 +466,30 @@ def main() -> int:
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
-        "format": "linear_softmax_bc_v1",
+        "format": "mlp_bc_v1",
         "feature_dim": int(d),
+        "hidden_dim": int(hdim),
         "action_dim": 40,
         "seed": int(args.seed),
         "data_path": str(data_path),
         "encoder": "encode_observation_2p:v1",
+        "train": {
+            "model": "mlp",
+            "optimizer": "adam",
+            "lr": float(lr),
+            "epochs": int(args.epochs),
+            "weight_decay": float(args.weight_decay),
+        },
         "metrics": [asdict(metric) for metric in metrics],
     }
-    np.savez(out_path, w=w, b=b, metadata_json=json.dumps(payload, ensure_ascii=False, indent=2))
+    np.savez(
+        out_path,
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        metadata_json=json.dumps(payload, ensure_ascii=False, indent=2),
+    )
     print(f"Saved model: {out_path}")
     return 0
 

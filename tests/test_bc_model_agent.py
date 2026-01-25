@@ -95,3 +95,48 @@ def test_load_bc_model_npz_validates_metadata_feature_dim(tmp_path: Path) -> Non
 
     with pytest.raises(ValueError):
         load_bc_model_npz(model_path)
+
+
+def test_bc_model_agent_supports_mlp_format(tmp_path: Path) -> None:
+    """L'agente deve supportare anche il formato MLP (w1/b1/w2/b2) e rispettare la mask."""
+    hand = (
+        Card(Suit.CUPS, Rank.THREE),
+        Card(Suit.CLUBS, Rank.TWO),
+    )
+    obs = _make_2p_observation(hand=hand)
+    encoded = encode_player_observation_2p(obs)
+    d = len(encoded.features)
+
+    action_a = action_id_from_suit_number(suit=hand[0].suit.value, number=hand[0].rank.number)
+    action_b = action_id_from_suit_number(suit=hand[1].suit.value, number=hand[1].rank.number)
+
+    hidden_dim = 2
+    w1 = np.zeros((d, hidden_dim), dtype=np.float32)
+    b1 = np.zeros((hidden_dim,), dtype=np.float32)
+    w2 = np.zeros((hidden_dim, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+
+    # Proiettiamo due feature della mano su due unità hidden (ReLU pass-through perché x>=0).
+    w1[action_a, 0] = 1.0
+    w1[action_b, 1] = 1.0
+    # Poi preferiamo action_a rispetto ad action_b.
+    w2[0, action_a] = 2.0
+    w2[1, action_b] = 1.0
+
+    invalid_action = action_id_from_suit_number(suit="coins", number=1)
+    assert invalid_action not in (action_a, action_b)
+    b2[invalid_action] = 10_000.0
+
+    model_path = tmp_path / "bc_model_mlp.npz"
+    np.savez(
+        model_path,
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        metadata_json=f'{{"format":"mlp_bc_v1","feature_dim":{d},"hidden_dim":{hidden_dim}}}',
+    )
+
+    agent = BCModelAgent.from_npz(model_path)
+    idx = agent.choose_card_index(obs, rng=random.Random(0))
+    assert idx == 0

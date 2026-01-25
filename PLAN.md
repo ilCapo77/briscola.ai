@@ -238,6 +238,7 @@ Scelte e stato (Fase 5A):
 - [x] definito encoder observation → feature (v1) e salvata una versione (`src/briscola_ai/ai/training/observation_encoder.py`)
 - [x] primo modello BC (baseline lineare) + loop di training riproducibile (`scripts/train_bc.py`)
 - [x] integrazione del modello come agente (valutazione con `scripts/evaluate_agents.py`)
+- [x] variante BC più espressiva: MLP minimale (1 hidden layer + ReLU) con training in NumPy (`scripts/train_bc.py --model mlp`)
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

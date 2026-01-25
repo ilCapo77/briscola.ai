@@ -22,7 +22,7 @@ import json
 import random
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import numpy as np
 
@@ -31,8 +31,23 @@ from .training.card_action_space import action_id_from_suit_number
 from .training.observation_encoder import encode_player_observation_2p
 
 
+class LoadedBCModel(Protocol):
+    """Interfaccia minima per un modello BC caricato da `.npz`."""
+
+    @property
+    def metadata(self) -> dict[str, Any]:
+        """Metadati del training (best effort, da `metadata_json`)."""
+
+    @property
+    def feature_dim(self) -> int:
+        """Dimensione feature attesa dall'encoder."""
+
+    def logits(self, x: np.ndarray) -> np.ndarray:
+        """Ritorna logits (40,) a partire da feature `x` (D,)."""
+
+
 @dataclass(frozen=True, slots=True)
-class BCModel:
+class LinearBCModel:
     """
     Modello BC lineare (softmax) salvato in `.npz`.
 
@@ -51,8 +66,64 @@ class BCModel:
         """Dimensione feature attesa dall'encoder."""
         return int(self.w.shape[0])
 
+    def logits(self, x: np.ndarray) -> np.ndarray:
+        """Logits lineari: xW + b."""
+        return x @ self.w + self.b
 
-def load_bc_model_npz(path: Path) -> BCModel:
+
+@dataclass(frozen=True, slots=True)
+class MLPBCModel:
+    """
+    Modello BC MLP (1 hidden layer + ReLU) salvato in `.npz`.
+
+    Convenzione (vedi `scripts/train_bc.py`):
+    - `w1`: (D, H) float32
+    - `b1`: (H,) float32
+    - `w2`: (H, 40) float32
+    - `b2`: (40,) float32
+    """
+
+    w1: np.ndarray
+    b1: np.ndarray
+    w2: np.ndarray
+    b2: np.ndarray
+    metadata: dict[str, Any]
+
+    @property
+    def feature_dim(self) -> int:
+        """Dimensione feature attesa dall'encoder."""
+        return int(self.w1.shape[0])
+
+    def logits(self, x: np.ndarray) -> np.ndarray:
+        """Forward MLP: relu(xW1 + b1)W2 + b2."""
+        z1 = x @ self.w1 + self.b1
+        h = np.maximum(z1, 0.0)
+        return h @ self.w2 + self.b2
+
+
+def _parse_metadata_json(raw: Any) -> dict[str, Any]:
+    """Parsa `metadata_json` salvato in npz (best effort)."""
+    try:
+        text = str(raw.item())
+    except Exception:
+        text = str(raw)
+    if not text:
+        return {}
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {"raw_metadata_json": text}
+    return parsed if isinstance(parsed, dict) else {"metadata": parsed}
+
+
+def _validate_declared_feature_dim(metadata: dict[str, Any], actual: int) -> None:
+    """Se `metadata.feature_dim` è presente, deve coincidere."""
+    declared_dim = metadata.get("feature_dim")
+    if isinstance(declared_dim, int) and declared_dim != actual:
+        raise ValueError(f"Feature dim mismatch: metadata={declared_dim} actual={actual}")
+
+
+def load_bc_model_npz(path: Path) -> LoadedBCModel:
     """
     Carica un modello BC da `.npz`.
 
@@ -65,8 +136,45 @@ def load_bc_model_npz(path: Path) -> BCModel:
         raise ValueError(f"Formato non supportato: {path} (atteso .npz)")
 
     with np.load(path) as data:
+        keys = set(data.keys())
+        metadata: dict[str, Any] = {}
+        if "metadata_json" in data:
+            metadata = _parse_metadata_json(data["metadata_json"])
+
+        fmt = metadata.get("format")
+        if isinstance(fmt, str):
+            fmt = fmt.strip()
+        else:
+            fmt = ""
+
+        # Preferiamo esplicitamente il formato dichiarato nel metadata, ma supportiamo anche inferenza.
+        is_mlp = fmt == "mlp_bc_v1" or {"w1", "b1", "w2", "b2"}.issubset(keys)
+        if is_mlp:
+            missing = {"w1", "b1", "w2", "b2"} - keys
+            if missing:
+                raise ValueError(
+                    f"File modello invalido: mancano chiavi MLP {sorted(missing)} (trovate: {sorted(keys)})"
+                )
+
+            w1 = np.asarray(data["w1"], dtype=np.float32)
+            b1 = np.asarray(data["b1"], dtype=np.float32)
+            w2 = np.asarray(data["w2"], dtype=np.float32)
+            b2 = np.asarray(data["b2"], dtype=np.float32)
+
+            if w1.ndim != 2 or b1.ndim != 1 or w2.ndim != 2 or b2.ndim != 1:
+                raise ValueError("Shape invalide per MLP (attesi w1/w2 2D e b1/b2 1D)")
+            if w2.shape[1] != 40 or b2.shape[0] != 40:
+                raise ValueError(f"Action dim invalida: w2={w2.shape} b2={b2.shape} (atteso (*,40) e (40,))")
+            if w1.shape[1] != b1.shape[0]:
+                raise ValueError(f"Hidden dim mismatch: w1={w1.shape} b1={b1.shape}")
+            if w2.shape[0] != b1.shape[0]:
+                raise ValueError(f"Hidden dim mismatch: w2={w2.shape} b1={b1.shape}")
+
+            _validate_declared_feature_dim(metadata, int(w1.shape[0]))
+            return MLPBCModel(w1=w1, b1=b1, w2=w2, b2=b2, metadata=metadata)
+
         if "w" not in data or "b" not in data:
-            raise ValueError(f"File modello invalido: chiavi attese w/b, trovate: {list(data.keys())}")
+            raise ValueError(f"File modello invalido: chiavi attese w/b, trovate: {sorted(keys)}")
 
         w = np.asarray(data["w"], dtype=np.float32)
         b = np.asarray(data["b"], dtype=np.float32)
@@ -75,25 +183,8 @@ def load_bc_model_npz(path: Path) -> BCModel:
         if w.shape[1] != 40 or b.shape[0] != 40:
             raise ValueError(f"Action dim invalida: w={w.shape} b={b.shape} (atteso (*,40) e (40,))")
 
-        metadata: dict[str, Any] = {}
-        if "metadata_json" in data:
-            raw = data["metadata_json"]
-            # `np.savez` salva le stringhe come array 0-d: usiamo `.item()` per ottenere la str.
-            try:
-                text = str(raw.item())
-            except Exception:
-                text = str(raw)
-            try:
-                metadata = json.loads(text) if text else {}
-            except json.JSONDecodeError:
-                metadata = {"raw_metadata_json": text}
-
-        # Sanity: se metadata dichiara una dimensione, facciamo un check esplicito.
-        declared_dim = metadata.get("feature_dim")
-        if isinstance(declared_dim, int) and declared_dim != int(w.shape[0]):
-            raise ValueError(f"Feature dim mismatch: metadata={declared_dim} w.shape[0]={w.shape[0]}")
-
-        return BCModel(w=w, b=b, metadata=metadata)
+        _validate_declared_feature_dim(metadata, int(w.shape[0]))
+        return LinearBCModel(w=w, b=b, metadata=metadata)
 
 
 @dataclass(frozen=True, slots=True)
@@ -103,13 +194,13 @@ class BCModelAgent:
 
     Implementazione:
     1) `PlayerObservation` -> `EncodedObservation` (feature + action_mask)
-    2) logits = xW + b
+    2) logits = model(x)  (lineare o MLP, stesso output 40)
     3) mask: azioni non valide -> logit molto negativo
     4) argmax -> action_id (0..39)
     5) action_id -> indice nella mano corrente (card_index)
     """
 
-    model: BCModel
+    model: LoadedBCModel
     model_path: Path
 
     @property
@@ -136,7 +227,7 @@ class BCModelAgent:
             )
 
         x = np.asarray(encoded.features, dtype=np.float32)
-        logits = x @ self.model.w + self.model.b  # (40,)
+        logits = self.model.logits(x)  # (40,)
 
         mask = np.asarray(encoded.action_mask, dtype=bool)
         if mask.shape != (40,):

@@ -378,6 +378,8 @@ Workflow minimo:
    - `python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl --all-players --include-ai`
 3. Allena il primo modello (baseline lineare):
    - `python scripts/train_bc.py --data ./data/dataset.jsonl --out ./data/bc_model.npz --epochs 10 --lr 0.5`
+   - Variante più espressiva (MLP 1-hidden-layer):
+     - `python scripts/train_bc.py --model mlp --hidden-dim 128 --data ./data/dataset.jsonl --out ./data/bc_model_mlp.npz --epochs 20 --lr 0.001`
 4. Valuta il modello vs una baseline (seed suite riproducibile):
    - `python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small --agent0 bc_model --agent0-model ./data/bc_model.npz --agent1 heuristic_v1`
 
