@@ -362,6 +362,23 @@ Opzioni utili:
 Nota: lo schema export v1 è pensato soprattutto per il 2-player. In 4-player (a squadre) la nozione di reward
 e l'interpretazione del “vincitore della mano” vanno adattate a livello di team (vedi `PLAN.md`).
 
+## Primo modello (Behavior Cloning)
+
+Scopo didattico: partire con un modello supervisionato semplice che imita un “teacher”
+(es. `heuristic_v1`) invece di partire subito con RL.
+
+Scelta chiave: spazio azioni fisso “**40 carte + action mask**”.
+- Il modello predice una carta tra 40 classi (ogni carta del mazzo).
+- Una **mask** abilita solo le carte realmente in mano (evita azioni impossibili).
+
+Workflow minimo:
+1. Genera un DB con self-play (es. teacher vs random):
+   - `python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 200 --seed 42 --num-players 2 --agents heuristic_v1,random`
+2. Esporta un JSONL di esempi:
+   - `python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl --all-players --include-ai`
+3. Allena il primo modello (baseline lineare):
+   - `python scripts/train_bc.py --data ./data/dataset.jsonl --out ./data/bc_model.npz --epochs 10 --lr 0.5`
+
 ## Come giocare
 
 1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”

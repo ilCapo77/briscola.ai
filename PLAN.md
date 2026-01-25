@@ -233,6 +233,12 @@ Percorso consigliato:
    - wrapper stile Gymnasium
    - reward shaping minimo e valutazione robusta
 
+Scelte e stato (Fase 5A):
+- [x] definito spazio azioni per BC: **40 carte + action mask** (non "indice nella mano")
+- [ ] definire encoder observation → feature (v1) e salvarne versione
+- [ ] primo modello BC (baseline lineare) + loop di training riproducibile
+- [ ] integrazione del modello come agente (valutazione con `scripts/evaluate_agents.py`)
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.
