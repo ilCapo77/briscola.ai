@@ -10,6 +10,7 @@ Questo test è volutamente piccolo (1 partita) per restare veloce.
 
 from __future__ import annotations
 
+import json
 import sqlite3
 import subprocess
 import sys
@@ -60,3 +61,19 @@ def test_self_play_writes_games_metadata(tmp_path: Path) -> None:
     assert isinstance(seed, int)
     assert isinstance(code_version, str)
     assert rules_version == get_rules_version()
+
+    # Verifichiamo anche che l'evento `game_created` includa metadati sugli agenti usati.
+    conn = sqlite3.connect(db_path)
+    try:
+        row = conn.execute(
+            "SELECT payload_json FROM events WHERE event_type = 'game_created' ORDER BY id LIMIT 1;"
+        ).fetchone()
+    finally:
+        conn.close()
+
+    assert row is not None
+    payload = json.loads(row[0])
+    assert payload["num_players"] == 2
+    assert payload["agents"] == {"0": "random", "1": "random"}
+    assert isinstance(payload.get("agents_common_note_it"), str)
+    assert payload["agents_common_note_it"]

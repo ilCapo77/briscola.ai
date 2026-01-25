@@ -275,6 +275,15 @@ Per generare molte partite velocemente (senza server/UI) e salvarle nel DB:
 python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 100 --seed 42 --num-players 2
 ```
 
+Puoi scegliere gli agenti per ciascun player con `--agents` (CSV, uno per player):
+
+```
+# 2-player: heuristic vs random
+python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 100 --seed 42 --num-players 2 --agents heuristic_v1,random
+```
+
+Nota: se `--agents` è omesso, usa `random` per tutti i player.
+
 ## Valutazione agenti (dominio-only)
 
 Per confrontare agenti in modo riproducibile (senza UI/server):

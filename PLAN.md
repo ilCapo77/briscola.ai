@@ -206,12 +206,13 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
   - generazione di partite in batch con seed
   - scrittura su SQLite + export dataset + metriche
   - Stato attuale:
-    - [x] self-play random → SQLite (script `scripts/self_play_to_db.py`)
+    - [x] self-play → SQLite con agenti configurabili (script `scripts/self_play_to_db.py`)
 - Introdurre una baseline di valutazione:
   - win-rate su set di seed
   - ELO/TrueSkill (opzionale)
   - Stato attuale:
     - [x] valutazione offline dominio-only (script `scripts/evaluate_agents.py`)
+    - [x] lista agenti centralizzata (metadati+factory in `briscola_ai.ai.agents`, riusati da UI/CLI/script)
     - [x] baseline euristica semplice (es. `heuristic_v1`) per confronto vs random
     - [x] taglie benchmark: `small=2000`, `medium=10000`, `big=100000` (tutte seat-fair)
     - [x] supporto a “suite seed” per regressioni ripetibili (seed da file via `--seed-suite-file`)

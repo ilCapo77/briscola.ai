@@ -15,6 +15,11 @@ Questo script:
 Nota:
 - Le azioni generate qui sono “IA” per definizione (self-play).
   Se vuoi dataset “umano”, usa il backend e colleziona partite reali.
+
+Anti-cheat (importante)
+-----------------------
+Le policy degli agenti sono calcolate *solo* a partire da una `PlayerObservation` (vista parziale lecita),
+non dal `GameState` completo. Questo evita leak informativi accidentali (es. ordine del mazzo, mano avversaria).
 """
 
 from __future__ import annotations
@@ -26,10 +31,12 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
+from briscola_ai.ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
 from briscola_ai.backend.dto import CardDTO, PlayActionResultDTO, TableCardDTO, TrickResultDTO
 from briscola_ai.backend.event_log import EventLog, EventLogConfig
 from briscola_ai.backend.observation_builder import build_observation_dto
 from briscola_ai.domain.engine import PlayCardAction, StepResult, step
+from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
 from briscola_ai.versioning import get_code_version, get_rules_version
 
@@ -42,6 +49,7 @@ class SelfPlayConfig:
     num_games: int
     seed: int
     num_players: int
+    agent_names: tuple[str, ...]
 
 
 def _build_play_action_result(step_result: StepResult, *, server_version: int) -> PlayActionResultDTO:
@@ -102,7 +110,10 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
 
     Ritorna contatori per debug/monitoring.
     """
-    rng = random.Random(config.seed)
+    rng_game = random.Random(config.seed)
+    rng_action_master = random.Random(config.seed ^ 0x9E3779B9)
+
+    agents: tuple[Agent, ...] = tuple(build_agent(name) for name in config.agent_names)
 
     event_log = EventLog(EventLogConfig(path=str(config.db_path)))
     code_version = get_code_version()
@@ -118,7 +129,9 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
 
     try:
         for _ in range(config.num_games):
-            game_seed = rng.randrange(0, 2**32)
+            game_seed = rng_game.randrange(0, 2**32)
+            action_seed = rng_action_master.randrange(0, 2**32)
+            rng_action = random.Random(action_seed)
             state = new_game_state(num_players=config.num_players, seed=game_seed)
 
             game_id = str(uuid.uuid4())
@@ -137,11 +150,14 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
                 "game_created",
                 {
                     "seed": game_seed,
+                    "action_seed": action_seed,
                     "code_version": code_version,
                     "rules_version": rules_version,
                     "num_players": state.num_players,
                     "player_names": [p.name for p in state.players],
                     "is_team_game": state.is_team_game,
+                    "agents": {str(i): agents[i].name for i in range(state.num_players)},
+                    "agents_common_note_it": AI_AGENTS_COMMON_NOTE_IT,
                 },
                 server_version=server_version,
             )
@@ -159,7 +175,15 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
                     counters["errors"] += 1
                     break
 
-                card_index = rng.randrange(hand_size)
+                # Policy dell'agente: decisione basata su osservazione lecita (anti-cheat).
+                observation = make_player_observation(state, current)
+                card_index = agents[current].choose_card_index(observation, rng=rng_action)
+
+                # Guard rail: qualunque carta in mano è valida, quindi l'indice deve essere in range.
+                if card_index < 0 or card_index >= hand_size:
+                    counters["errors"] += 1
+                    break
+
                 new_state, step_result = step(state, PlayCardAction(player_index=current, card_index=card_index))
                 if step_result.error:
                     counters["errors"] += 1
@@ -220,13 +244,38 @@ def main() -> int:
     parser.add_argument("--num-games", type=int, default=10, help="Numero di partite da simulare")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
     parser.add_argument("--num-players", type=int, default=2, choices=[2, 4], help="Numero giocatori (2 o 4)")
+    parser.add_argument(
+        "--agents",
+        default="",
+        help=(
+            "Agenti per player (CSV). Esempi:\n"
+            "- 2-player: --agents heuristic_v1,random\n"
+            "- 4-player: --agents random,random,random,random\n"
+            "Se vuoto, usa `random` per tutti."
+        ),
+    )
     args = parser.parse_args()
+
+    available = {spec.name for spec in list_agent_specs()}
+    if args.agents.strip():
+        names = tuple(n.strip() for n in args.agents.split(",") if n.strip())
+    else:
+        names = tuple("random" for _ in range(args.num_players))
+
+    if len(names) != args.num_players:
+        raise SystemExit(
+            f"Errore: `--agents` deve contenere esattamente {args.num_players} nomi (uno per player). Ottenuti: {names}"
+        )
+    unknown = [n for n in names if n not in available]
+    if unknown:
+        raise SystemExit(f"Errore: agenti non supportati: {unknown}. Disponibili: {sorted(available)}")
 
     cfg = SelfPlayConfig(
         db_path=Path(args.db),
         num_games=args.num_games,
         seed=args.seed,
         num_players=args.num_players,
+        agent_names=names,
     )
 
     start = time.time()
@@ -234,6 +283,7 @@ def main() -> int:
     elapsed = time.time() - start
 
     print(f"Self-play completato in {elapsed:.2f}s.")
+    print(f"- agents: {list(cfg.agent_names)}")
     for k, v in counters.items():
         print(f"- {k}: {v}")
     return 0 if counters["errors"] == 0 else 1

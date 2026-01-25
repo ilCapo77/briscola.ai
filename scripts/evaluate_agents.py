@@ -19,7 +19,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, RandomAgent
+from briscola_ai.ai.agents import build_agent, list_agent_specs
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 
 
@@ -78,22 +78,6 @@ def _make_range_seed_suite(*, start: int, step: int, count: int) -> list[int]:
     return [((start + i * step) & 0xFFFFFFFF) for i in range(count)]
 
 
-def _build_agent(name: str):
-    """
-    Costruisce un agente a partire da una stringa CLI.
-
-    Nota:
-    Manteniamo una mappa esplicita (no import dinamici) per semplicità e sicurezza.
-    """
-    if name == "random":
-        return RandomAgent()
-    if name == "greedy_points":
-        return GreedyPointsAgent()
-    if name == "heuristic_v1":
-        return HeuristicAgentV1()
-    raise ValueError(f"Agente non supportato: {name!r}")
-
-
 def main() -> int:
     """Entry point CLI."""
     parser = argparse.ArgumentParser(description="Valuta agenti Briscola (dominio-only)")
@@ -109,16 +93,17 @@ def main() -> int:
     )
     benchmark_group.add_argument("--num-games", type=int, default=1000, help="Numero partite da simulare")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
+    agent_names = [spec.name for spec in list_agent_specs()]
     parser.add_argument(
         "--agent0",
         default="random",
-        choices=["random", "greedy_points", "heuristic_v1"],
+        choices=agent_names,
         help="Agente per player 0",
     )
     parser.add_argument(
         "--agent1",
         default="random",
-        choices=["random", "greedy_points", "heuristic_v1"],
+        choices=agent_names,
         help="Agente per player 1",
     )
     parser.add_argument(
@@ -187,8 +172,8 @@ def main() -> int:
         else:
             raise ValueError(f"Benchmark non supportato: {args.benchmark!r}")
 
-    agent0 = _build_agent(args.agent0)
-    agent1 = _build_agent(args.agent1)
+    agent0 = build_agent(args.agent0)
+    agent1 = build_agent(args.agent1)
 
     if args.seed_suite_range_start is None and args.seed_suite_range_step != 1:
         raise ValueError("`--seed-suite-range-step` richiede anche `--seed-suite-range-start`.")
