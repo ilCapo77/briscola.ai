@@ -75,5 +75,3 @@ def test_self_play_writes_games_metadata(tmp_path: Path) -> None:
     payload = json.loads(row[0])
     assert payload["num_players"] == 2
     assert payload["agents"] == {"0": "random", "1": "random"}
-    assert isinstance(payload.get("agents_common_note_it"), str)
-    assert payload["agents_common_note_it"]

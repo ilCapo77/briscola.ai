@@ -20,6 +20,10 @@ Anti-cheat (importante)
 -----------------------
 Le policy degli agenti sono calcolate *solo* a partire da una `PlayerObservation` (vista parziale lecita),
 non dal `GameState` completo. Questo evita leak informativi accidentali (es. ordine del mazzo, mano avversaria).
+
+Nota metadati:
+questa garanzia è documentata nel `README.md` (e nel codice), ma non viene ripetuta nel DB per ogni partita:
+nel DB salviamo invece i metadati davvero “operativi” (es. quali agenti hanno giocato e i seed).
 """
 
 from __future__ import annotations
@@ -31,7 +35,7 @@ import uuid
 from dataclasses import dataclass
 from pathlib import Path
 
-from briscola_ai.ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
+from briscola_ai.ai.agents import Agent, build_agent, list_agent_specs
 from briscola_ai.backend.dto import CardDTO, PlayActionResultDTO, TableCardDTO, TrickResultDTO
 from briscola_ai.backend.event_log import EventLog, EventLogConfig
 from briscola_ai.backend.observation_builder import build_observation_dto
@@ -157,7 +161,6 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
                     "player_names": [p.name for p in state.players],
                     "is_team_game": state.is_team_game,
                     "agents": {str(i): agents[i].name for i in range(state.num_players)},
-                    "agents_common_note_it": AI_AGENTS_COMMON_NOTE_IT,
                 },
                 server_version=server_version,
             )
