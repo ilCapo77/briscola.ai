@@ -235,9 +235,9 @@ Percorso consigliato:
 
 Scelte e stato (Fase 5A):
 - [x] definito spazio azioni per BC: **40 carte + action mask** (non "indice nella mano")
-- [ ] definire encoder observation → feature (v1) e salvarne versione
-- [ ] primo modello BC (baseline lineare) + loop di training riproducibile
-- [ ] integrazione del modello come agente (valutazione con `scripts/evaluate_agents.py`)
+- [x] definito encoder observation → feature (v1) e salvata una versione (`src/briscola_ai/ai/training/observation_encoder.py`)
+- [x] primo modello BC (baseline lineare) + loop di training riproducibile (`scripts/train_bc.py`)
+- [x] integrazione del modello come agente (valutazione con `scripts/evaluate_agents.py`)
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

@@ -7,6 +7,8 @@ Esempi:
   python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
   python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small \\
     --agent0 heuristic_v1 --agent1 random
+  python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small \\
+    --agent0 bc_model --agent0-model ./data/bc_model.npz --agent1 heuristic_v1
   python scripts/evaluate_agents.py --seat-fair --num-games 100000 --seed-suite-range-start 0 \\
     --agent0 heuristic_v1 --agent1 random
   python scripts/evaluate_agents.py --benchmark medium --agent0 heuristic_v1 --agent1 random --out-json /tmp/medium.json
@@ -19,7 +21,8 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from briscola_ai.ai.agents import build_agent, list_agent_specs
+from briscola_ai.ai.agents import Agent, build_agent, list_agent_specs
+from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 
 
@@ -93,7 +96,7 @@ def main() -> int:
     )
     benchmark_group.add_argument("--num-games", type=int, default=1000, help="Numero partite da simulare")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
-    agent_names = [spec.name for spec in list_agent_specs()]
+    agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
     parser.add_argument(
         "--agent0",
         default="random",
@@ -105,6 +108,16 @@ def main() -> int:
         default="random",
         choices=agent_names,
         help="Agente per player 1",
+    )
+    parser.add_argument(
+        "--agent0-model",
+        default="",
+        help="Path al modello `.npz` se `--agent0 bc_model` (output di scripts/train_bc.py).",
+    )
+    parser.add_argument(
+        "--agent1-model",
+        default="",
+        help="Path al modello `.npz` se `--agent1 bc_model` (output di scripts/train_bc.py).",
     )
     parser.add_argument(
         "--seat-fair",
@@ -172,8 +185,17 @@ def main() -> int:
         else:
             raise ValueError(f"Benchmark non supportato: {args.benchmark!r}")
 
-    agent0 = build_agent(args.agent0)
-    agent1 = build_agent(args.agent1)
+    def _build(*, agent_name: str, model_path: str, agent_flag: str) -> Agent:
+        if agent_name == "bc_model":
+            if not model_path.strip():
+                raise ValueError(f"`--{agent_flag}-model` obbligatorio quando `--{agent_flag} bc_model`.")
+            return BCModelAgent.from_npz(model_path.strip())
+        if model_path.strip():
+            raise ValueError(f"`--{agent_flag}-model` è valido solo quando `--{agent_flag} bc_model`.")
+        return build_agent(agent_name)
+
+    agent0 = _build(agent_name=args.agent0, model_path=args.agent0_model, agent_flag="agent0")
+    agent1 = _build(agent_name=args.agent1, model_path=args.agent1_model, agent_flag="agent1")
 
     if args.seed_suite_range_start is None and args.seed_suite_range_step != 1:
         raise ValueError("`--seed-suite-range-step` richiede anche `--seed-suite-range-start`.")

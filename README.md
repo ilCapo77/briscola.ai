@@ -378,6 +378,12 @@ Workflow minimo:
    - `python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl --all-players --include-ai`
 3. Allena il primo modello (baseline lineare):
    - `python scripts/train_bc.py --data ./data/dataset.jsonl --out ./data/bc_model.npz --epochs 10 --lr 0.5`
+4. Valuta il modello vs una baseline (seed suite riproducibile):
+   - `python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small --agent0 bc_model --agent0-model ./data/bc_model.npz --agent1 heuristic_v1`
+
+Nota:
+- `bc_model.npz` è un artefatto locale (non va versionato nel repo).
+- Puoi usare due modelli diversi con `--agent0-model` e `--agent1-model`.
 
 ## Come giocare
 

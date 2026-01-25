@@ -19,6 +19,8 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ...domain.models import Card
+from ...domain.observation import PlayerObservation
 from .card_action_space import build_card_features, card_dto_to_action_id
 
 
@@ -144,3 +146,50 @@ def encode_observation_2p(observation: dict) -> EncodedObservation:
     )
 
     return EncodedObservation(features=features, action_mask=mask)
+
+
+def encode_player_observation_2p(observation: PlayerObservation) -> EncodedObservation:
+    """
+    Encoda una `PlayerObservation` (dominio) in feature+mask (2-player).
+
+    Per coerenza con il training BC, convertiamo la `PlayerObservation` in un dict
+    compatibile con `ObservationDTO` e poi riusiamo `encode_observation_2p`.
+
+    Nota:
+    - `PlayerObservation` non contiene informazione nascosta (anti-cheat).
+    - Usiamo solo i campi necessari all'encoder (mano, tavolo, briscola, punti, deck_size).
+    """
+    if observation.num_players != 2:
+        raise ValueError("Questo encoder è pensato per 2-player (num_players=2).")
+
+    def _card_to_dto_dict(card: Card) -> dict[str, object]:
+        return {
+            "suit": card.suit.value,
+            "rank": card.rank.name,
+            "number": card.rank.number,
+            "points": card.rank.points,
+        }
+
+    players = []
+    for i in range(observation.num_players):
+        players.append(
+            {
+                "index": i,
+                "name": "player",
+                "points": observation.players_points[i],
+                "hand_size": observation.players_hand_sizes[i],
+            }
+        )
+
+    dto_like = {
+        "num_players": observation.num_players,
+        "my_index": observation.player_index,
+        "my_hand": [_card_to_dto_dict(c) for c in observation.hand],
+        "my_points": observation.players_points[observation.player_index],
+        "my_turn": (observation.current_turn == observation.player_index) and (not observation.game_over),
+        "trump_suit": observation.trump_card.suit.value if observation.trump_card else None,
+        "table_cards": [{"card": _card_to_dto_dict(c), "player_index": idx} for c, idx in observation.table_cards],
+        "cards_remaining_in_deck": observation.deck_size,
+        "players": players,
+    }
+    return encode_observation_2p(dto_like)
