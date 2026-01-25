@@ -239,6 +239,7 @@ Scelte e stato (Fase 5A):
 - [x] primo modello BC (baseline lineare) + loop di training riproducibile (`scripts/train_bc.py`)
 - [x] integrazione del modello come agente (valutazione con `scripts/evaluate_agents.py`)
 - [x] variante BC più espressiva: MLP minimale (1 hidden layer + ReLU) con training in NumPy (`scripts/train_bc.py --model mlp`)
+- [x] training RL per superare baseline: policy gradient (REINFORCE) con warm-start da BC (`scripts/train_pg.py`)
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

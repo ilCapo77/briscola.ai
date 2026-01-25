@@ -148,7 +148,7 @@ def load_bc_model_npz(path: Path) -> LoadedBCModel:
             fmt = ""
 
         # Preferiamo esplicitamente il formato dichiarato nel metadata, ma supportiamo anche inferenza.
-        is_mlp = fmt == "mlp_bc_v1" or {"w1", "b1", "w2", "b2"}.issubset(keys)
+        is_mlp = fmt in {"mlp_bc_v1", "mlp_pg_v1"} or {"w1", "b1", "w2", "b2"}.issubset(keys)
         if is_mlp:
             missing = {"w1", "b1", "w2", "b2"} - keys
             if missing:

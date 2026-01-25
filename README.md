@@ -387,6 +387,19 @@ Nota:
 - `bc_model.npz` è un artefatto locale (non va versionato nel repo).
 - Puoi usare due modelli diversi con `--agent0-model` e `--agent1-model`.
 
+## Superare `heuristic_v1` (RL: Policy Gradient)
+
+Il Behavior Cloning (BC) tende a *eguagliare* il teacher, non a superarlo.
+Per superare `heuristic_v1` puoi fare fine-tuning con Reinforcement Learning ottimizzando direttamente il return finale.
+
+Workflow consigliato (warm-start da BC MLP teacher-only):
+1. Allena BC MLP su dataset teacher-only (vedi sopra) → `./data/bc_model_teacher_mlp.npz`
+2. Fine-tuning RL contro `heuristic_v1`:
+   - `python scripts/train_pg.py --init ./data/bc_model_teacher_mlp.npz --out ./data/rl_vs_heuristic_v1.npz --opponent heuristic_v1 --num-games 20000 --seat-fair --seed 0`
+   - se stampa troppo, aggiungi `--log-every 50`
+3. Valuta:
+   - `python scripts/evaluate_agents.py --benchmark small --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1`
+
 ## Come giocare
 
 1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”
