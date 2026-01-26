@@ -43,6 +43,15 @@ Comandi tipici:
 - Avvia server: `briscola-server --reload`
 - Apri UI: `http://localhost:8000`
 
+## Come giocare
+
+1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”
+   - La UI mostra una breve descrizione dell’IA selezionata (dai metadati del backend).
+2. Clicca su una carta in mano per giocarla
+3. L'IA risponderà automaticamente al suo turno
+
+Nota: la UI attuale avvia una partita **2-player**. Per testare flussi 4-player (senza UI) usa gli script headless o le API.
+
 ## Approccio step-by-step (didattico)
 
 L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
@@ -76,7 +85,40 @@ L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
   - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio-only)
 - `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
 
-## Architettura comunicazione Backend ↔ Frontend
+## Contesti del progetto (Domain / Backend / Frontend / AI)
+
+### Domain (motore di gioco)
+
+Il dominio è la “fonte di verità” del gioco: regole, stato e transizioni.
+
+- Dove: `src/briscola_ai/domain/`
+- Cosa contiene: `GameState`, `step(state, action)`, regole isolate (`rules.py`), modelli canonici (`Card`, `Suit`, `Rank`)
+- Obiettivo: essere deterministico, testabile e riusabile senza FastAPI/UI
+
+### Backend (FastAPI + WebSocket)
+
+Il backend è un adattatore: espone il dominio via HTTP/WS e gestisce le partite in memoria.
+
+- Dove: `src/briscola_ai/backend/`
+- Cosa contiene: DTO Pydantic v2 (`dto.py`), server FastAPI (`server.py`), endpoint REST + WebSocket
+- Pattern: server‑driven per l’IA (il backend fa avanzare la partita quando tocca all’IA)
+
+### Frontend (UI web)
+
+La UI è un client “thin”: presenta gli snapshot e gestisce animazioni/hold; non implementa regole.
+
+- Dove: `src/briscola_ai/frontend/static/`
+- Note: la UI attuale è pensata soprattutto per il **2-player**
+
+### AI & ML (policy, dataset, training)
+
+Qui vivono agenti baseline e pipeline ML (self-play, export dataset, training, valutazioni).
+
+- Dove: `src/briscola_ai/ai/` e `scripts/`
+- Anti-cheat: gli agenti vedono solo `PlayerObservation` (osservazione parziale lecita)
+- Artefatti: DB/dataset/modelli in `data/` sono output locali (non versionati)
+
+## Backend (FastAPI + WebSocket)
 
 Il sistema usa un'architettura ibrida HTTP + WebSocket:
 
@@ -175,54 +217,7 @@ Il backend avanza automaticamente la partita quando è il turno dell'IA (pattern
 
 Questa scelta mantiene separata la **logica di presentazione** (frontend) dalla **logica di gioco** (backend), evitando al contempo che la UI debba “pilotare” il dominio con chiamate dedicate.
 
-## Cosa è stato fatto (stato attuale)
-
-- Dominio canonico isolato in `domain/` (motore `GameState + step()`), con regole testate.
-- Backend FastAPI + DTO Pydantic v2 (contratto più esplicito e testabile).
-- Contratto WS stabilizzato: snapshot `type: "observation"` + eventi (`ai_card_reveal`, `trick_result`, `pong`) e `server_version` monotona.
-- UI resa più robusta: gestione reconnect/backoff, modalità polling `?polling=1`, sequenza mano più leggibile.
-- Asset carte e proporzioni: UI mantiene aspect ratio immagini (177x285), retro carta `card_back.png`, placeholder stabili per briscola/mazzo a fine mazzo (niente “salti” layout).
-- Test: unit (dominio) + integrazione (API/WS); coverage attuale **84%** su `briscola_ai`.
-
-Dettaglio completo e roadmap: vedi `PLAN.md`.
-
-## Cosa rimane da fare (prossimi step consigliati)
-
-La prossima fase “vera” è trasformare il progetto in un ambiente addestrabile (data pipeline + baseline):
-
-- **Persistenza “da laboratorio” (SQLite)**: event log append‑only di partite/azioni/osservazioni (riproducibilità e debug).
-- **Export dataset** (SQLite → JSONL/Parquet) con schema versionato.
-- **Self‑play batch** (random + euristica semplice) per generare dati e metriche.
-- **Valutazione**: win‑rate su seed fissi; opzionale ELO/TrueSkill.
-
-Non urgenti / futuri:
-- lint/format JS (decisione di toolchain) e, se utile, un E2E leggero (Playwright).
-- estendere la parte ML al 4-player (team‑play, osservazioni parziali, reward).
-
-## Sviluppo (test, lint, typecheck)
-
-Con il virtual environment attivo e le dipendenze dev installate (`uv pip install -e ".[dev]"`):
-
-- Test: `pytest`
-- Coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
-- Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README (Shields.io).
-- Lint: `ruff check src tests scripts`
-- Format: `ruff format src tests scripts`
-
-### Event log (SQLite “da laboratorio”)
-
-Quando avvii il server con lo script `briscola-server`, per default viene scritto un event log su:
-- `./data/briscola_events.sqlite3`
-  - Nota: `data/` e i file `*.sqlite3*` sono ignorati da git (sono output runtime, non sorgenti).
-
-Per cambiare percorso (o disabilitare) puoi usare:
-- CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
-- Env: `BRISCOLA_EVENT_DB_PATH=./data/mio_log.sqlite3 briscola-server`
-
-Metadati salvati per partita:
-- `seed`
-- `code_version` (override possibile con `BRISCOLA_CODE_VERSION`)
-- `rules_version` (versione semantica del dominio)
+## Frontend (UI web)
 
 ### Smoke test UI (manuale)
 
@@ -243,7 +238,6 @@ Expected:
 - Nessun errore in console (ok log informativi; no eccezioni uncaught)
 - Nessun “freeze”: la UI resta interattiva e le carte non scompaiono in modo incoerente
 - Nessuna duplicazione sul tavolo (es. due carte attribuite allo stesso player nella stessa mano)
-- Typecheck: `mypy src`
 
 ### Debug UI (quando qualcosa “si blocca”)
 
@@ -259,15 +253,43 @@ Se noti comportamenti strani (carte che spariscono, sequenza eventi incoerente, 
   - apri la UI con `?polling=1` (es. `http://localhost:8000/?polling=1`)
   - utile per capire se un bug dipende dal WS/reconnect o dalla logica UI.
 
-## Simulazioni (headless)
+## Sviluppo (test, lint, typecheck)
 
-Per simulare N partite senza UI (utile per debug e, in futuro, generazione dataset):
+Con il virtual environment attivo e le dipendenze dev installate (`uv pip install -e ".[dev]"`):
+
+- Test: `pytest`
+- Coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
+- Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README (Shields.io).
+- Lint: `ruff check src tests scripts`
+- Format: `ruff format src tests scripts`
+- Typecheck: `mypy src`
+
+## AI & ML (pipeline)
+
+### Event log (SQLite “da laboratorio”)
+
+Quando avvii il server con lo script `briscola-server`, per default viene scritto un event log su:
+- `./data/briscola_events.sqlite3`
+  - Nota: `data/` e i file `*.sqlite3*` sono ignorati da git (sono output runtime, non sorgenti).
+
+Per cambiare percorso (o disabilitare) puoi usare:
+- CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
+- Env: `BRISCOLA_EVENT_DB_PATH=./data/mio_log.sqlite3 briscola-server`
+
+Metadati salvati per partita:
+- `seed`
+- `code_version` (override possibile con `BRISCOLA_CODE_VERSION`)
+- `rules_version` (versione semantica del dominio)
+
+### Simulazioni (headless)
+
+Per simulare N partite senza UI (utile per debug e generazione dataset):
 
 ```
 python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
 ```
 
-## Self-play (dominio → SQLite)
+### Self-play (dominio → SQLite)
 
 Per generare molte partite velocemente (senza server/UI) e salvarle nel DB:
 
@@ -284,7 +306,7 @@ python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-game
 
 Nota: se `--agents` è omesso, usa `random` per tutti i player.
 
-## Valutazione agenti (dominio-only)
+### Valutazione agenti (dominio-only)
 
 Per confrontare agenti in modo riproducibile (senza UI/server):
 
@@ -299,7 +321,7 @@ Agenti disponibili (baseline):
 - `greedy_points`: gioca la carta con più punti in mano (euristica minimale e spiegabile).
 - `heuristic_v1`: euristica 2-player che prova a prendere “a basso costo” quando conviene e scarta in modo economico quando non conviene.
 
-### Anti-cheat: osservazione parziale (information set)
+#### Anti-cheat: osservazione parziale (information set)
 
 Perché serve:
 - nel dominio `GameState` contiene informazione **completa** (es. ordine del mazzo e mani di tutti);
@@ -321,7 +343,7 @@ Riferimenti utili:
 
 Nota importante (bias “chi inizia”):
 - nel dominio attuale il player 0 inizia sempre la partita;
-- per confronti più corretti (e per le valutazioni future) **usa sempre** la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
+- per confronti più corretti **usa** la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
 
 ```
 python scripts/evaluate_agents.py --seat-fair --num-games 10000 --seed 42 --agent0 random --agent1 random
@@ -341,7 +363,7 @@ Taglie consigliate (benchmark):
 - `medium=10000` (numero “standard” per confronti)
 - `big=100000` (misura stabile, più lenta)
 
-## Export dataset (JSONL)
+### Export dataset (JSONL)
 
 Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:
 
@@ -362,7 +384,7 @@ Opzioni utili:
 Nota: lo schema export v1 è pensato soprattutto per il 2-player. In 4-player (a squadre) la nozione di reward
 e l'interpretazione del “vincitore della mano” vanno adattate a livello di team (vedi `PLAN.md`).
 
-## Primo modello (Behavior Cloning)
+### Primo modello (Behavior Cloning)
 
 Scopo didattico: partire con un modello supervisionato semplice che imita un “teacher”
 (es. `heuristic_v1`) invece di partire subito con RL.
@@ -387,7 +409,7 @@ Nota:
 - `bc_model.npz` è un artefatto locale (non va versionato nel repo).
 - Puoi usare due modelli diversi con `--agent0-model` e `--agent1-model`.
 
-## Superare `heuristic_v1` (RL: Policy Gradient)
+### Superare `heuristic_v1` (RL: Policy Gradient)
 
 Il Behavior Cloning (BC) tende a *eguagliare* il teacher, non a superarlo.
 Per superare `heuristic_v1` puoi fare fine-tuning con Reinforcement Learning ottimizzando direttamente il return finale.
@@ -410,14 +432,15 @@ Nota:
 - `scripts/train_pg.py` salva un `.npz` con `w1/b1/w2/b2` (MLP). L’agente `bc_model` lo supporta, come per i modelli BC MLP.
 - I file in `data/` (DB SQLite, dataset JSONL, modelli `.npz`) sono artefatti locali: non vanno versionati nel repo.
 
-## Come giocare
+## Stato e prossimi step
 
-1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”
-   - La UI mostra una breve descrizione dell’IA selezionata (dai metadati del backend).
-2. Clicca su una carta in mano per giocarla
-3. L'IA risponderà automaticamente al suo turno
+Dettaglio completo e roadmap: vedi `PLAN.md`.
 
-Nota: la UI attuale avvia una partita **2-player**. Per testare flussi 4-player (senza UI) usa gli script headless o le API.
+Direzioni consigliate (ML):
+- Actor‑Critic (A2C minimale) per ridurre varianza rispetto a REINFORCE puro.
+- Opponent mix per robustezza (evitare overfitting su un singolo avversario).
+- Reward shaping leggero (delta punti per mano) mantenendo osservazioni anti‑cheat.
+- Dati umani (opzionale): raccolta con consenso UI + export “human-only”.
 
 ## Sviluppi futuri
 
