@@ -241,6 +241,21 @@ Scelte e stato (Fase 5A):
 - [x] variante BC più espressiva: MLP minimale (1 hidden layer + ReLU) con training in NumPy (`scripts/train_bc.py --model mlp`)
 - [x] training RL per superare baseline: policy gradient (REINFORCE) con warm-start da BC (`scripts/train_pg.py`)
 
+Risultati recenti (esempio, artefatti locali in `data/` e JSON in `benchmarks/`):
+- BC MLP teacher-only: quasi pari con `heuristic_v1` su `big` (diff punti ≈ -0.6).
+  - modello: `data/bc_model_teacher_mlp.npz`
+  - benchmark: `benchmarks/bc_teacher_mlp_vs_heuristic_v1_big.json`
+- RL (policy gradient) warm-start da BC MLP: supera `heuristic_v1` in modo robusto anche su holdout seed.
+  - modello: `data/rl_vs_heuristic_v1_200k.npz` (200k game di training vs `heuristic_v1`)
+  - benchmark big: `benchmarks/rl_vs_heuristic_v1_200k_big.json` (diff punti ≈ +5.5)
+  - benchmark big holdout: `benchmarks/rl_vs_heuristic_v1_200k_big_holdout_1M.json` (diff punti ≈ +5.3)
+
+Prossime direzioni consigliate (Fase 5B, miglioramenti “algoritmo/setting”):
+- [ ] Actor-Critic (A2C minimale): aggiungere una value head `V(s)` per ridurre la varianza rispetto a REINFORCE puro.
+- [ ] Opponent mix: allenare contro un mix di avversari (baseline + snapshot della policy) per robustezza e anti-overfitting.
+- [ ] Reward shaping leggero: usare reward denso (delta punti per mano) oltre al return finale, mantenendo l’osservazione anti-cheat.
+- [ ] Dati umani (opzionale): pipeline di raccolta con consenso UI + tag nel DB + export “human-only” per pretraining/finetune.
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

@@ -400,6 +400,16 @@ Workflow consigliato (warm-start da BC MLP teacher-only):
 3. Valuta:
    - `python scripts/evaluate_agents.py --benchmark small --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1`
 
+Validazione robusta (consigliata):
+- benchmark “big” (più stabile, più lento):
+  - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1 --out-json benchmarks/rl_vs_heuristic_v1_big.json`
+- holdout di seed (evita “overfitting” su una sola suite):
+  - `python scripts/evaluate_agents.py --benchmark big --seed-suite-range-start 1000000 --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1 --out-json benchmarks/rl_vs_heuristic_v1_big_holdout_1M.json`
+
+Nota:
+- `scripts/train_pg.py` salva un `.npz` con `w1/b1/w2/b2` (MLP). L’agente `bc_model` lo supporta, come per i modelli BC MLP.
+- I file in `data/` (DB SQLite, dataset JSONL, modelli `.npz`) sono artefatti locali: non vanno versionati nel repo.
+
 ## Come giocare
 
 1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”
