@@ -419,6 +419,8 @@ Workflow consigliato (warm-start da BC MLP teacher-only):
 2. Fine-tuning RL contro `heuristic_v1`:
    - `python scripts/train_pg.py --init ./data/bc_model_teacher_mlp.npz --out ./data/rl_vs_heuristic_v1.npz --opponent heuristic_v1 --num-games 20000 --seat-fair --seed 0`
    - se stampa troppo, aggiungi `--log-every 50`
+   - per robustezza (consigliato): usa un opponent mix
+     - `python scripts/train_pg.py --init ./data/bc_model_teacher_mlp.npz --out ./data/rl_mix.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 20000 --seat-fair --seed 0`
 3. Valuta:
    - `python scripts/evaluate_agents.py --benchmark small --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1`
 

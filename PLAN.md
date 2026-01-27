@@ -252,7 +252,7 @@ Risultati recenti (esempio, artefatti locali in `data/` e JSON in `benchmarks/`)
 
 Prossime direzioni consigliate (Fase 5B, miglioramenti “algoritmo/setting”):
 - [ ] Actor-Critic (A2C minimale): aggiungere una value head `V(s)` per ridurre la varianza rispetto a REINFORCE puro.
-- [ ] Opponent mix: allenare contro un mix di avversari (baseline + snapshot della policy) per robustezza e anti-overfitting.
+- [x] Opponent mix: allenare contro un mix di avversari (baseline + snapshot della policy) per robustezza e anti-overfitting.
 - [ ] Reward shaping leggero: usare reward denso (delta punti per mano) oltre al return finale, mantenendo l’osservazione anti-cheat.
 - [ ] Dati umani (opzionale): pipeline di raccolta con consenso UI + tag nel DB + export “human-only” per pretraining/finetune.
 

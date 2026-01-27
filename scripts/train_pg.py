@@ -50,6 +50,7 @@ from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.training.observation_encoder import encode_player_observation_2p
+from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
@@ -157,6 +158,23 @@ class MLPPolicy:
         return PolicyStep(x=x, z1=z1, h=h, probs=probs, action_id=action_id)
 
 
+@dataclass(frozen=True, slots=True)
+class OpponentPool:
+    """Pool di avversari campionabili (opponent mix)."""
+
+    items: list[OpponentMixItem]
+    agents_by_name: dict[str, Agent]
+
+    def sample(self, *, rng: np.random.Generator) -> Agent:
+        """Campiona un avversario secondo la distribuzione."""
+        name = sample_opponent_name(self.items, rng=rng)
+        return self.agents_by_name[name]
+
+    def to_metadata(self) -> list[dict[str, float | str]]:
+        """Rappresentazione serializzabile (ordine stabile) per `metadata_json`."""
+        return [{"name": item.name, "prob": float(item.prob)} for item in self.items]
+
+
 def _action_id_to_card_index(*, action_id: int, hand) -> int:
     """Converte action_id (carta canonica) in indice nella mano corrente."""
     for i, card in enumerate(hand):
@@ -244,6 +262,15 @@ def main() -> int:
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC).")
     parser.add_argument("--opponent", default="heuristic_v1", help="Nome avversario (es. heuristic_v1, random).")
+    parser.add_argument(
+        "--opponent-mix",
+        default="",
+        help=(
+            "Miscela avversari (robustezza): `name:weight,name:weight,...` "
+            "(es. `heuristic_v1:0.7,random:0.2,greedy_points:0.1`). "
+            "Se presente, sovrascrive `--opponent`."
+        ),
+    )
     parser.add_argument("--num-games", type=int, default=20000, help="Numero partite di training (2-player).")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità).")
     parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dim (se non si usa --init).")
@@ -263,8 +290,18 @@ def main() -> int:
     out_path = Path(args.out)
     rng = np.random.default_rng(args.seed)
     rng_game = np.random.default_rng(args.seed ^ 0x9E3779B9)
+    rng_opponent_select = np.random.default_rng(args.seed ^ 0xA5A5A5A5)
 
-    opponent = build_agent(args.opponent)
+    opponent_pool: OpponentPool | None = None
+    opponent_mix_raw = args.opponent_mix.strip()
+    if opponent_mix_raw:
+        items = parse_opponent_mix(opponent_mix_raw)
+        agents_by_name = {item.name: build_agent(item.name) for item in items}
+        opponent_pool = OpponentPool(items=items, agents_by_name=agents_by_name)
+        # Per compatibilità, lasciamo comunque valorizzato `opponent` (ma non lo usiamo).
+        opponent = build_agent(items[0].name)
+    else:
+        opponent = build_agent(args.opponent)
     rng_opponent = random.Random(args.seed ^ 0xC0FFEE)
 
     # Inizializzazione policy.
@@ -318,10 +355,11 @@ def main() -> int:
     for game_idx in range(1, int(args.num_games) + 1):
         game_seed = int(rng_game.integers(0, 2**32))
         policy_seat = (game_idx % 2) if args.seat_fair else 0
+        current_opponent = opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent
 
         final_state, traj = _play_one_game_2p_collect(
             policy=policy,
-            opponent=opponent,
+            opponent=current_opponent,
             rng_opponent=rng_opponent,
             rng_action=rng,
             game_seed=game_seed,
@@ -429,7 +467,8 @@ def main() -> int:
         "hidden_dim": int(policy.hidden_dim),
         "action_dim": 40,
         "seed": int(args.seed),
-        "opponent": str(args.opponent),
+        "opponent": str(args.opponent) if not opponent_mix_raw else None,
+        "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
         "init": args.init.strip() or None,
         "encoder": "encode_observation_2p:v1",
         "train": {
