@@ -256,6 +256,10 @@ Prossime direzioni consigliate (Fase 5B, miglioramenti “algoritmo/setting”):
 - [ ] Reward shaping leggero: usare reward denso (delta punti per mano) oltre al return finale, mantenendo l’osservazione anti-cheat.
 - [ ] Dati umani (opzionale): pipeline di raccolta con consenso UI + tag nel DB + export “human-only” per pretraining/finetune.
 
+Nota (tuning opponent mix):
+- in una mini-grid (benchmark `medium` + holdout) la miscela `heuristic_v1:0.7,random:0.2,greedy_points:0.1` ha dato il miglior compromesso
+  tra performance vs `heuristic_v1` e robustezza vs baseline più deboli (risultati dettagliati in `README.md`).
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

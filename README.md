@@ -421,6 +421,22 @@ Workflow consigliato (warm-start da BC MLP teacher-only):
    - se stampa troppo, aggiungi `--log-every 50`
    - per robustezza (consigliato): usa un opponent mix
      - `python scripts/train_pg.py --init ./data/bc_model_teacher_mlp.npz --out ./data/rl_mix.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 20000 --seat-fair --seed 0`
+
+Mini-grid (esempio) per scegliere il mix:
+- setup: warm-start da `bc_model_teacher_mlp.npz`, training 100k game, benchmark `medium` (10k) + holdout `medium` via `--seed-suite-range-start 1000000`.
+- metrica: **diff punti media** (A−B) in seat-fair.
+
+| setup | vs heuristic_v1 | holdout vs heuristic_v1 | vs random | vs greedy_points |
+|---|---:|---:|---:|---:|
+| single (solo heuristic_v1) | +3.36 | +3.57 | +31.64 | +30.19 |
+| mix 85/10/05 | +3.33 | +3.23 | +32.19 | +30.39 |
+| mix 70/20/10 | **+3.66** | **+3.78** | **+33.28** | **+31.52** |
+| mix 60/20/20 | +2.15 | +2.79 | +32.70 | +31.18 |
+
+Nota interpretativa:
+- aumentare la quota “easy opponents” tende a rendere la policy più robusta (margini più alti vs random/greedy),
+  ma può ridurre la performance vs `heuristic_v1` se la quota di `heuristic_v1` scende troppo.
+  Per questo conviene scegliere il mix guardando una piccola “evaluation matrix” (almeno vs `heuristic_v1`, `random`, `greedy_points`) e fare anche un holdout di seed.
 3. Valuta:
    - `python scripts/evaluate_agents.py --benchmark small --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1`
 
