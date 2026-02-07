@@ -197,7 +197,11 @@ async def lifespan(app: FastAPI):
 
 
 # Crea l'app FastAPI
-app = FastAPI(title="Briscola AI API", version="0.1.0", lifespan=lifespan)
+#
+# Nota:
+# usiamo `get_code_version()` per tenere allineata la versione OpenAPI con la versione del pacchetto
+# (o con l'override via env `BRISCOLA_CODE_VERSION`).
+app = FastAPI(title="Briscola AI API", version=get_code_version(), lifespan=lifespan)
 
 # Aggiunge middleware CORS per consentire richieste cross-origin
 app.add_middleware(

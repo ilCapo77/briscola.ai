@@ -22,6 +22,7 @@ from fastapi.staticfiles import StaticFiles
 
 from .backend import server as backend_server
 from .backend.event_log import EventLog, EventLogConfig, parse_event_db_path
+from .versioning import get_code_version
 
 
 @asynccontextmanager
@@ -82,7 +83,11 @@ async def lifespan(app: FastAPI):
 
 
 # Crea l'applicazione FastAPI principale
-app = FastAPI(title="Briscola AI", version="0.1.0", lifespan=lifespan)
+#
+# Nota:
+# usiamo `get_code_version()` per allineare la versione OpenAPI alla versione del pacchetto
+# (o all'override via env `BRISCOLA_CODE_VERSION`).
+app = FastAPI(title="Briscola AI", version=get_code_version(), lifespan=lifespan)
 
 # Ottiene la directory del file corrente
 current_dir = os.path.dirname(os.path.abspath(__file__))
