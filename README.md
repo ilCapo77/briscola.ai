@@ -52,6 +52,22 @@ Comandi tipici:
 
 Nota: la UI attuale avvia una partita **2-player**. Per testare flussi 4-player (senza UI) usa gli script headless o le API.
 
+### Giocare contro un modello locale (`.npz`)
+
+Se hai addestrato un modello (BC / PG / A2C) e lo hai salvato in un file `.npz`, puoi usarlo come avversario nella UI:
+
+1. Metti il file in una directory “whitelist” lato server:
+   - consigliato: `./data/models/` (creala se non esiste)
+   - alternativa: imposta `BRISCOLA_MODELS_DIR=/path/alla/tua/cartella`
+2. (Ri)avvia il server: `briscola-server --reload`
+3. Nella UI:
+   - scegli **“Modello locale (.npz)”** come avversario;
+   - seleziona il modello dal dropdown “Modello (file .npz)”.
+
+Nota sicurezza:
+- il browser non invia path arbitrari: invia solo un `ai_model_id` (path relativo) scelto tra quelli esposti da `GET /api/ai/models`;
+- il backend rifiuta path traversal (`..`) e carica modelli solo dentro `BRISCOLA_MODELS_DIR`.
+
 ## Approccio step-by-step (didattico)
 
 L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:

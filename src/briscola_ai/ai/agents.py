@@ -22,11 +22,13 @@ from __future__ import annotations
 
 import random
 from dataclasses import dataclass
+from pathlib import Path
 from typing import ClassVar, Protocol
 
 from ..domain.models import Card, Suit
 from ..domain.observation import PlayerObservation
 from ..domain.rules import trick_points, who_wins_trick
+from .bc_model_agent import BCModelAgent
 
 
 class Agent(Protocol):
@@ -288,6 +290,15 @@ _AGENT_BUILDERS: dict[str, type[Agent]] = {
     "heuristic_v1": HeuristicAgentV1,
 }
 
+BC_MODEL_SPEC = AgentSpec(
+    name="bc_model",
+    label="Modello locale (.npz)",
+    description_it=(
+        "Usa un modello addestrato e salvato in un file `.npz` (Behavior Cloning / RL). "
+        "Il file è scelto dalla UI tra quelli disponibili sul server."
+    ),
+)
+
 AI_AGENTS_COMMON_NOTE_IT = (
     "Nota anti-cheat: tutte le IA ricevono solo un’osservazione parziale (PlayerObservation). "
     "Non possono leggere l’ordine del mazzo né le carte specifiche in mano all’avversario."
@@ -296,16 +307,21 @@ AI_AGENTS_COMMON_NOTE_IT = (
 
 def list_agent_specs() -> list[AgentSpec]:
     """Ritorna la lista di agenti disponibili con metadati (ordine stabile)."""
-    return [RandomAgent.spec, GreedyPointsAgent.spec, HeuristicAgentV1.spec]
+    return [RandomAgent.spec, GreedyPointsAgent.spec, HeuristicAgentV1.spec, BC_MODEL_SPEC]
 
 
-def build_agent(name: str) -> Agent:
+def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
     """
     Costruisce un agente a partire dal nome canonico.
 
     Nota:
     usiamo una mappa esplicita (no import dinamici) per semplicità e riproducibilità.
     """
+    if name == "bc_model":
+        if model_path is None:
+            raise ValueError("Agente 'bc_model' richiede `model_path` (file .npz)")
+        return BCModelAgent.from_npz(model_path)
+
     try:
         return _AGENT_BUILDERS[name]()
     except KeyError as exc:

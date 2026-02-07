@@ -297,6 +297,29 @@ Piano di lavoro:
 - [x] Aggiungere test (veloci) per parsing/config/output
 - [x] Documentare l’uso in `README.md` (didattico): perché serve e comandi consigliati
 
+### Fase 5D — Giocare in UI contro un modello locale (`.npz`)
+
+Obiettivo: permettere all’utente di selezionare un modello addestrato localmente (es. A2C/PG/BC) come avversario
+direttamente dalla UI, senza introdurre rischi di sicurezza (path traversal) e mantenendo l’anti-cheat (osservazione parziale).
+
+Piano di lavoro:
+- [x] Definire un “catalogo modelli” locale:
+  - directory configurabile via env (es. `BRISCOLA_MODELS_DIR`, default sotto `./data/`)
+  - lista di file `.npz` con metadati (`metadata_json`) e una descrizione breve in italiano (best effort)
+- [x] Esporre un endpoint backend per la UI:
+  - `GET /ai/models` → lista `{ id, label, description_it, metadata }` (senza path assoluti)
+- [x] Estendere creazione partita:
+  - supportare `ai_agent="bc_model"` + `ai_model_id`
+  - validare che `ai_model_id` punti a un file whitelisted dentro `BRISCOLA_MODELS_DIR` (no `..`, no path arbitrari)
+- [x] Aggiornare frontend:
+  - mostrare un select “Modello” solo quando l’utente sceglie l’agente `bc_model`
+  - visualizzare una descrizione breve del modello selezionato (in italiano) + i metadati utili
+- [x] Test:
+  - `GET /ai/models` ritorna una lista coerente e non espone path
+  - `POST /games` con `bc_model` fallisce senza `ai_model_id` e rifiuta path traversal
+- [x] Documentazione:
+  - aggiornare `README.md`: dove mettere i modelli, come avviare e giocare contro un modello, note di sicurezza/anti-cheat
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

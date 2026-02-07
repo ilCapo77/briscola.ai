@@ -23,6 +23,9 @@ const UI = (() => {
         aiAgentSelect: document.getElementById('ai-agent-select'),
         aiAgentDescription: document.getElementById('ai-agent-description'),
         aiAgentCommonNote: document.getElementById('ai-agent-common-note'),
+        aiModelGroup: document.getElementById('ai-model-group'),
+        aiModelSelect: document.getElementById('ai-model-select'),
+        aiModelDescription: document.getElementById('ai-model-description'),
         gameId: document.getElementById('game-id'),
         gameStatus: document.getElementById('game-status'),
         opponentName: document.getElementById('opponent-name'),
@@ -46,11 +49,32 @@ const UI = (() => {
     let aiAgentMetaByName = {};
     let aiAgentCommonNoteIt = '';
 
+    // Modelli locali selezionabili (solo per `bc_model`).
+    let aiModelMetaById = {};
+
     const _updateAiAgentDescription = () => {
         const name = elements.aiAgentSelect?.value;
         const meta = name ? aiAgentMetaByName[name] : null;
         if (elements.aiAgentDescription) elements.aiAgentDescription.textContent = meta?.description_it || '';
         if (elements.aiAgentCommonNote) elements.aiAgentCommonNote.textContent = aiAgentCommonNoteIt || '';
+    };
+
+    const _updateAiModelUi = () => {
+        const agentName = elements.aiAgentSelect?.value;
+        const isBcModel = agentName === 'bc_model';
+
+        if (elements.aiModelGroup) {
+            elements.aiModelGroup.classList.toggle('hidden', !isBcModel);
+        }
+
+        if (!isBcModel) {
+            if (elements.aiModelDescription) elements.aiModelDescription.textContent = '';
+            return;
+        }
+
+        const modelId = elements.aiModelSelect?.value;
+        const meta = modelId ? aiModelMetaById[modelId] : null;
+        if (elements.aiModelDescription) elements.aiModelDescription.textContent = meta?.description_it || '';
     };
 
     /**
@@ -118,11 +142,17 @@ const UI = (() => {
             callbacks.onStartGame?.({
                 playerName: elements.playerNameInput.value || 'Giocatore',
                 aiAgent: elements.aiAgentSelect?.value || 'random',
-                aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random'
+                aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
+                aiModelId: elements.aiModelSelect?.value || null,
+                aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null
             });
         });
 
-        elements.aiAgentSelect?.addEventListener('change', _updateAiAgentDescription);
+        elements.aiAgentSelect?.addEventListener('change', () => {
+            _updateAiAgentDescription();
+            _updateAiModelUi();
+        });
+        elements.aiModelSelect?.addEventListener('change', _updateAiModelUi);
 
         elements.newGame.addEventListener('click', () => {
             callbacks.onNewGame?.();
@@ -135,6 +165,7 @@ const UI = (() => {
 
         if (!elements.aiAgentSelect || !Array.isArray(agents) || agents.length === 0) {
             _updateAiAgentDescription();
+            _updateAiModelUi();
             return;
         }
 
@@ -156,6 +187,40 @@ const UI = (() => {
         const hasHeuristic = !!aiAgentMetaByName.heuristic_v1;
         elements.aiAgentSelect.value = hasHeuristic ? 'heuristic_v1' : (agents[0]?.name || 'random');
         _updateAiAgentDescription();
+        _updateAiModelUi();
+    };
+
+    /**
+     * Imposta la lista di modelli `.npz` disponibili (per l'agente `bc_model`).
+     *
+     * Payload atteso:
+     * - `[{ id, label, description_it, ... }]`
+     * - oppure `{ models: [...] }`
+     */
+    const setAiModels = (catalog) => {
+        const models = Array.isArray(catalog) ? catalog : (catalog?.models || []);
+        aiModelMetaById = {};
+
+        if (!elements.aiModelSelect) {
+            _updateAiModelUi();
+            return;
+        }
+
+        elements.aiModelSelect.innerHTML = '';
+        models.forEach((m) => {
+            if (!m?.id) return;
+            aiModelMetaById[m.id] = m;
+            const option = document.createElement('option');
+            option.value = m.id;
+            option.textContent = m.label || m.filename || m.id;
+            elements.aiModelSelect.appendChild(option);
+        });
+
+        if (models.length > 0 && models[0]?.id) {
+            elements.aiModelSelect.value = models[0].id;
+        }
+
+        _updateAiModelUi();
     };
 
     const showGameSetup = () => {
@@ -416,6 +481,7 @@ const UI = (() => {
     return {
         init,
         setAiAgents,
+        setAiModels,
         showGameSetup,
         showGameBoard,
         showGameResult,

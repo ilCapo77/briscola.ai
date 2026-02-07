@@ -150,6 +150,30 @@ const API = (() => {
     };
 
     /**
+     * Elenca i modelli locali `.npz` disponibili sul server (per l'agente `bc_model`).
+     *
+     * Ritorna un oggetto del tipo:
+     * { models: [{ id, label, description_it, ... }, ...] }
+     */
+    const getAiModels = async () => {
+        _requireServedOverHttp();
+        try {
+            const response = await fetch(`${API_URL}/ai/models`);
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Impossibile caricare la lista modelli IA');
+            }
+
+            const payload = await response.json();
+            return { models: Array.isArray(payload?.models) ? payload.models : [] };
+        } catch (error) {
+            console.error('Errore caricando modelli IA:', error);
+            throw error;
+        }
+    };
+
+    /**
      * Ottiene lo stato corrente di una partita
      * @param {string} gameId - ID della partita
      * @param {number} playerIndex - Indice del giocatore per una vista specifica
@@ -364,6 +388,7 @@ const API = (() => {
         playerIndex,
         createGame,
         getAiAgents,
+        getAiModels,
         getGameState,
         playCard,
         getGameResult,

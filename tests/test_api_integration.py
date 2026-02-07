@@ -9,8 +9,11 @@ interferenze tra casi di test.
 """
 
 import asyncio
+import json
 from collections.abc import Generator
+from pathlib import Path
 
+import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
@@ -48,6 +51,31 @@ def _clean_server_state() -> Generator[None, None, None]:
     server.connected_clients.clear()
 
 
+def _write_dummy_bc_model_npz(path: Path) -> None:
+    """
+    Crea un file `.npz` minimo compatibile con `BCModelAgent`.
+
+    Nota:
+    Usiamo `D=248` che è la dimensione feature attuale di `encode_player_observation_2p` (v1).
+    """
+    d = 248
+    h = 8
+    rng = np.random.default_rng(0)
+    w1 = rng.normal(size=(d, h)).astype(np.float32)
+    b1 = np.zeros((h,), dtype=np.float32)
+    w2 = rng.normal(size=(h, 40)).astype(np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    metadata = {
+        "format": "mlp_bc_v1",
+        "feature_dim": d,
+        "hidden_dim": h,
+        "action_dim": 40,
+        "train": {"algorithm": "bc", "num_games": 1234},
+        "description_it": "Modello dummy per test (non usare in produzione).",
+    }
+    np.savez(path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json=json.dumps(metadata, ensure_ascii=False))
+
+
 def test_backend_root_healthcheck() -> None:
     """Smoke test: l'endpoint root del backend risponde e contiene un messaggio."""
     client = TestClient(server.app)
@@ -74,9 +102,75 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert "random" in by_name
     assert "greedy_points" in by_name
     assert "heuristic_v1" in by_name
+    assert "bc_model" in by_name
 
     assert isinstance(by_name["heuristic_v1"].get("description_it"), str)
     assert by_name["heuristic_v1"]["description_it"]
+
+
+def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`GET /ai/models` deve elencare i modelli `.npz` disponibili (senza path assoluti)."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+
+    model_path = tmp_path / "dummy_model.npz"
+    _write_dummy_bc_model_npz(model_path)
+
+    client = TestClient(server.app)
+    r = client.get("/ai/models")
+    assert r.status_code == 200
+
+    payload = r.json()
+    models = payload.get("models")
+    assert isinstance(models, list)
+    assert models
+
+    first = models[0]
+    assert first["id"] == "dummy_model.npz"
+    assert "models_dir" not in payload  # non vogliamo esporre path server-side
+    assert isinstance(first.get("label"), str)
+    assert isinstance(first.get("description_it"), str)
+    assert "metadata" in first
+
+
+def test_create_game_supports_bc_model_with_ai_model_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`POST /games` deve supportare `ai_agent=bc_model` + `ai_model_id` (whitelisted)."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    _write_dummy_bc_model_npz(tmp_path / "dummy_model.npz")
+
+    client = TestClient(server.app)
+
+    missing = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["A", "B"], "ai_agent": "bc_model"},
+    )
+    assert missing.status_code == 400
+    assert "ai_model_id" in missing.json()["detail"]
+
+    traversal = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model",
+            "ai_model_id": "../dummy_model.npz",
+        },
+    )
+    assert traversal.status_code == 400
+    assert "path traversal" in traversal.json()["detail"].lower()
+
+    ok = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model",
+            "ai_model_id": "dummy_model.npz",
+        },
+    )
+    assert ok.status_code == 200
+    payload = ok.json()
+    assert payload["ai_agent"] == "bc_model"
+    assert payload["ai_model_id"] == "dummy_model.npz"
 
 
 def test_create_game_get_state_and_play_action_happy_path() -> None:

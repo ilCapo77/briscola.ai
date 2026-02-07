@@ -52,6 +52,14 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             console.warn('Impossibile caricare metadati agenti IA:', error);
         }
+
+        try {
+            const models = await API.getAiModels();
+            UI.setAiModels(models);
+        } catch (error) {
+            console.warn('Impossibile caricare lista modelli IA (.npz):', error);
+            UI.setAiModels({ models: [] });
+        }
     };
 
     // Track last known table state to detect changes
@@ -344,13 +352,29 @@ document.addEventListener('DOMContentLoaded', () => {
         try {
             const aiAgent = config.aiAgent || 'random';
             const aiAgentLabel = config.aiAgentLabel || aiAgent;
-            const playerNames = [config.playerName, `IA (${aiAgentLabel})`];
+            const aiModelId = config.aiModelId || null;
+            const aiModelLabel = config.aiModelLabel || null;
 
-            const result = await API.createGame({
+            const opponentLabel = aiAgent === 'bc_model'
+                ? (aiModelLabel ? `Modello: ${aiModelLabel}` : 'Modello locale')
+                : aiAgentLabel;
+
+            const playerNames = [config.playerName, `IA (${opponentLabel})`];
+
+            if (aiAgent === 'bc_model' && !aiModelId) {
+                throw new Error('Seleziona un modello (.npz) prima di avviare la partita.');
+            }
+
+            const createPayload = {
                 num_players: 2,
                 player_names: playerNames,
-                ai_agent: aiAgent
-            });
+                ai_agent: aiAgent,
+            };
+            if (aiAgent === 'bc_model') {
+                createPayload.ai_model_id = aiModelId;
+            }
+
+            const result = await API.createGame(createPayload);
 
             store.setState({
                 gameId: result.game_id,

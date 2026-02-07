@@ -29,6 +29,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
+from ..ai.model_catalog import get_models_dir_from_env, list_local_models, resolve_model_path
 from ..domain.engine import PlayCardAction, step
 from ..domain.observation import make_player_observation
 from ..domain.state import GameState as DomainGameState
@@ -53,6 +54,7 @@ class GameConfig(BaseModel):
     num_players: int
     player_names: Optional[List[str]] = None
     ai_agent: Optional[str] = None
+    ai_model_id: Optional[str] = None
 
 
 class GameAction(BaseModel):
@@ -244,6 +246,32 @@ async def list_ai_agents():
     }
 
 
+@app.get("/ai/models", response_model=Dict)
+async def list_ai_models():
+    """
+    Elenca i modelli `.npz` disponibili sul server (per l'agente `bc_model`).
+
+    Nota sicurezza:
+    la UI riceve solo `model_id` (path relativo dentro una directory whitelisted).
+    Il backend risolverà poi l'id in un path reale con controlli anti-path-traversal.
+    """
+    models_dir = get_models_dir_from_env()
+    models = list_local_models(models_dir, recursive=False)
+    return {
+        "models": [
+            {
+                "id": m.id,
+                "filename": m.filename,
+                "label": m.label,
+                "description_it": m.description_it,
+                "metadata": m.metadata,
+                "last_modified_utc": m.last_modified_utc,
+            }
+            for m in models
+        ]
+    }
+
+
 @app.get("/")
 async def root():
     """Health-check minimale."""
@@ -267,7 +295,12 @@ async def create_game(config: GameConfig):
 
         # Config IA (solo 2-player, come la UI attuale).
         if config.num_players == 2:
-            game_ai_agents[game_id] = {1: build_agent(ai_agent_name)}
+            if ai_agent_name == "bc_model":
+                models_dir = get_models_dir_from_env()
+                model_path = resolve_model_path(models_dir, config.ai_model_id or "")
+                game_ai_agents[game_id] = {1: build_agent(ai_agent_name, model_path=model_path)}
+            else:
+                game_ai_agents[game_id] = {1: build_agent(ai_agent_name)}
             game_action_rngs[game_id] = random.Random(seed ^ 0x9E3779B9)
 
         game_data[game_id] = [
@@ -276,6 +309,9 @@ async def create_game(config: GameConfig):
                 "event": "game_created",
                 "seed": seed,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
+                "ai_model_id": config.ai_model_id
+                if (config.num_players == 2 and ai_agent_name == "bc_model")
+                else None,
             }
         ]
         game_locks[game_id] = asyncio.Lock()
@@ -296,6 +332,9 @@ async def create_game(config: GameConfig):
                 "player_names": [p.name for p in state.players],
                 "is_team_game": state.is_team_game,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
+                "ai_model_id": config.ai_model_id
+                if (config.num_players == 2 and ai_agent_name == "bc_model")
+                else None,
             },
             server_version=0,
         )
@@ -307,9 +346,12 @@ async def create_game(config: GameConfig):
             "is_team_game": state.is_team_game,
             "player_names": [p.name for p in state.players],
             "ai_agent": ai_agent_name if config.num_players == 2 else None,
+            "ai_model_id": config.ai_model_id if (config.num_players == 2 and ai_agent_name == "bc_model") else None,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))
+    except FileNotFoundError:
+        raise HTTPException(status_code=400, detail="Modello .npz non trovato (ai_model_id)")
 
 
 @app.get("/games/{game_id}", response_model=Dict)
