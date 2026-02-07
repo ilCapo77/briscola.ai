@@ -39,6 +39,15 @@ class EncodedObservation:
 
 _CARD_FEATURES = build_card_features()
 
+# Costanti di “contratto” (didattiche).
+#
+# L'encoder v1 costruisce un vettore di feature a dimensione fissa:
+# - 6 blocchi da 40 (mano onehot/points/strength + tavolo onehot/points/strength) = 240
+# - briscola onehot sui 4 semi = 4  -> 244
+# - 4 scalari = 4                 -> 248
+FEATURE_DIM_2P_V1 = 248
+ACTION_DIM = 40
+
 
 def _one_hot_suit(suit: str | None) -> list[float]:
     """One-hot sui 4 semi (clubs, cups, coins, swords)."""

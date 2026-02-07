@@ -29,7 +29,12 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
-from ..ai.model_catalog import get_models_dir_from_env, list_local_models, resolve_model_path
+from ..ai.model_catalog import (
+    get_models_dir_from_env,
+    list_local_models,
+    resolve_model_path,
+    validate_model_compatible_for_ui,
+)
 from ..domain.engine import PlayCardAction, step
 from ..domain.observation import make_player_observation
 from ..domain.state import GameState as DomainGameState
@@ -270,6 +275,8 @@ async def list_ai_models():
                 "description_it": m.description_it,
                 "metadata": m.metadata,
                 "last_modified_utc": m.last_modified_utc,
+                "is_compatible": m.is_compatible,
+                "compatibility_reason_it": m.compatibility_reason_it,
             }
             for m in models
         ]
@@ -302,6 +309,7 @@ async def create_game(config: GameConfig):
             if ai_agent_name == "bc_model":
                 models_dir = get_models_dir_from_env()
                 model_path = resolve_model_path(models_dir, config.ai_model_id or "")
+                validate_model_compatible_for_ui(model_path)
                 game_ai_agents[game_id] = {1: build_agent(ai_agent_name, model_path=model_path)}
             else:
                 game_ai_agents[game_id] = {1: build_agent(ai_agent_name)}

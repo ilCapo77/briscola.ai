@@ -354,6 +354,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const aiAgentLabel = config.aiAgentLabel || aiAgent;
             const aiModelId = config.aiModelId || null;
             const aiModelLabel = config.aiModelLabel || null;
+            const aiModelCompatible = config.aiModelCompatible === true;
+            const aiModelCompatibilityReasonIt = config.aiModelCompatibilityReasonIt || null;
 
             const opponentLabel = aiAgent === 'bc_model'
                 ? (aiModelLabel ? `Modello: ${aiModelLabel}` : 'Modello locale')
@@ -363,6 +365,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (aiAgent === 'bc_model' && !aiModelId) {
                 throw new Error('Seleziona un modello (.npz) prima di avviare la partita.');
+            }
+            if (aiAgent === 'bc_model' && !aiModelCompatible) {
+                const reason = aiModelCompatibilityReasonIt ? `\n\nMotivo: ${aiModelCompatibilityReasonIt}` : '';
+                throw new Error(`Il modello selezionato non è compatibile.${reason}`);
             }
 
             const createPayload = {

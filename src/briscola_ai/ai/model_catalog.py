@@ -30,6 +30,9 @@ from typing import Any, Iterable
 
 import numpy as np
 
+from .bc_model_agent import load_bc_model_npz
+from .training.observation_encoder import FEATURE_DIM_2P_V1
+
 
 @dataclass(frozen=True, slots=True)
 class LocalModelSpec:
@@ -51,6 +54,8 @@ class LocalModelSpec:
     description_it: str
     metadata: dict[str, Any]
     last_modified_utc: str
+    is_compatible: bool
+    compatibility_reason_it: str | None
 
 
 def get_models_dir_from_env() -> Path:
@@ -100,6 +105,25 @@ def resolve_model_path(models_dir: Path, model_id: str) -> Path:
     if not candidate.exists() or not candidate.is_file():
         raise FileNotFoundError(str(candidate))
     return candidate
+
+
+def validate_model_compatible_for_ui(path: Path) -> None:
+    """
+    Verifica che un modello `.npz` sia compatibile con l'agent `bc_model` (UI).
+
+    Criteri:
+    - file caricato correttamente (chiavi/shape coerenti);
+    - `feature_dim` coerente con l'encoder 2-player v1 usato dall'agente.
+
+    Nota:
+    se in futuro introduciamo encoder diversi, questa funzione dovrà considerare `metadata.encoder`.
+    """
+    model = load_bc_model_npz(path)
+    if int(model.feature_dim) != int(FEATURE_DIM_2P_V1):
+        raise ValueError(
+            "Model feature_dim mismatch: "
+            f"model={int(model.feature_dim)} expected={int(FEATURE_DIM_2P_V1)} (encoder 2p v1)."
+        )
 
 
 def _parse_metadata_json(raw: Any) -> dict[str, Any]:
@@ -251,13 +275,27 @@ def list_local_models(models_dir: Path, *, recursive: bool = False) -> list[Loca
 
     out: list[LocalModelSpec] = []
     for path in candidates:
+        metadata: dict[str, Any] = {}
+        is_compatible = False
+        compatibility_reason_it: str | None = None
+
         try:
             with np.load(path) as data:
+                if "metadata_json" in data:
+                    metadata = _parse_metadata_json(data["metadata_json"])
                 if not _has_supported_weights(data.keys()):
-                    continue
-                metadata = _parse_metadata_json(data["metadata_json"]) if "metadata_json" in data else {}
-        except Exception:
-            continue
+                    compatibility_reason_it = (
+                        "File `.npz` non riconosciuto come policy: mancano le chiavi dei pesi "
+                        "attese (w/b oppure w1/b1/w2/b2)."
+                    )
+                else:
+                    try:
+                        validate_model_compatible_for_ui(path)
+                        is_compatible = True
+                    except Exception as exc:
+                        compatibility_reason_it = str(exc)
+        except Exception as exc:
+            compatibility_reason_it = f"Impossibile leggere il file `.npz`: {exc}"
 
         try:
             rel_id = path.resolve().relative_to(root).as_posix()
@@ -274,6 +312,8 @@ def list_local_models(models_dir: Path, *, recursive: bool = False) -> list[Loca
                 description_it=description_it,
                 metadata=metadata,
                 last_modified_utc=mtime,
+                is_compatible=is_compatible,
+                compatibility_reason_it=compatibility_reason_it,
             )
         )
 

@@ -76,6 +76,27 @@ def _write_dummy_bc_model_npz(path: Path) -> None:
     np.savez(path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json=json.dumps(metadata, ensure_ascii=False))
 
 
+def _write_dummy_bc_model_npz_with_feature_dim(path: Path, *, feature_dim: int) -> None:
+    """Come `_write_dummy_bc_model_npz`, ma con feature_dim configurabile (per test compatibilità)."""
+    d = int(feature_dim)
+    h = 8
+    rng = np.random.default_rng(0)
+    w1 = rng.normal(size=(d, h)).astype(np.float32)
+    b1 = np.zeros((h,), dtype=np.float32)
+    w2 = rng.normal(size=(h, 40)).astype(np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    metadata = {
+        "format": "mlp_bc_v1",
+        "feature_dim": d,
+        "hidden_dim": h,
+        "action_dim": 40,
+        "train": {"algorithm": "bc", "num_games": 1},
+        "label": "Dummy",
+        "description_it": "Modello dummy per test compatibilità.",
+    }
+    np.savez(path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json=json.dumps(metadata, ensure_ascii=False))
+
+
 def test_backend_root_healthcheck() -> None:
     """Smoke test: l'endpoint root del backend risponde e contiene un messaggio."""
     client = TestClient(server.app)
@@ -112,8 +133,8 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     """`GET /ai/models` deve elencare i modelli `.npz` disponibili (senza path assoluti)."""
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
 
-    model_path = tmp_path / "dummy_model.npz"
-    _write_dummy_bc_model_npz(model_path)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible.npz", feature_dim=248)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "incompatible.npz", feature_dim=10)
 
     client = TestClient(server.app)
     r = client.get("/ai/models")
@@ -124,18 +145,26 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     assert isinstance(models, list)
     assert models
 
-    first = models[0]
-    assert first["id"] == "dummy_model.npz"
     assert "models_dir" not in payload  # non vogliamo esporre path server-side
-    assert isinstance(first.get("label"), str)
-    assert isinstance(first.get("description_it"), str)
-    assert "metadata" in first
+    by_id = {m["id"]: m for m in models}
+    assert "compatible.npz" in by_id
+    assert "incompatible.npz" in by_id
+
+    ok = by_id["compatible.npz"]
+    assert ok["is_compatible"] is True
+    assert ok.get("compatibility_reason_it") is None
+
+    bad = by_id["incompatible.npz"]
+    assert bad["is_compatible"] is False
+    assert isinstance(bad.get("compatibility_reason_it"), str)
+    assert bad["compatibility_reason_it"]
 
 
 def test_create_game_supports_bc_model_with_ai_model_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`POST /games` deve supportare `ai_agent=bc_model` + `ai_model_id` (whitelisted)."""
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
-    _write_dummy_bc_model_npz(tmp_path / "dummy_model.npz")
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "dummy_model.npz", feature_dim=248)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "bad_model.npz", feature_dim=10)
 
     client = TestClient(server.app)
 
@@ -171,6 +200,18 @@ def test_create_game_supports_bc_model_with_ai_model_id(monkeypatch: pytest.Monk
     payload = ok.json()
     assert payload["ai_agent"] == "bc_model"
     assert payload["ai_model_id"] == "dummy_model.npz"
+
+    bad = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model",
+            "ai_model_id": "bad_model.npz",
+        },
+    )
+    assert bad.status_code == 400
+    assert "feature_dim" in bad.json()["detail"]
 
 
 def test_create_game_get_state_and_play_action_happy_path() -> None:

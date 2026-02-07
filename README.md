@@ -69,6 +69,7 @@ Se hai addestrato un modello (BC / PG / A2C) e lo hai salvato in un file `.npz`,
 Nota UI:
 - il dropdown mostra `metadata_json.label` e la descrizione mostra `metadata_json.description_it` (se presenti nel file `.npz`);
 - i trainer del progetto (`scripts/train_*.py`) salvano questi campi in automatico.
+- se un file `.npz` non è compatibile (chiavi mancanti o `feature_dim` diverso), il backend lo segnala nel catalogo e la UI ne disabilita la selezione.
 
 Nota sicurezza:
 - il browser non invia path arbitrari: invia solo un `ai_model_id` (path relativo) scelto tra quelli esposti da `GET /api/ai/models`;

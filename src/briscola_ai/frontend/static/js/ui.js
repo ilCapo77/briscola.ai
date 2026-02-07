@@ -74,7 +74,16 @@ const UI = (() => {
 
         const modelId = elements.aiModelSelect?.value;
         const meta = modelId ? aiModelMetaById[modelId] : null;
-        if (elements.aiModelDescription) elements.aiModelDescription.textContent = meta?.description_it || '';
+        if (elements.aiModelDescription) {
+            const desc = meta?.description_it || '';
+            const compatible = meta?.is_compatible;
+            const reason = meta?.compatibility_reason_it || '';
+            if (compatible === false) {
+                elements.aiModelDescription.textContent = `${desc}\n\nNON compatibile: ${reason}`.trim();
+            } else {
+                elements.aiModelDescription.textContent = desc;
+            }
+        }
     };
 
     /**
@@ -139,12 +148,16 @@ const UI = (() => {
     const init = (callbacks) => {
         elements.gameForm.addEventListener('submit', (e) => {
             e.preventDefault();
+            const modelId = elements.aiModelSelect?.value || null;
+            const modelMeta = modelId ? aiModelMetaById[modelId] : null;
             callbacks.onStartGame?.({
                 playerName: elements.playerNameInput.value || 'Giocatore',
                 aiAgent: elements.aiAgentSelect?.value || 'random',
                 aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
-                aiModelId: elements.aiModelSelect?.value || null,
-                aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null
+                aiModelId: modelId,
+                aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null,
+                aiModelCompatible: modelMeta?.is_compatible === true,
+                aiModelCompatibilityReasonIt: modelMeta?.compatibility_reason_it || null,
             });
         });
 
@@ -207,18 +220,35 @@ const UI = (() => {
         }
 
         elements.aiModelSelect.innerHTML = '';
+        if (!Array.isArray(models) || models.length === 0) {
+            const option = document.createElement('option');
+            option.value = '';
+            option.textContent = 'Nessun modello trovato';
+            option.disabled = true;
+            option.selected = true;
+            elements.aiModelSelect.appendChild(option);
+            _updateAiModelUi();
+            return;
+        }
+
         models.forEach((m) => {
             if (!m?.id) return;
             aiModelMetaById[m.id] = m;
             const option = document.createElement('option');
             option.value = m.id;
             option.textContent = m.label || m.filename || m.id;
+            if (m.is_compatible === false) {
+                option.disabled = true;
+                const reason = m.compatibility_reason_it ? ` (${m.compatibility_reason_it})` : '';
+                option.textContent = `NON COMPATIBILE: ${option.textContent}${reason}`;
+            }
             elements.aiModelSelect.appendChild(option);
         });
 
-        if (models.length > 0 && models[0]?.id) {
-            elements.aiModelSelect.value = models[0].id;
-        }
+        // Default: primo modello compatibile (se presente), altrimenti il primo.
+        const firstCompatible = models.find((m) => m?.id && m.is_compatible !== false);
+        if (firstCompatible?.id) elements.aiModelSelect.value = firstCompatible.id;
+        else if (models[0]?.id) elements.aiModelSelect.value = models[0].id;
 
         _updateAiModelUi();
     };

@@ -306,6 +306,9 @@ Piano di lavoro:
   - la UI li usa per mostrare un dropdown più leggibile (senza euristiche sul filename)
 - [x] Esporre un endpoint backend per la UI:
   - `GET /ai/models` → lista `{ id, label, description_it, metadata }` (senza path assoluti)
+- [x] Migliorare la robustezza UX:
+  - il catalogo indica `is_compatible` + un motivo `compatibility_reason_it` per modelli non caricabili/incompatibili
+  - la UI disabilita la selezione di modelli non compatibili e fallisce presto in modo chiaro
 - [x] Estendere creazione partita:
   - supportare `ai_agent="bc_model"` + `ai_model_id`
   - validare che `ai_model_id` punti a un file whitelisted dentro `BRISCOLA_MODELS_DIR` (no `..`, no path arbitrari)
