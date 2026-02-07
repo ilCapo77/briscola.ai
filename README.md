@@ -394,6 +394,11 @@ Esempio (veloce, `medium`):
 python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark medium --out-json benchmarks/matrix_medium.json
 ```
 
+Output “pretty” (tabella colorata) se il terminale è interattivo:
+- default: `--format auto` (già il default)
+- forzare: `--format rich`
+- fallback CSV-like (utile per redirect/log): `--format csv`
+
 Esempio (robusto, `big`):
 
 ```

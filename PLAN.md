@@ -293,6 +293,7 @@ Piano di lavoro:
   - avversari di default: `heuristic_v1`, `random`, `greedy_points` (configurabili)
   - per ogni avversario: `benchmark big` + `big holdout` (configurabili)
   - output: stampa tabella a schermo + `--out-json`
+- [x] Migliorare l’output “a schermo” con tabella colorata (Rich) mantenendo fallback CSV-like
 - [x] Aggiungere un modulo “core” importabile per test/riuso (es. `src/briscola_ai/ai/evaluation_matrix.py`)
 - [x] Aggiungere test (veloci) per parsing/config/output
 - [x] Documentare l’uso in `README.md` (didattico): perché serve e comandi consigliati
