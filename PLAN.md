@@ -282,6 +282,21 @@ Piano di lavoro (A2C “minimale” + reward denso):
   - perché reward shaping riduce varianza
   - comandi consigliati + note su robustezza (big + holdout)
 
+### Fase 5C — Evaluation matrix (benchmarking ripetibile)
+
+Obiettivo: standardizzare la valutazione di un modello su una “matrice” di match (avversari × seed suite),
+per evitare errori manuali e rendere confronti robusti e ripetibili.
+
+Piano di lavoro:
+- [x] Implementare `scripts/evaluate_matrix.py`:
+  - input: `--model` (path `.npz`)
+  - avversari di default: `heuristic_v1`, `random`, `greedy_points` (configurabili)
+  - per ogni avversario: `benchmark big` + `big holdout` (configurabili)
+  - output: stampa tabella a schermo + `--out-json`
+- [x] Aggiungere un modulo “core” importabile per test/riuso (es. `src/briscola_ai/ai/evaluation_matrix.py`)
+- [x] Aggiungere test (veloci) per parsing/config/output
+- [x] Documentare l’uso in `README.md` (didattico): perché serve e comandi consigliati
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

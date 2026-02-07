@@ -363,6 +363,27 @@ Taglie consigliate (benchmark):
 - `medium=10000` (numero “standard” per confronti)
 - `big=100000` (misura stabile, più lenta)
 
+#### Evaluation matrix (consigliata)
+
+Quando alleni molti modelli (`.npz`) conviene standardizzare i confronti per evitare errori manuali
+e misurare robustezza (anche su holdout).
+
+Lo script `scripts/evaluate_matrix.py` valuta un modello contro una lista di avversari su due suite:
+- `standard` (seed generate con `range(start=0)`)
+- `holdout` (seed generate con `range(start=1_000_000)`)
+
+Esempio (veloce, `medium`):
+
+```
+python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark medium --out-json benchmarks/matrix_medium.json
+```
+
+Esempio (robusto, `big`):
+
+```
+python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark big --out-json benchmarks/matrix_big.json
+```
+
 ### Export dataset (JSONL)
 
 Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:
