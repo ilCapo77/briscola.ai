@@ -251,14 +251,36 @@ Risultati recenti (esempio, artefatti locali in `data/` e JSON in `benchmarks/`)
   - benchmark big holdout: `benchmarks/rl_vs_heuristic_v1_200k_big_holdout_1M.json` (diff punti ≈ +5.3)
 
 Prossime direzioni consigliate (Fase 5B, miglioramenti “algoritmo/setting”):
-- [ ] Actor-Critic (A2C minimale): aggiungere una value head `V(s)` per ridurre la varianza rispetto a REINFORCE puro.
+- [x] Actor-Critic (A2C minimale): aggiungere una value head `V(s)` per ridurre la varianza rispetto a REINFORCE puro.
 - [x] Opponent mix: allenare contro un mix di avversari (baseline + snapshot della policy) per robustezza e anti-overfitting.
-- [ ] Reward shaping leggero: usare reward denso (delta punti per mano) oltre al return finale, mantenendo l’osservazione anti-cheat.
+- [x] Reward shaping leggero: usare reward denso (delta punti per mano) oltre al return finale, mantenendo l’osservazione anti-cheat.
 - [ ] Dati umani (opzionale): pipeline di raccolta con consenso UI + tag nel DB + export “human-only” per pretraining/finetune.
 
 Nota (tuning opponent mix):
 - in una mini-grid (benchmark `medium` + holdout) la miscela `heuristic_v1:0.7,random:0.2,greedy_points:0.1` ha dato il miglior compromesso
   tra performance vs `heuristic_v1` e robustezza vs baseline più deboli (risultati dettagliati in `README.md`).
+
+### Fase 5B — A2C + reward shaping (prossimo step)
+
+Obiettivo: migliorare stabilità/performance del training RL rispetto a REINFORCE puro, mantenendo anti-cheat.
+
+Piano di lavoro (A2C “minimale” + reward denso):
+- [x] Implementare `scripts/train_a2c.py`:
+  - policy MLP (1 hidden layer) con action mask (40 carte)
+  - value head `V(s)` (critic) per baseline appresa
+  - training con Adam (policy + critic)
+- [x] Reward shaping “trick delta”:
+  - definire il time-step come “turno della policy”
+  - reward per step = delta di `(punti_policy - punti_opp)` accumulato fino al prossimo turno della policy
+- [x] Supportare `--opponent-mix` anche in A2C (riuso parsing già esistente)
+- [x] Validare e benchmarkare:
+  - `medium` vs `heuristic_v1` + holdout seed
+  - `medium` vs `random` e `greedy_points`
+  - (quando promettente) `big` + holdout
+- [x] Documentare in `README.md` (didattico):
+  - differenza REINFORCE vs A2C
+  - perché reward shaping riduce varianza
+  - comandi consigliati + note su robustezza (big + holdout)
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

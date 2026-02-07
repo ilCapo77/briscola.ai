@@ -409,10 +409,12 @@ Nota:
 - `bc_model.npz` è un artefatto locale (non va versionato nel repo).
 - Puoi usare due modelli diversi con `--agent0-model` e `--agent1-model`.
 
-### Superare `heuristic_v1` (RL: Policy Gradient)
+### Superare `heuristic_v1` (RL)
 
 Il Behavior Cloning (BC) tende a *eguagliare* il teacher, non a superarlo.
 Per superare `heuristic_v1` puoi fare fine-tuning con Reinforcement Learning ottimizzando direttamente il return finale.
+
+#### REINFORCE (policy gradient) + opponent mix
 
 Workflow consigliato (warm-start da BC MLP teacher-only):
 1. Allena BC MLP su dataset teacher-only (vedi sopra) → `./data/bc_model_teacher_mlp.npz`
@@ -440,14 +442,30 @@ Nota interpretativa:
 3. Valuta:
    - `python scripts/evaluate_agents.py --benchmark small --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1`
 
+#### A2C (actor-critic) + reward shaping “trick delta” (consigliato)
+
+REINFORCE funziona, ma è più rumoroso. Un passo successivo “ad alto ROI” è A2C:
+- aggiungiamo un *critic* `V(s)` (value head) e usiamo l’**advantage** `A = G - V(s)` come baseline appresa;
+- usiamo un reward più denso (senza barare): ogni step è un **turno della policy**, e il reward è il delta di
+  `(punti_policy - punti_opp)` accumulato fino al turno successivo (include la chiusura della mano).
+
+Script:
+- training: `scripts/train_a2c.py`
+
+Esempio (warm-start + opponent mix):
+- `python scripts/train_a2c.py --init ./data/bc_model_teacher_mlp.npz --out ./data/a2c_shaped.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 200000 --seat-fair --seed 0`
+
+Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
+- con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.
+
 Validazione robusta (consigliata):
 - benchmark “big” (più stabile, più lento):
-  - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1 --out-json benchmarks/rl_vs_heuristic_v1_big.json`
+  - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big.json`
 - holdout di seed (evita “overfitting” su una sola suite):
-  - `python scripts/evaluate_agents.py --benchmark big --seed-suite-range-start 1000000 --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1 --out-json benchmarks/rl_vs_heuristic_v1_big_holdout_1M.json`
+  - `python scripts/evaluate_agents.py --benchmark big --seed-suite-range-start 1000000 --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big_holdout_1M.json`
 
 Nota:
-- `scripts/train_pg.py` salva un `.npz` con `w1/b1/w2/b2` (MLP). L’agente `bc_model` lo supporta, come per i modelli BC MLP.
+- `scripts/train_pg.py` e `scripts/train_a2c.py` salvano un `.npz` con `w1/b1/w2/b2` (MLP). L’agente `bc_model` lo supporta, come per i modelli BC MLP.
 - I file in `data/` (DB SQLite, dataset JSONL, modelli `.npz`) sono artefatti locali: non vanno versionati nel repo.
 
 ## Stato e prossimi step
