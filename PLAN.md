@@ -29,26 +29,20 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
   - Punti da sistemare/considerare (IA server-driven + robustezza):
     - Backend: mossa IA eseguita automaticamente quando è il suo turno (pattern standard); serializzazione mutazioni tramite `game_locks`.
     - Frontend: coda eventi WS + hold per mantenere la sequenza didattica (carta 1 → carta 2 → risultato) anche se gli update arrivano “subito”.
-    - Contratto WS fissato: gli snapshot includono `type: "observation"` (allineare README/UI e test).
+    - Contratto WS: gli snapshot includono `type: "observation"` (allineato in README/UI/test).
     - Chiarire vincolo attuale UI “umano = player 0” (focus 2-player; da generalizzare se aggiungiamo scelta giocatore/4-player in UI).
   - Timing animazioni (scelta architetturale):
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Coverage: misurata con `pytest-cov` (attuale ~56% su `briscola_ai`; obiettivo: crescita progressiva).
+- Test attuali: **79** (pytest).
+- Coverage: misurata con `pytest-cov` (attuale ~81% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
+- AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
 
 Comandi di verifica (sempre validi):
 - test: `pytest`
 - coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
-
-## Stato attuale
-
-- Backend: `FastAPI` + endpoint HTTP + `WebSocket` (stato partita in memoria).
-- Motore (canonico): `GameState + step()` in `src/briscola_ai/domain/` (2 e 4 giocatori).
-- Frontend: asset statici in `src/briscola_ai/frontend/static/` (HTML/CSS/JS).
-- Test: presenti in `tests/` (unit + integrazione API base).
-- “AI”: bot casuale server‑driven (backend gioca automaticamente quando è il suo turno).
 
 ## Principi guida (per un refactor “che insegna”)
 
@@ -95,8 +89,8 @@ Obiettivo: aggiornare senza rompere API e comportamento, usando i test come rete
 Stato attuale (dopo upgrade):
 - venv: Python 3.14
 - stack: FastAPI + Pydantic v2
-- tests: verdi (29)
-- coverage totale: ~56% (focus prossimo: aumentare copertura di `backend/server.py` e rami non coperti del motore)
+- tests: verdi (79)
+- coverage totale: ~81% (focus prossimo: aumentare copertura di `main.py` e dei rami non coperti del backend)
 
 Prossimi step (per aumentare coverage, focus 2-player):
 - [x] Testare più rami API: `404 partita`, `player_index` invalido, `get_game_result` e fine partita.

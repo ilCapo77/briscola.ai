@@ -1,6 +1,6 @@
 # Briscola AI
 
-![Coverage](https://img.shields.io/badge/coverage-84%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen)
 
 Un progetto didattico “end‑to‑end” nato da un’esigenza concreta: **studiare le reti neurali con un progetto reale**, non con esempi astratti.
 
@@ -18,7 +18,9 @@ Obiettivo finale: arrivare a un’IA (rete neurale) che impari a giocare in modo
 - Motore (`domain/`) con supporto **2 giocatori** e **4 giocatori** (a squadre)
 - Interfaccia utente web
 - Aggiornamenti in tempo reale via WebSocket
-- IA semplice (attualmente strategia casuale) con modello "standard" server‑driven:
+- IA selezionabile (baseline + modelli locali) con modello "standard" server‑driven:
+  - Agenti baseline: `random`, `greedy_points`, `heuristic_v1` (metadati e descrizioni in italiano esposti dal backend)
+  - Modelli locali: `bc_model` carica un file `.npz` scelto dalla UI (catalogo server-side, no path arbitrari dal browser)
   - Il backend avanza automaticamente la partita quando è il turno dell'IA
   - Il backend non introduce delay di presentazione (niente `asyncio.sleep()` per animazioni)
   - Il frontend controlla solo la presentazione (hold/animazioni) degli update ricevuti via WS
@@ -100,39 +102,6 @@ L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
   - `scripts/export_dataset.py` – export SQLite → JSONL
   - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio-only)
 - `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
-
-## Contesti del progetto (Domain / Backend / Frontend / AI)
-
-### Domain (motore di gioco)
-
-Il dominio è la “fonte di verità” del gioco: regole, stato e transizioni.
-
-- Dove: `src/briscola_ai/domain/`
-- Cosa contiene: `GameState`, `step(state, action)`, regole isolate (`rules.py`), modelli canonici (`Card`, `Suit`, `Rank`)
-- Obiettivo: essere deterministico, testabile e riusabile senza FastAPI/UI
-
-### Backend (FastAPI + WebSocket)
-
-Il backend è un adattatore: espone il dominio via HTTP/WS e gestisce le partite in memoria.
-
-- Dove: `src/briscola_ai/backend/`
-- Cosa contiene: DTO Pydantic v2 (`dto.py`), server FastAPI (`server.py`), endpoint REST + WebSocket
-- Pattern: server‑driven per l’IA (il backend fa avanzare la partita quando tocca all’IA)
-
-### Frontend (UI web)
-
-La UI è un client “thin”: presenta gli snapshot e gestisce animazioni/hold; non implementa regole.
-
-- Dove: `src/briscola_ai/frontend/static/`
-- Note: la UI attuale è pensata soprattutto per il **2-player**
-
-### AI & ML (policy, dataset, training)
-
-Qui vivono agenti baseline e pipeline ML (self-play, export dataset, training, valutazioni).
-
-- Dove: `src/briscola_ai/ai/` e `scripts/`
-- Anti-cheat: gli agenti vedono solo `PlayerObservation` (osservazione parziale lecita)
-- Artefatti: DB/dataset/modelli in `data/` sono output locali (non versionati)
 
 ## Backend (FastAPI + WebSocket)
 
