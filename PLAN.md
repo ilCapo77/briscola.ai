@@ -301,6 +301,9 @@ Piano di lavoro:
 - [x] Definire un “catalogo modelli” locale:
   - directory configurabile via env (es. `BRISCOLA_MODELS_DIR`, default sotto `./data/`)
   - lista di file `.npz` con metadati (`metadata_json`) e una descrizione breve in italiano (best effort)
+- [x] Standardizzare i metadati UI nei trainer:
+  - i modelli salvati da `scripts/train_*.py` includono `label` e `description_it` dentro `metadata_json`
+  - la UI li usa per mostrare un dropdown più leggibile (senza euristiche sul filename)
 - [x] Esporre un endpoint backend per la UI:
   - `GET /ai/models` → lista `{ id, label, description_it, metadata }` (senza path assoluti)
 - [x] Estendere creazione partita:

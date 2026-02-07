@@ -66,6 +66,10 @@ Se hai addestrato un modello (BC / PG / A2C) e lo hai salvato in un file `.npz`,
    - scegli **“Modello locale (.npz)”** come avversario;
    - seleziona il modello dal dropdown “Modello (file .npz)”.
 
+Nota UI:
+- il dropdown mostra `metadata_json.label` e la descrizione mostra `metadata_json.description_it` (se presenti nel file `.npz`);
+- i trainer del progetto (`scripts/train_*.py`) salvano questi campi in automatico.
+
 Nota sicurezza:
 - il browser non invia path arbitrari: invia solo un `ai_model_id` (path relativo) scelto tra quelli esposti da `GET /api/ai/models`;
 - il backend rifiuta path traversal (`..`) e carica modelli solo dentro `BRISCOLA_MODELS_DIR`.

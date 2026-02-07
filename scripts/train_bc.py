@@ -328,6 +328,34 @@ def main() -> int:
     data_path = Path(args.data)
     out_path = Path(args.out)
 
+    # Metadati UI (opzionali ma utili per la selezione del modello in frontend).
+    #
+    # Se presenti nel `metadata_json`, la UI può mostrare:
+    # - un label sintetico (per il dropdown)
+    # - una descrizione breve in italiano (per la help text)
+    #
+    # Nota: sono best-effort e non influenzano il funzionamento del modello.
+    def _make_ui_metadata(*, model: str) -> tuple[str, str]:
+        dataset = data_path.name
+        epochs = int(args.epochs)
+        lr = float(args.lr) if args.lr is not None else (0.5 if model == "linear" else 1e-3)
+
+        if model == "linear":
+            label = f"BC lineare (epoche {epochs})"
+            description_it = (
+                "Behavior Cloning (supervised): modello lineare softmax su 40 carte + action mask. "
+                f"Addestrato su dataset `{dataset}` (epoche={epochs}, lr={lr:g})."
+            )
+            return label, description_it
+
+        hidden_dim = int(args.hidden_dim)
+        label = f"BC MLP (epoche {epochs})"
+        description_it = (
+            "Behavior Cloning (supervised): MLP (1 hidden layer + ReLU) su 40 carte + action mask. "
+            f"Addestrato su dataset `{dataset}` (hidden={hidden_dim}, epoche={epochs}, lr={lr:g})."
+        )
+        return label, description_it
+
     x_all, mask_all, y_all = _build_training_examples(data_path)
 
     rng = np.random.default_rng(args.seed)
@@ -347,6 +375,7 @@ def main() -> int:
     lr = float(args.lr) if args.lr is not None else (0.5 if args.model == "linear" else 1e-3)
 
     metrics: list[TrainMetrics] = []
+    ui_label, ui_description_it = _make_ui_metadata(model=str(args.model))
 
     if args.model == "linear":
         # Inizializzazione pesi (piccola).
@@ -385,6 +414,8 @@ def main() -> int:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         payload = {
             "format": "linear_softmax_bc_v1",
+            "label": ui_label,
+            "description_it": ui_description_it,
             "feature_dim": int(d),
             "action_dim": 40,
             "seed": int(args.seed),
@@ -467,6 +498,8 @@ def main() -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
         "format": "mlp_bc_v1",
+        "label": ui_label,
+        "description_it": ui_description_it,
         "feature_dim": int(d),
         "hidden_dim": int(hdim),
         "action_dim": 40,

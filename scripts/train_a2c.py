@@ -547,8 +547,31 @@ def main() -> int:
             value_losses.clear()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
+
+    # Metadati UI (opzionali ma utili per il dropdown dei modelli in frontend).
+    def _format_num_games(n: int) -> str:
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.0f}k"
+        return str(n)
+
+    def _format_opponent_label() -> str:
+        if opponent_pool is not None:
+            parts = [f"{name} {weight:.2f}" for name, weight in opponent_pool.to_metadata().items()]
+            return "mix(" + ", ".join(parts) + ")"
+        return str(args.opponent).strip()
+
+    ui_label = f"A2C shaped {_format_num_games(int(args.num_games))} game"
+    ui_description_it = (
+        "Policy addestrata con A2C (actor-critic) con reward shaping (delta punti per mano), "
+        f"contro {_format_opponent_label()}. "
+        "Osservazione anti-cheat: PlayerObservation (vista parziale lecita)."
+    )
     payload = {
         "format": "mlp_a2c_shaped_v1",
+        "label": ui_label,
+        "description_it": ui_description_it,
         "feature_dim": int(policy.feature_dim),
         "hidden_dim": int(policy.hidden_dim),
         "action_dim": 40,
