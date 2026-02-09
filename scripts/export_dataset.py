@@ -178,7 +178,21 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
     # Compatibilità: DB creati prima dell'introduzione di `code_version`/`rules_version`
     # potrebbero non avere queste colonne. Interroghiamo lo schema e selezioniamo solo ciò che esiste.
     game_columns = {r[1] for r in conn.execute("PRAGMA table_info(games);").fetchall()}
-    select_cols = [c for c in ("game_id", "num_players", "seed", "code_version", "rules_version") if c in game_columns]
+    select_cols = [
+        c
+        for c in (
+            "game_id",
+            "num_players",
+            "seed",
+            "code_version",
+            "rules_version",
+            "client_id",
+            "finished_at",
+            "aborted_at",
+            "aborted_reason",
+        )
+        if c in game_columns
+    ]
     select_sql = f"SELECT {', '.join(select_cols)} FROM games;"
     games: dict[str, dict[str, Any]] = {}
     for row in conn.execute(select_sql):
@@ -191,6 +205,14 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
             meta["code_version"] = row["code_version"]
         if "rules_version" in row.keys():
             meta["rules_version"] = row["rules_version"]
+        if "client_id" in row.keys():
+            meta["client_id"] = row["client_id"]
+        if "finished_at" in row.keys():
+            meta["finished_at"] = row["finished_at"]
+        if "aborted_at" in row.keys():
+            meta["aborted_at"] = row["aborted_at"]
+        if "aborted_reason" in row.keys():
+            meta["aborted_reason"] = row["aborted_reason"]
         games[row["game_id"]] = meta
 
     counters = {
