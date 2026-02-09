@@ -318,6 +318,28 @@ Piano di lavoro:
   - la UI disabilita la selezione di modelli non compatibili e fallisce presto in modo chiaro
 - [x] Estendere creazione partita:
   - supportare `ai_agent="bc_model"` + `ai_model_id`
+
+### Fase 5E — Roadmap breve per potenziare i modelli (league/curriculum)
+
+Obiettivo: aumentare la forza/robustezza dei modelli RL **senza perdere riproducibilità** e mantenendo la proprietà anti-cheat
+(gli agenti vedono solo `PlayerObservation`).
+
+Roadmap (in ordine):
+1. **League training contro un “best” congelato**:
+   - introdurre un alias agente `best_a2c` che carica un file locale “campione” (es. `data/models/best_a2c.npz`)
+   - usare `best_a2c` dentro `--opponent-mix` (e.g. `best_a2c:0.5,heuristic_v1:0.3,random:0.2`)
+   - idea didattica: evitare “chasing” instabile (due policy che cambiano insieme) e ridurre regressioni
+2. **Curriculum / mix experiments**:
+   - definire 2–3 preset di mix avversari (easy/standard/hard) e farli scalare nel training
+   - misurare la generalizzazione con `evaluate_matrix.py` su standard+holdout
+3. **(Opzionale) PPO + GAE**:
+   - introdurre clipping PPO + advantage con GAE per stabilità su training più lunghi
+   - mantenere la stessa observation/action space per confronti “fair”
+
+Stato:
+- [x] (5E.1) Alias agente `best_a2c` (file locale) + documentazione
+- [ ] (5E.2) Preset curriculum + harness “train+eval” riproducibile
+- [ ] (5E.3) Spike PPO+GAE (solo se serve)
   - validare che `ai_model_id` punti a un file whitelisted dentro `BRISCOLA_MODELS_DIR` (no `..`, no path arbitrari)
 - [x] Aggiornare frontend:
   - mostrare un select “Modello” solo quando l’utente sceglie l’agente `bc_model`

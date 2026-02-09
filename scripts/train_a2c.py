@@ -305,7 +305,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Train RL A2C (MLP, 40 carte + action mask) con reward shaping")
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC/RL).")
-    parser.add_argument("--opponent", default="heuristic_v1", help="Nome avversario (se non usi --opponent-mix).")
+    parser.add_argument(
+        "--opponent",
+        default="heuristic_v1",
+        help=(
+            "Nome avversario (se non usi --opponent-mix). "
+            "Esempi: heuristic_v1, random, greedy_points, best_a2c "
+            "(alias che carica `best_a2c.npz` dalla directory modelli)."
+        ),
+    )
     parser.add_argument(
         "--opponent-mix",
         default="",

@@ -419,6 +419,7 @@ Output (convenzione):
 
 Note pratiche:
 - log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
+- coerenza directory modelli: la pipeline imposta `BRISCOLA_MODELS_DIR=<models-dir>` per i processi figli, così alias come `best_a2c` risolvono sempre nella stessa cartella.
 - modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data` (conserva solo i file `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`).
 
 Esempio A2C (da zero, opponent mix, poi eval medium+big):
@@ -434,6 +435,32 @@ python scripts/run_experiment.py \
 
 Warm-start (opzionale):
 - se hai già un best locale, puoi ripartire da `--init ./data/models/best_a2c.npz` (stesso schema pesi/encoder).
+
+#### League training (avversario “best” congelato) — `best_a2c`
+
+Quando inizi a ottenere modelli RL forti, allenare “sempre contro lo stesso baseline” può diventare limitante.
+Una tecnica pratica è la **league**: continui ad allenare un nuovo modello, ma lo fai giocare spesso contro
+un avversario “campione” **congelato** (non cambia durante quel run).
+
+Per supportare questo in modo riproducibile esiste l’alias agente:
+- `best_a2c` → carica un file locale `best_a2c.npz` dalla *directory modelli* (`BRISCOLA_MODELS_DIR`, oppure `./data/models`, fallback `./data`).
+
+Da dove arriva `best_a2c.npz`?
+- la pipeline `scripts/run_experiment.py` (default `--update-best`) aggiorna `./data/models/best_a2c.npz` quando trova un modello migliore.
+
+Esempio: allenare A2C contro un mix che include il best congelato:
+
+```
+python scripts/train_a2c.py \
+  --out ./data/models/a2c_vs_best_mix.npz \
+  --opponent-mix best_a2c:0.5,heuristic_v1:0.3,random:0.2 \
+  --num-games 200000 \
+  --seed 6 \
+  --seat-fair
+```
+
+Nota:
+- se `best_a2c.npz` manca (o è incompatibile con l’encoder 2-player v1), il trainer fallisce subito con un errore esplicativo.
 
 Nota metrica “best model”:
 - per default usiamo `avg_diff` su suite `holdout` vs `heuristic_v1` (preferibilmente benchmark `big`).

@@ -29,6 +29,8 @@ from ..domain.models import Card, Suit
 from ..domain.observation import PlayerObservation
 from ..domain.rules import trick_points, who_wins_trick
 from .bc_model_agent import BCModelAgent
+from .model_catalog import get_models_dir_from_env, resolve_model_path
+from .training.observation_encoder import FEATURE_DIM_2P_V1
 
 
 class Agent(Protocol):
@@ -299,6 +301,17 @@ BC_MODEL_SPEC = AgentSpec(
     ),
 )
 
+BEST_A2C_SPEC = AgentSpec(
+    name="best_a2c",
+    label="Best A2C (locale)",
+    description_it=(
+        "Carica un modello “campione” A2C da un file locale `best_a2c.npz` nella directory modelli. "
+        "È pensato per training in stile league (avversario congelato) e per confronti riproducibili."
+    ),
+)
+
+_BEST_A2C_DEFAULT_MODEL_ID = "best_a2c.npz"
+
 AI_AGENTS_COMMON_NOTE_IT = (
     "Nota anti-cheat: tutte le IA ricevono solo un’osservazione parziale (PlayerObservation). "
     "Non possono leggere l’ordine del mazzo né le carte specifiche in mano all’avversario."
@@ -317,6 +330,27 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
     Nota:
     usiamo una mappa esplicita (no import dinamici) per semplicità e riproducibilità.
     """
+    if name == "best_a2c":
+        models_dir = get_models_dir_from_env()
+        try:
+            path = resolve_model_path(models_dir=models_dir, model_id=_BEST_A2C_DEFAULT_MODEL_ID)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                "Agente 'best_a2c' non disponibile: file modello non trovato. "
+                "Convenzione: salva (o copia) un modello `.npz` compatibile in "
+                f"{models_dir.resolve()!s}/{_BEST_A2C_DEFAULT_MODEL_ID}. "
+                "Puoi cambiare directory impostando `BRISCOLA_MODELS_DIR`."
+            ) from exc
+
+        agent = BCModelAgent.from_npz(path)
+        if int(agent.model.feature_dim) != int(FEATURE_DIM_2P_V1):
+            raise ValueError(
+                "Agente 'best_a2c' non compatibile: feature_dim non coerente con l'encoder 2-player v1. "
+                f"model={int(agent.model.feature_dim)} expected={int(FEATURE_DIM_2P_V1)} "
+                f"({path})."
+            )
+        return agent
+
     if name == "bc_model":
         if model_path is None:
             raise ValueError("Agente 'bc_model' richiede `model_path` (file .npz)")

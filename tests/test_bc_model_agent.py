@@ -15,9 +15,10 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from briscola_ai.ai.agents import build_agent
 from briscola_ai.ai.bc_model_agent import BCModelAgent, load_bc_model_npz
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
-from briscola_ai.ai.training.observation_encoder import encode_player_observation_2p
+from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1, encode_player_observation_2p
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
 
@@ -140,3 +141,32 @@ def test_bc_model_agent_supports_mlp_format(tmp_path: Path) -> None:
     agent = BCModelAgent.from_npz(model_path)
     idx = agent.choose_card_index(obs, rng=random.Random(0))
     assert idx == 0
+
+
+def test_build_agent_best_a2c_loads_from_models_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    `best_a2c` è un alias comodo per league training: carica `best_a2c.npz` dalla directory modelli.
+
+    Questo test verifica che:
+    - la risoluzione avvenga tramite `BRISCOLA_MODELS_DIR`
+    - il file venga caricato come policy compatibile (feature_dim = encoder 2p v1)
+    """
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+
+    model_path = tmp_path / "best_a2c.npz"
+    w1 = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
+    b1 = np.zeros((1,), dtype=np.float32)
+    w2 = np.zeros((1, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    np.savez(model_path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json='{"format":"mlp_a2c_shaped_v1"}')
+
+    agent = build_agent("best_a2c")
+    assert isinstance(agent, BCModelAgent)
+    assert agent.model_path.name == "best_a2c.npz"
+
+
+def test_build_agent_best_a2c_errors_if_missing(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Se manca il file `best_a2c.npz`, l'errore deve essere chiaro e user-friendly."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    with pytest.raises(ValueError, match=r"best_a2c\.npz"):
+        build_agent("best_a2c")

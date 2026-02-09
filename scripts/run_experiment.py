@@ -39,7 +39,7 @@ from briscola_ai.ai.experiment_pipeline import (
 from briscola_ai.versioning import get_code_version, get_rules_version
 
 
-def _run(cmd: list[str], *, log_path: Path) -> None:
+def _run(cmd: list[str], *, log_path: Path, env_overrides: dict[str, str] | None = None) -> None:
     """
     Esegue un comando e fa tee su stdout + file.
 
@@ -58,6 +58,8 @@ def _run(cmd: list[str], *, log_path: Path) -> None:
         # così vediamo i log “live” (utile per capire se il training diverge).
         env = os.environ.copy()
         env["PYTHONUNBUFFERED"] = "1"
+        if env_overrides:
+            env.update(env_overrides)
 
         proc = subprocess.Popen(
             cmd,
@@ -275,7 +277,8 @@ def main() -> int:
         raise ValueError(f"`--train-extra` non può includere {sorted(forbidden)} (gestiti dalla pipeline).")
     train_cmd += list(train_extra)
 
-    _run(train_cmd, log_path=train_log)
+    env_overrides = {"BRISCOLA_MODELS_DIR": str(models_dir)}
+    _run(train_cmd, log_path=train_log, env_overrides=env_overrides)
     if not model_path.exists():
         raise RuntimeError(f"Training completato ma il modello non esiste: {model_path}")
 
@@ -311,7 +314,7 @@ def main() -> int:
             "--format",
             "csv",
         ]
-        _run(eval_cmd, log_path=log_path)
+        _run(eval_cmd, log_path=log_path, env_overrides=env_overrides)
         matrix_paths[b] = out_json
 
     # --- Manifest + score ---
