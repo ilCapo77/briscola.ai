@@ -197,22 +197,16 @@ class EventLog:
         """
         ts = time.time() if finished_at is None else float(finished_at)
         with self._lock:
-            self._conn.execute(
+            cur = self._conn.execute(
                 """
                 UPDATE games
-                SET finished_at = COALESCE(finished_at, ?)
-                WHERE game_id = ?;
+                SET finished_at = ?
+                WHERE game_id = ? AND finished_at IS NULL;
                 """,
                 (ts, game_id),
             )
             self._conn.commit()
-            # Nota: rowcount può essere 1 anche se finished_at era già settata (dipende da SQLite).
-            # Per evitare ambiguità, facciamo un check esplicito.
-            row = self._conn.execute(
-                "SELECT finished_at FROM games WHERE game_id = ?;",
-                (game_id,),
-            ).fetchone()
-            return bool(row is not None and row[0] == ts)
+            return bool(cur.rowcount == 1)
 
     def try_mark_game_aborted(
         self,
