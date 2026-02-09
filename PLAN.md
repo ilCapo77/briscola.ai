@@ -356,6 +356,14 @@ Miglioramenti di ergonomia (pipeline):
   - mantenere in `data/models/` solo `best_<algo>.npz` + `best_<algo>.json`
   - evitare accumulo di molti `.npz` intermedi (restano i manifest/log in `benchmarks/experiments/`)
 
+Prossimi esperimenti (A2C):
+- [x] Run “lunga” 500k:
+  - warm-start da `data/models/best_a2c.npz`
+  - config: `lr=3e-4`, `entropy_beta=1e-3`, mix `heuristic_v1:0.7,random:0.2,greedy_points:0.1`, seat-fair
+  - benchmark: `medium,big`
+  - criterio di successo: aggiornare `best_a2c.npz` se migliora `big holdout vs heuristic_v1 avg_diff`
+  - risultato: aggiornato `best_a2c.npz` con `big holdout vs heuristic_v1 avg_diff = +11.19` (seed training=9, 500k game)
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

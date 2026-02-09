@@ -48,7 +48,8 @@ def _run(cmd: list[str], *, log_path: Path) -> None:
     anche dopo giorni (utile quando alleni decine di modelli).
     """
     log_path.parent.mkdir(parents=True, exist_ok=True)
-    with log_path.open("w", encoding="utf-8") as f:
+    # `buffering=1` -> line buffering (in text mode): aiuta ad avere log “live” anche su file.
+    with log_path.open("w", encoding="utf-8", buffering=1) as f:
         f.write("$ " + " ".join(cmd) + "\n\n")
         f.flush()
 
@@ -69,7 +70,9 @@ def _run(cmd: list[str], *, log_path: Path) -> None:
         assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
+            sys.stdout.flush()
             f.write(line)
+            f.flush()
         rc = proc.wait()
         if rc != 0:
             raise RuntimeError(f"Comando fallito (exit={rc}): {' '.join(cmd)}")

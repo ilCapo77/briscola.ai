@@ -393,17 +393,19 @@ Note pratiche:
 - log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
 - modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data` (conserva solo i file `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`).
 
-Esempio A2C (warm-start + opponent mix, poi eval medium+big):
+Esempio A2C (da zero, opponent mix, poi eval medium+big):
 
 ```
 python scripts/run_experiment.py \
   --algo a2c \
-  --init ./data/bc_model_teacher_mlp.npz \
   --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 \
   --num-games 200000 \
   --train-seed 5 \
   --seat-fair
 ```
+
+Warm-start (opzionale):
+- se hai già un best locale, puoi ripartire da `--init ./data/models/best_a2c.npz` (stesso schema pesi/encoder).
 
 Nota metrica “best model”:
 - per default usiamo `avg_diff` su suite `holdout` vs `heuristic_v1` (preferibilmente benchmark `big`).
