@@ -22,6 +22,7 @@ gli artefatti in `data/` e `benchmarks/` sono locali (gitignored).
 from __future__ import annotations
 
 import argparse
+import os
 import shutil
 import subprocess
 import sys
@@ -51,7 +52,20 @@ def _run(cmd: list[str], *, log_path: Path) -> None:
         f.write("$ " + " ".join(cmd) + "\n\n")
         f.flush()
 
-        proc = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
+        # Importante: quando il processo figlio scrive su stdout e noi lo pipiamo (stdout=PIPE),
+        # Python *bufferizza* le print (non essendo un TTY). Impostiamo quindi un env unbuffered,
+        # così vediamo i log “live” (utile per capire se il training diverge).
+        env = os.environ.copy()
+        env["PYTHONUNBUFFERED"] = "1"
+
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
         assert proc.stdout is not None
         for line in proc.stdout:
             sys.stdout.write(line)
@@ -61,7 +75,7 @@ def _run(cmd: list[str], *, log_path: Path) -> None:
             raise RuntimeError(f"Comando fallito (exit={rc}): {' '.join(cmd)}")
 
 
-def _copy_best_model(*, model_path: Path, best_path: Path, score: float, meta_path: Path, manifest: dict) -> None:
+def _copy_best_model(*, model_path: Path, best_path: Path, score: float, meta_path: Path, manifest: dict) -> bool:
     """
     Aggiorna il best model se lo score è migliore.
 
@@ -79,7 +93,7 @@ def _copy_best_model(*, model_path: Path, best_path: Path, score: float, meta_pa
 
     if previous_score is not None and score <= previous_score:
         print(f"Best model invariato: score={score:+.2f} <= best={previous_score:+.2f}")
-        return
+        return False
 
     best_path.parent.mkdir(parents=True, exist_ok=True)
     shutil.copy2(model_path, best_path)
@@ -87,12 +101,36 @@ def _copy_best_model(*, model_path: Path, best_path: Path, score: float, meta_pa
         meta_path,
         {
             "score": float(score),
-            "model_path": str(model_path),
+            # Nota: se vuoi tenere `data/models/` minimal, questo path deve puntare al best
+            # (non al modello “run-specific”, che potrebbe essere eliminato).
+            "model_path": str(best_path),
+            "source_model_path": str(model_path),
             "updated_utc": utc_now_iso(),
             "manifest": manifest,
         },
     )
     print(f"Updated best model: {best_path} (score={score:+.2f})")
+    return True
+
+
+def _prune_models_dir(*, models_dir: Path, algo: str) -> None:
+    """
+    Mantiene in `models_dir` solo i file “best” per l’algoritmo indicato.
+
+    Regola conservativa:
+    - tocchiamo solo file nella root di `models_dir` (niente ricorsione);
+    - tocchiamo solo `.npz` e `.json`;
+    - preserviamo `best_<algo>.npz` e `best_<algo>.json`.
+    """
+    keep = {f"best_{algo}.npz", f"best_{algo}.json"}
+    for path in models_dir.iterdir():
+        if not path.is_file():
+            continue
+        if path.name in keep:
+            continue
+        if path.suffix.lower() not in {".npz", ".json"}:
+            continue
+        path.unlink()
 
 
 def main() -> int:
@@ -138,7 +176,16 @@ def main() -> int:
         "--train-extra",
         nargs=argparse.REMAINDER,
         help=(
-            "Argomenti extra passati al trainer (usa `--` per separarli). "
+            "DEPRECATO: usa argomenti posizionali dopo `--` (vedi `trainer_args`). "
+            "Esempio: --train-extra --lr 3e-4 --entropy-beta 1e-3"
+        ),
+    )
+    parser.add_argument(
+        "trainer_args",
+        nargs=argparse.REMAINDER,
+        help=(
+            "Argomenti extra pass-through al trainer. "
+            "Usa `--` per separarli dalle opzioni della pipeline. "
             "Esempio: python scripts/run_experiment.py --algo a2c -- --lr 3e-4 --entropy-beta 1e-3"
         ),
     )
@@ -148,6 +195,15 @@ def main() -> int:
         default=True,
         help=(
             "Aggiorna `best_<algo>.npz` se lo score migliora (default: true). Usa `--no-update-best` per disabilitare."
+        ),
+    )
+    parser.add_argument(
+        "--minimal-data",
+        action="store_true",
+        help=(
+            "Mantiene `data/models/` minimale: conserva solo `best_<algo>.npz` + `best_<algo>.json` "
+            "e rimuove gli altri file. Per riproducibilità, copia comunque il modello finale dentro "
+            "`benchmarks/experiments/<name>/model.npz`."
         ),
     )
     args = parser.parse_args()
@@ -199,17 +255,34 @@ def main() -> int:
     if bool(args.seat_fair):
         train_cmd.append("--seat-fair")
 
-    train_extra = args.train_extra or []
+    train_extra = list(args.train_extra or [])
+    positional_extra = list(args.trainer_args or [])
+    if train_extra and positional_extra:
+        raise ValueError("Usa o `--train-extra` oppure gli argomenti dopo `--`, non entrambi.")
+
+    if positional_extra:
+        train_extra = positional_extra
+
+    # Argparse include spesso `--` dentro `REMAINDER` quando usiamo il separatore.
+    # Per pass-through al trainer, lo togliamo.
+    if train_extra and train_extra[0] == "--":
+        train_extra = train_extra[1:]
     forbidden = {"--out", "--data"}
     if any(tok in forbidden for tok in train_extra):
         raise ValueError(f"`--train-extra` non può includere {sorted(forbidden)} (gestiti dalla pipeline).")
-    if train_extra and train_extra[0] == "--":
-        train_extra = train_extra[1:]
     train_cmd += list(train_extra)
 
     _run(train_cmd, log_path=train_log)
     if not model_path.exists():
         raise RuntimeError(f"Training completato ma il modello non esiste: {model_path}")
+
+    # Se vogliamo mantenere `data/models/` minimal, copiamo subito una copia del modello
+    # dentro la cartella dell'esperimento (così il manifest resta “auto-consistente” anche
+    # se poi eliminiamo il file da `data/models/`).
+    experiment_model_path: Path | None = None
+    if bool(args.minimal_data):
+        experiment_model_path = experiments_dir / "model.npz"
+        shutil.copy2(model_path, experiment_model_path)
 
     # --- Evaluation matrix ---
     benchmarks = [b.strip() for b in str(args.benchmarks).split(",") if b.strip()]
@@ -245,7 +318,7 @@ def main() -> int:
         "code_version": get_code_version(),
         "rules_version": get_rules_version(),
         "algo": algo,
-        "model_path": str(model_path),
+        "model_path": str(experiment_model_path or model_path),
         "train": {"cmd": train_cmd},
         "eval": [
             {
@@ -275,12 +348,36 @@ def main() -> int:
     write_json(manifest_path, manifest)
     print(f"Wrote manifest: {manifest_path}")
 
+    best_updated = False
     if bool(args.update_best) and score is not None:
         best_path = models_dir / f"best_{algo}.npz"
         best_meta = models_dir / f"best_{algo}.json"
-        _copy_best_model(
+        best_updated = _copy_best_model(
             model_path=model_path, best_path=best_path, score=score, meta_path=best_meta, manifest=manifest
         )
+
+    if bool(args.minimal_data):
+        if not bool(args.update_best):
+            raise ValueError("--minimal-data richiede --update-best (altrimenti non sappiamo cosa preservare).")
+
+        # In modalità “minimal”, il modello “run-specific” in `data/models/<name>.npz` diventa ridondante:
+        # - abbiamo una copia stabile in `benchmarks/experiments/<name>/model.npz`
+        # - abbiamo eventualmente aggiornato il `best_<algo>.npz`
+        try:
+            model_path.unlink()
+        except FileNotFoundError:
+            pass
+
+        # Ripuliamo eventuali altri modelli lasciati da run precedenti.
+        _prune_models_dir(models_dir=models_dir, algo=algo)
+
+        # Piccola nota nel manifest per ricordare che il file in `data/models/` è stato rimosso.
+        manifest["minimal_data"] = {
+            "enabled": True,
+            "model_copied_to": str(experiment_model_path) if experiment_model_path else None,
+            "best_updated": bool(best_updated),
+        }
+        write_json(manifest_path, manifest)
 
     return 0
 

@@ -389,6 +389,10 @@ Output (convenzione):
 - risultati: `./benchmarks/experiments/<name>/matrix_medium.json`, `matrix_big.json`, `manifest.json`
 - best model (locale): `./data/models/best_<algo>.npz` + `best_<algo>.json` con lo score
 
+Note pratiche:
+- log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
+- modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data` (conserva solo i file `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`).
+
 Esempio A2C (warm-start + opponent mix, poi eval medium+big):
 
 ```
