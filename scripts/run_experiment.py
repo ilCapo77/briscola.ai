@@ -144,9 +144,11 @@ def main() -> int:
     )
     parser.add_argument(
         "--update-best",
-        action="store_true",
+        action=argparse.BooleanOptionalAction,
         default=True,
-        help="Aggiorna `best_<algo>.npz` se lo score migliora (default: true).",
+        help=(
+            "Aggiorna `best_<algo>.npz` se lo score migliora (default: true). Usa `--no-update-best` per disabilitare."
+        ),
     )
     args = parser.parse_args()
 

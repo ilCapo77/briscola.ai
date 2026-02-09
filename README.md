@@ -403,6 +403,7 @@ python scripts/run_experiment.py \
 
 Nota metrica “best model”:
 - per default usiamo `avg_diff` su suite `holdout` vs `heuristic_v1` (preferibilmente benchmark `big`).
+- per run “di prova” puoi disabilitare l’aggiornamento del best: `--no-update-best`.
 
 ### Export dataset (JSONL)
 

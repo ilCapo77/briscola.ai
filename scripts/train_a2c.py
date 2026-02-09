@@ -558,7 +558,7 @@ def main() -> int:
 
     def _format_opponent_label() -> str:
         if opponent_pool is not None:
-            parts = [f"{name} {weight:.2f}" for name, weight in opponent_pool.to_metadata().items()]
+            parts = [f"{item.name} {float(item.prob):.2f}" for item in opponent_pool.items]
             return "mix(" + ", ".join(parts) + ")"
         return str(args.opponent).strip()
 
