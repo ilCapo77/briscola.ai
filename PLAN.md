@@ -374,6 +374,8 @@ Piano di lavoro:
   - unit test per estrazione metrica da JSON della matrice e per naming deterministico dell’esperimento
 - [x] Documentazione:
   - aggiornare `README.md` con un esempio end-to-end e con la struttura cartelle (`data/models`, `benchmarks/experiments/...`)
+- [x] Igiene `--minimal-data`:
+  - supportare anche `--no-update-best` (screening): mantenere `data/models/` minimale senza forzare l’aggiornamento del best
 
 Workflow consigliato (tuning):
 - [x] Mini-sweep “veloce” (no update best):

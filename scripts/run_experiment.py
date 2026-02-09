@@ -462,25 +462,42 @@ def main() -> int:
         )
 
     if bool(args.minimal_data):
-        if not bool(args.update_best):
-            raise ValueError("--minimal-data richiede --update-best (altrimenti non sappiamo cosa preservare).")
-
-        # In modalità “minimal”, il modello “run-specific” in `data/models/<name>.npz` diventa ridondante:
+        # In modalità “minimal”, vogliamo mantenere `data/models/` il più pulito possibile.
+        #
+        # Caso tipico:
         # - abbiamo una copia stabile in `benchmarks/experiments/<name>/model.npz`
-        # - abbiamo eventualmente aggiornato il `best_<algo>.npz`
-        try:
-            model_path.unlink()
-        except FileNotFoundError:
-            pass
+        # - abbiamo (già) un `best_<algo>.npz` locale, o lo aggiorniamo in questo run
+        #
+        # Nota:
+        # supportiamo `--minimal-data` anche con `--no-update-best` per fare “screening” veloce:
+        # - se esiste già `best_<algo>.npz`, possiamo rimuovere il modello run-specific e mantenere solo i best
+        # - se NON esiste ancora un best e non vogliamo aggiornarlo, lasciamo il modello run-specific per comodità
+        best_path = models_dir / f"best_{algo}.npz"
+        best_present = best_path.exists()
 
-        # Ripuliamo eventuali altri modelli lasciati da run precedenti.
-        _prune_models_dir(models_dir=models_dir, algo=algo)
+        if bool(args.update_best) or best_present:
+            try:
+                model_path.unlink()
+            except FileNotFoundError:
+                pass
+            _prune_models_dir(models_dir=models_dir, algo=algo)
+        else:
+            # Primo run “minimal” senza best: preserviamo solo il modello run-specific.
+            for path in models_dir.iterdir():
+                if not path.is_file():
+                    continue
+                if path == model_path:
+                    continue
+                if path.suffix.lower() not in {".npz", ".json"}:
+                    continue
+                path.unlink()
 
         # Piccola nota nel manifest per ricordare che il file in `data/models/` è stato rimosso.
         manifest["minimal_data"] = {
             "enabled": True,
             "model_copied_to": str(experiment_model_path) if experiment_model_path else None,
             "best_updated": bool(best_updated),
+            "update_best_enabled": bool(args.update_best),
         }
         write_json(manifest_path, manifest)
 

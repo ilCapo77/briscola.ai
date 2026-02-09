@@ -420,7 +420,9 @@ Output (convenzione):
 Note pratiche:
 - log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
 - coerenza directory modelli: la pipeline imposta `BRISCOLA_MODELS_DIR=<models-dir>` per i processi figli, così alias come `best_a2c` risolvono sempre nella stessa cartella.
-- modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data` (conserva solo i file `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`).
+- modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data`.
+  - se `--update-best` è attivo (default), conserva solo `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`.
+  - se fai screening con `--no-update-best`, mantiene comunque `data/models/` minimale (conserva i best se esistono; altrimenti conserva il modello run-specific).
 
 Esempio A2C (da zero, opponent mix, poi eval medium+big):
 
