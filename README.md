@@ -288,6 +288,7 @@ In modalità `dataset`:
 - salva un marker `game_finished` quando `game_over=true` (utile per esportare solo partite complete);
 - **non** salva `player_names` nel DB (privacy/igiene dati);
 - la UI invia un `client_id` pseudonimo (UUID in `localStorage`) per permettere split train/val per giocatore senza PII.
+- (opzionale) salva anche `client_decision_time_ms`: tempo stimato (ms) tra inizio turno umano e click (utile per filtri qualità/analisi).
 
 ### Simulazioni (headless)
 

@@ -208,19 +208,29 @@ const API = (() => {
      * @param {number} cardIndex - Indice della carta nella mano del giocatore
      * @returns {Promise} - Promise con l'esito dell'azione
      */
-    const playCard = async (gameId, playerIndex, cardIndex) => {
+    const playCard = async (gameId, playerIndex, cardIndex, clientMeta = null) => {
         _requireServedOverHttp();
         try {
+            const payload = {
+                game_id: gameId,
+                player_index: playerIndex,
+                card_index: cardIndex
+            };
+            if (clientMeta && typeof clientMeta === 'object') {
+                if (Number.isFinite(clientMeta.observedServerVersion)) {
+                    payload.client_observed_server_version = Math.trunc(clientMeta.observedServerVersion);
+                }
+                if (Number.isFinite(clientMeta.decisionTimeMs)) {
+                    payload.client_decision_time_ms = Math.max(0, Math.trunc(clientMeta.decisionTimeMs));
+                }
+            }
+
             const response = await fetch(`${API_URL}/games/${gameId}/actions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
                 },
-                body: JSON.stringify({
-                    game_id: gameId,
-                    player_index: playerIndex,
-                    card_index: cardIndex
-                })
+                body: JSON.stringify(payload)
             });
 
             if (!response.ok) {

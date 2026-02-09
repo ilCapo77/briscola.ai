@@ -193,6 +193,7 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
       - env: `BRISCOLA_EVENT_LOG_MODE=dataset`
       - eventi: `human_action` (self-contained) + marker `game_finished` (solo quando `game_over=true`)
       - igiene dati: non salvare `player_names` nel DB; usare `client_id` pseudonimo (UUID UI)
+      - qualità dati: salvare `client_decision_time_ms` (tempo decisionale stimato in ms)
 - Definire un comando di export dataset (per training):
   - da SQLite → JSONL/Parquet con schema versionato
   - campi minimi: `state` (osservazione), `valid_actions`, `action`, `reward`, `done`, `metadata`

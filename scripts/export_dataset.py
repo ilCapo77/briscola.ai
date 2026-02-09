@@ -297,6 +297,8 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
                 reward = payload.get("reward", 0)
                 done = payload.get("done")
                 next_obs = payload.get("next_observation")
+                decision_time_ms = payload.get("client_decision_time_ms")
+                observed_server_version = payload.get("client_observed_server_version")
 
                 if not isinstance(player_idx, int) or not isinstance(card_index, int):
                     continue
@@ -321,6 +323,12 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
                     if (config.include_next_state and isinstance(next_obs, dict))
                     else None,
                     "done": bool(done is True) if config.include_next_state else None,
+                    "client": {
+                        "decision_time_ms": int(decision_time_ms) if isinstance(decision_time_ms, int) else None,
+                        "observed_server_version": int(observed_server_version)
+                        if isinstance(observed_server_version, int)
+                        else None,
+                    },
                 }
 
                 if record["observation"] is None:

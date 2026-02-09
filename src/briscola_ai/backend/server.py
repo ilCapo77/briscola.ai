@@ -69,6 +69,9 @@ class GameAction(BaseModel):
     game_id: str
     player_index: int
     card_index: int
+    # Metadati client-side (opzionali): utili per analisi qualità dati umani.
+    client_observed_server_version: Optional[int] = None
+    client_decision_time_ms: Optional[int] = None
 
 
 class GameState(BaseModel):
@@ -582,6 +585,8 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
                     "reward": reward,
                     "done": bool(new_state.game_over is True),
                     "next_observation": next_observation,
+                    "client_observed_server_version": action.client_observed_server_version,
+                    "client_decision_time_ms": action.client_decision_time_ms,
                 },
                 server_version=server_version,
                 player_index=action.player_index,

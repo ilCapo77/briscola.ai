@@ -91,6 +91,16 @@ document.addEventListener('DOMContentLoaded', () => {
     let pollingIntervalId = null;
     let pollingInFlight = false;
 
+    // Timing umano (client-side): stimiamo il tempo decisionale (ms) come il tempo trascorso
+    // da quando la UI applica uno snapshot in cui `my_turn=true` fino al click.
+    //
+    // Nota:
+    // - usiamo "apply time" (non "receive time") perché il frontend può trattenere snapshot per UX (hold).
+    // - misuriamo solo quando parte un turno umano (transizione my_turn false -> true).
+    let my_turn_started_at_ms = null;
+    let my_turn_observation_server_version = null;
+    let was_my_turn = false;
+
     // UI hold: quando evidenziamo una carta, rinviamo il rendering dello snapshot
     // finché non è passato il tempo di reveal (evita che la carta appaia sul tavolo
     // mentre è ancora "in mano").
@@ -214,6 +224,16 @@ document.addEventListener('DOMContentLoaded', () => {
             // possiamo considerare "chiusa" l'azione locale (lock click).
             actionInFlight: false
         });
+
+        // Tracking decision time: segna inizio turno umano quando `my_turn` diventa true.
+        // Non resettiamo se arrivano snapshot successivi nello stesso turno (evita di sottostimare).
+        if (obs && typeof obs.my_turn === 'boolean') {
+            if (obs.my_turn && !was_my_turn) {
+                my_turn_started_at_ms = Date.now();
+                my_turn_observation_server_version = typeof obs.server_version === 'number' ? obs.server_version : null;
+            }
+            was_my_turn = obs.my_turn;
+        }
 
         updateUI(obs);
 
@@ -416,6 +436,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 gameOver: false
             });
 
+            my_turn_started_at_ms = null;
+            my_turn_observation_server_version = null;
+            was_my_turn = false;
+
             UI.setPlayerName(config.playerName);
             UI.updateGameInfo({ gameId: result.game_id, connected: false, statusText: 'Connessione...', statusClass: 'connecting' });
             UI.showGameBoard();
@@ -475,7 +499,11 @@ document.addEventListener('DOMContentLoaded', () => {
             UI.revealPlayerCard(cardIndex);
             _holdUiForReveal();
 
-            await API.playCard(state.gameId, state.playerIndex, cardIndex);
+            const decisionTimeMs = my_turn_started_at_ms != null ? (Date.now() - my_turn_started_at_ms) : null;
+            await API.playCard(state.gameId, state.playerIndex, cardIndex, {
+                observedServerVersion: my_turn_observation_server_version,
+                decisionTimeMs
+            });
             // UI update will come via WebSocket
         } catch (error) {
             // In caso di errore, sblocchiamo la UI: lo snapshot potrebbe non arrivare.
@@ -529,6 +557,9 @@ document.addEventListener('DOMContentLoaded', () => {
         lastAppliedServerVersion = -1;
         pendingEvents = [];
         uiHoldUntilMs = 0;
+        my_turn_started_at_ms = null;
+        my_turn_observation_server_version = null;
+        was_my_turn = false;
         UI.showGameSetup();
     };
 

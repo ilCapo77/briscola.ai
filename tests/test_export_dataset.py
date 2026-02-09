@@ -62,6 +62,8 @@ def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
                 "reward": 0,
                 "done": False,
                 "next_observation": {"type": "observation", "game_over": False, "my_turn": False, "valid_actions": []},
+                "client_observed_server_version": 0,
+                "client_decision_time_ms": 1234,
             },
             server_version=1,
             player_index=0,
@@ -90,6 +92,8 @@ def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
     assert rec["action"] == {"card_index": 1}
     assert rec["observation"]["my_turn"] is True
     assert isinstance(rec["next_observation"], dict)
+    assert rec["client"]["observed_server_version"] == 0
+    assert rec["client"]["decision_time_ms"] == 1234
 
 
 def test_export_skips_incomplete_games_by_default(tmp_path: Path) -> None:
