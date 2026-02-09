@@ -105,6 +105,43 @@ def test_backend_root_healthcheck() -> None:
     assert r.json()["message"]
 
 
+def test_meta_exposes_event_log_mode_and_consent(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`GET /meta` deve indicare la modalità logging e se serve il consenso (dataset)."""
+    monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "dataset")
+    client = TestClient(server.app)
+    r = client.get("/meta")
+    assert r.status_code == 200
+    payload = r.json()
+    assert payload["event_log_mode"] == "dataset"
+    assert payload["dataset_requires_consent"] is True
+
+    monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "debug")
+    r2 = client.get("/meta")
+    assert r2.status_code == 200
+    payload2 = r2.json()
+    assert payload2["event_log_mode"] == "debug"
+    assert payload2["dataset_requires_consent"] is False
+
+
+def test_create_game_requires_consent_in_dataset_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """In `event_log_mode=dataset` il backend deve richiedere consenso esplicito."""
+    monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "dataset")
+    client = TestClient(server.app)
+
+    missing = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["Alice", "Bob"]},
+    )
+    assert missing.status_code == 400
+    assert "Consenso" in missing.json()["detail"]
+
+    ok = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["Alice", "Bob"], "consent_to_data_collection": True},
+    )
+    assert ok.status_code == 200
+
+
 def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     """`GET /ai/agents` deve esporre nomi e descrizioni (in italiano) per la UI."""
     client = TestClient(server.app)

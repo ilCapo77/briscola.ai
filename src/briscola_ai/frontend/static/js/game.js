@@ -68,7 +68,26 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getState = () => store.getState();
 
+    // Metadati runtime del server (es. modalità raccolta dati).
+    let serverMeta = { dataset_requires_consent: false };
+
     const loadAiAgentMetadata = async () => {
+        try {
+            const meta = await API.getServerMeta();
+            serverMeta = meta && typeof meta === 'object' ? meta : serverMeta;
+            const required = meta?.dataset_requires_consent === true;
+            UI.setDataCollectionConsent({
+                required,
+                description_it: required
+                    ? 'Questa istanza sta raccogliendo dataset umano: le mosse verranno registrate in modo anonimo.'
+                    : ''
+            });
+        } catch (error) {
+            // Se non riusciamo a caricare i meta, manteniamo la UI in modalità "no consent required".
+            serverMeta = { dataset_requires_consent: false };
+            UI.setDataCollectionConsent({ required: false, description_it: '' });
+        }
+
         try {
             const agents = await API.getAiAgents();
             UI.setAiAgents(agents);
@@ -406,6 +425,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const playerNames = [config.playerName, `IA (${opponentLabel})`];
 
+            if (serverMeta?.dataset_requires_consent === true && config.consentToDataCollection !== true) {
+                throw new Error('Devi accettare la raccolta dati (anonima) per avviare la partita.');
+            }
+
             if (aiAgent === 'bc_model' && !aiModelId) {
                 throw new Error('Seleziona un modello (.npz) prima di avviare la partita.');
             }
@@ -419,6 +442,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 player_names: playerNames,
                 ai_agent: aiAgent,
                 client_id: _getClientId(),
+                consent_to_data_collection: config.consentToDataCollection === true,
             };
             if (aiAgent === 'bc_model') {
                 createPayload.ai_model_id = aiModelId;

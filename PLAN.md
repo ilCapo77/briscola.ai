@@ -194,6 +194,8 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
       - eventi: `human_action` (self-contained) + marker `game_finished` (solo quando `game_over=true`)
       - igiene dati: non salvare `player_names` nel DB; usare `client_id` pseudonimo (UUID UI)
       - qualità dati: salvare `client_decision_time_ms` (tempo decisionale stimato in ms)
+      - consenso: in `dataset` la UI mostra una checkbox e il backend rifiuta `POST /games` senza consenso
+      - deploy: endpoint `GET /api/meta` per UI e env `BRISCOLA_CORS_ALLOW_ORIGINS` per restringere CORS in produzione
 - Definire un comando di export dataset (per training):
   - da SQLite → JSONL/Parquet con schema versionato
   - campi minimi: `state` (osservazione), `valid_actions`, `action`, `reward`, `done`, `metadata`

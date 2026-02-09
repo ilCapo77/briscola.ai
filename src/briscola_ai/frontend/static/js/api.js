@@ -174,6 +174,34 @@ const API = (() => {
     };
 
     /**
+     * Metadati runtime del server (deploy/config).
+     *
+     * Esempio:
+     * {
+     *   code_version: string,
+     *   rules_version: string,
+     *   event_log_mode: 'debug'|'dataset'|'off',
+     *   dataset_requires_consent: boolean
+     * }
+     */
+    const getServerMeta = async () => {
+        _requireServedOverHttp();
+        try {
+            const response = await fetch(`${API_URL}/meta`);
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || 'Impossibile caricare metadati server');
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error('Errore caricando metadati server:', error);
+            throw error;
+        }
+    };
+
+    /**
      * Ottiene lo stato corrente di una partita
      * @param {string} gameId - ID della partita
      * @param {number} playerIndex - Indice del giocatore per una vista specifica
@@ -399,6 +427,7 @@ const API = (() => {
         createGame,
         getAiAgents,
         getAiModels,
+        getServerMeta,
         getGameState,
         playCard,
         getGameResult,

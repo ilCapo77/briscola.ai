@@ -92,6 +92,31 @@ select {
     color: var(--text-color);
 }
 
+/* Consent checkbox: non vogliamo lo stile full-width dell'input text. */
+.consent-row {
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.15);
+}
+
+.consent-row input[type="checkbox"] {
+    width: auto;
+    margin-top: 3px;
+    transform: scale(1.1);
+}
+
+.consent-label {
+    display: inline;
+    margin: 0;
+    color: var(--text-color);
+    font-weight: 500;
+    cursor: pointer;
+}
+
 input:focus,
 select:focus {
     outline: none;

@@ -61,6 +61,7 @@ class GameConfig(BaseModel):
     ai_agent: Optional[str] = None
     ai_model_id: Optional[str] = None
     client_id: Optional[str] = None
+    consent_to_data_collection: Optional[bool] = None
 
 
 class GameAction(BaseModel):
@@ -301,11 +302,35 @@ async def lifespan(app: FastAPI):
 # (o con l'override via env `BRISCOLA_CODE_VERSION`).
 app = FastAPI(title="Briscola AI API", version=get_code_version(), lifespan=lifespan)
 
-# Aggiunge middleware CORS per consentire richieste cross-origin
+
+def _parse_cors_allow_origins() -> list[str]:
+    """
+    Parsea `BRISCOLA_CORS_ALLOW_ORIGINS` (CSV) per limitare le origin ammesse.
+
+    Esempi:
+    - `BRISCOLA_CORS_ALLOW_ORIGINS=https://example.com`
+    - `BRISCOLA_CORS_ALLOW_ORIGINS=https://a.com,https://b.com`
+
+    Default:
+    - se la variabile non è impostata, usiamo `*` (comportamento “dev-friendly”).
+    """
+    raw = os.getenv("BRISCOLA_CORS_ALLOW_ORIGINS", "").strip()
+    if not raw:
+        return ["*"]
+    origins = [o.strip() for o in raw.split(",") if o.strip()]
+    return origins or ["*"]
+
+
+# Aggiunge middleware CORS per consentire richieste cross-origin.
+#
+# Nota:
+# In produzione è consigliato impostare `BRISCOLA_CORS_ALLOW_ORIGINS` con il tuo dominio.
+cors_allow_origins = _parse_cors_allow_origins()
+cors_allow_credentials = "*" not in cors_allow_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In sviluppo, consente tutte le origini
-    allow_credentials=True,
+    allow_origins=cors_allow_origins,
+    allow_credentials=cors_allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -382,10 +407,38 @@ async def root():
     return {"message": "Benvenuto nelle API di Briscola AI"}
 
 
+@app.get("/meta", response_model=Dict)
+async def meta() -> Dict:
+    """
+    Metadati “di runtime” per UI/deploy.
+
+    Scopi:
+    - mostrare/abilitare UX legata alla raccolta dati (consenso) quando `event_log_mode=dataset`.
+    - debug rapido (versioni).
+    """
+    mode = _get_event_log_mode()
+    return {
+        "code_version": get_code_version(),
+        "rules_version": get_rules_version(),
+        "event_log_mode": mode,
+        "dataset_requires_consent": mode == "dataset",
+        "cors_allow_origins": cors_allow_origins,
+    }
+
+
 @app.post("/games", response_model=Dict)
 async def create_game(config: GameConfig):
     """Crea una nuova partita di Briscola"""
     try:
+        if _get_event_log_mode() == "dataset" and config.consent_to_data_collection is not True:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "Consenso mancante: per raccogliere dati umani (event_log_mode=dataset) "
+                    "devi accettare la registrazione anonima delle mosse."
+                ),
+            )
+
         # Seed per rendere riproducibile lo shuffle in fase di debugging/dataset.
         # In produzione useremmo RNG più robusto o un seed esplicito del client.
         seed = random.randrange(0, 2**32)
@@ -440,6 +493,7 @@ async def create_game(config: GameConfig):
                 if (config.num_players == 2 and ai_agent_name == "bc_model")
                 else None,
                 "client_id": config.client_id,
+                "consent_to_data_collection": bool(config.consent_to_data_collection is True),
             },
             server_version=0,
         )

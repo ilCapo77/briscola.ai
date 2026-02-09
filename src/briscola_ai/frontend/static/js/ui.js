@@ -19,6 +19,7 @@ const UI = (() => {
         gameBoard: document.getElementById('game-board'),
         gameResult: document.getElementById('game-result'),
         gameForm: document.getElementById('game-form'),
+        startGameButton: document.getElementById('start-game'),
         playerNameInput: document.getElementById('player-name-input'),
         aiAgentSelect: document.getElementById('ai-agent-select'),
         aiAgentDescription: document.getElementById('ai-agent-description'),
@@ -26,6 +27,9 @@ const UI = (() => {
         aiModelGroup: document.getElementById('ai-model-group'),
         aiModelSelect: document.getElementById('ai-model-select'),
         aiModelDescription: document.getElementById('ai-model-description'),
+        dataConsentGroup: document.getElementById('data-consent-group'),
+        dataConsentCheckbox: document.getElementById('data-consent-checkbox'),
+        dataConsentDescription: document.getElementById('data-consent-description'),
         gameId: document.getElementById('game-id'),
         gameStatus: document.getElementById('game-status'),
         opponentName: document.getElementById('opponent-name'),
@@ -52,11 +56,24 @@ const UI = (() => {
     // Modelli locali selezionabili (solo per `bc_model`).
     let aiModelMetaById = {};
 
+    // Se true, richiediamo una checkbox esplicita prima di avviare la partita.
+    let dataConsentRequired = false;
+
     const _updateAiAgentDescription = () => {
         const name = elements.aiAgentSelect?.value;
         const meta = name ? aiAgentMetaByName[name] : null;
         if (elements.aiAgentDescription) elements.aiAgentDescription.textContent = meta?.description_it || '';
         if (elements.aiAgentCommonNote) elements.aiAgentCommonNote.textContent = aiAgentCommonNoteIt || '';
+    };
+
+    const _updateConsentUi = () => {
+        if (!elements.startGameButton) return;
+        if (!dataConsentRequired) {
+            elements.startGameButton.disabled = false;
+            return;
+        }
+        const checked = elements.dataConsentCheckbox?.checked === true;
+        elements.startGameButton.disabled = !checked;
     };
 
     const _updateAiModelUi = () => {
@@ -158,6 +175,7 @@ const UI = (() => {
                 aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null,
                 aiModelCompatible: modelMeta?.is_compatible === true,
                 aiModelCompatibilityReasonIt: modelMeta?.compatibility_reason_it || null,
+                consentToDataCollection: elements.dataConsentCheckbox?.checked === true,
             });
         });
 
@@ -166,6 +184,7 @@ const UI = (() => {
             _updateAiModelUi();
         });
         elements.aiModelSelect?.addEventListener('change', _updateAiModelUi);
+        elements.dataConsentCheckbox?.addEventListener('change', _updateConsentUi);
 
         elements.newGame.addEventListener('click', () => {
             callbacks.onNewGame?.();
@@ -253,10 +272,32 @@ const UI = (() => {
         _updateAiModelUi();
     };
 
+    const setDataCollectionConsent = (payload) => {
+        const required = payload?.required === true;
+        const descriptionIt = payload?.description_it || '';
+        dataConsentRequired = required;
+
+        if (elements.dataConsentGroup) {
+            elements.dataConsentGroup.classList.toggle('hidden', !required);
+        }
+        if (elements.dataConsentCheckbox) {
+            elements.dataConsentCheckbox.checked = false;
+        }
+        if (elements.dataConsentDescription) {
+            elements.dataConsentDescription.textContent = required
+                ? (descriptionIt || 'Questa istanza sta raccogliendo dataset umano: serve il tuo consenso.')
+                : '';
+        }
+        _updateConsentUi();
+    };
+
     const showGameSetup = () => {
         elements.gameSetup.classList.remove('hidden');
         elements.gameBoard.classList.add('hidden');
         elements.gameResult.classList.add('hidden');
+        // Se il consenso è richiesto, resettiamo la checkbox per rendere esplicita la scelta ad ogni partita.
+        if (elements.dataConsentCheckbox) elements.dataConsentCheckbox.checked = false;
+        _updateConsentUi();
     };
 
     const showGameBoard = () => {
@@ -512,6 +553,7 @@ const UI = (() => {
         init,
         setAiAgents,
         setAiModels,
+        setDataCollectionConsent,
         showGameSetup,
         showGameBoard,
         showGameResult,

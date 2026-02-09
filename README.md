@@ -289,6 +289,15 @@ In modalità `dataset`:
 - **non** salva `player_names` nel DB (privacy/igiene dati);
 - la UI invia un `client_id` pseudonimo (UUID in `localStorage`) per permettere split train/val per giocatore senza PII.
 - (opzionale) salva anche `client_decision_time_ms`: tempo stimato (ms) tra inizio turno umano e click (utile per filtri qualità/analisi).
+- consenso: la UI mostra una checkbox e il backend rifiuta `POST /api/games` se il consenso non è accettato.
+
+#### Deploy: CORS (minimo hardening)
+
+Se deployi la UI/API su un dominio pubblico, è consigliato restringere le origin CORS:
+
+- `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio.example briscola-server`
+
+Se non imposti nulla, per default è `*` (comodo in sviluppo, non consigliato in produzione).
 
 ### Simulazioni (headless)
 
