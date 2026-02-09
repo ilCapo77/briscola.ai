@@ -12,8 +12,13 @@ JSON Lines (JSONL) è un formato “streaming friendly”: ogni riga è un JSON 
 
 Schema (versione 1)
 -------------------
-Ogni record è una singola azione `action_play_card` associata alla migliore observation
-disponibile *prima* dell'azione e alla observation *subito dopo* (se presente).
+Ogni record è una singola azione “gioca carta”.
+
+Fonti supportate (in ordine di preferenza):
+- `human_action` (raccolta umana in modalità `BRISCOLA_EVENT_LOG_MODE=dataset`): evento già self-contained,
+  con observation prima dell'azione e (opzionale) next_observation.
+- legacy: `action_play_card` + `observation_sent` (il record viene ricostruito cercando la migliore observation
+  disponibile *prima* dell'azione e la observation *subito dopo*).
 
 Campi principali:
 - `schema_version`: versione dello schema record (int)
@@ -46,6 +51,14 @@ Uso
 
 Per esportare solo azioni “umane” del player 0 (default UI):
   python scripts/export_dataset.py --player-index 0 --exclude-ai
+
+Per esportare *solo* partite complete (default):
+- una partita è “completa” se ha `game_over=true`
+- nel DB questo è tracciato preferibilmente con un evento `game_finished`
+- fallback legacy: l'exporter riconosce anche snapshot `observation_sent` con `"game_over": true`
+
+Per includere anche partite incomplete (sconsigliato per dataset principale):
+  python scripts/export_dataset.py --include-incomplete
 """
 
 from __future__ import annotations
@@ -67,6 +80,7 @@ class ExportConfig:
     player_index: Optional[int]
     include_ai: bool
     include_next_state: bool
+    only_completed_games: bool
     schema_version: int = 1
 
 
@@ -138,6 +152,29 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
     conn = sqlite3.connect(str(config.db_path))
     conn.row_factory = sqlite3.Row
 
+    completed_game_ids: set[str] = set()
+    if config.only_completed_games:
+        # Preferiamo un marker esplicito (`game_finished`), e facciamo fallback su DB legacy
+        # dove la completezza era implicita negli snapshot `observation_sent`.
+        for row in conn.execute(
+            """
+            SELECT DISTINCT game_id
+            FROM events
+            WHERE event_type = 'game_finished';
+            """
+        ):
+            completed_game_ids.add(str(row["game_id"]))
+
+        for row in conn.execute(
+            """
+            SELECT DISTINCT game_id
+            FROM events
+            WHERE event_type = 'observation_sent'
+              AND payload_json LIKE '%"game_over":true%';
+            """
+        ):
+            completed_game_ids.add(str(row["game_id"]))
+
     # Compatibilità: DB creati prima dell'introduzione di `code_version`/`rules_version`
     # potrebbero non avere queste colonne. Interroghiamo lo schema e selezioniamo solo ciò che esiste.
     game_columns = {r[1] for r in conn.execute("PRAGMA table_info(games);").fetchall()}
@@ -161,6 +198,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
         "records_written": 0,
         "records_skipped_ai": 0,
         "records_skipped_player": 0,
+        "records_skipped_incomplete_game": 0,
         "records_missing_observation": 0,
         "records_missing_next_observation": 0,
     }
@@ -168,6 +206,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
     current_game_id: Optional[str] = None
     observations_by_player: dict[int, list[dict[str, Any]]] = {}
     pending_by_player: dict[int, dict[str, Any]] = {}
+    skip_current_game = False
 
     def flush_game_pending() -> None:
         """
@@ -207,11 +246,17 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
 
             if current_game_id is None:
                 current_game_id = game_id
+                skip_current_game = bool(config.only_completed_games and str(game_id) not in completed_game_ids)
             elif current_game_id != game_id:
                 flush_game_pending()
                 current_game_id = game_id
                 observations_by_player = {}
                 pending_by_player = {}
+                skip_current_game = bool(config.only_completed_games and str(game_id) not in completed_game_ids)
+
+            if skip_current_game:
+                counters["records_skipped_incomplete_game"] += 1
+                continue
 
             event_type = row["event_type"]
             server_version = row["server_version"]
@@ -220,6 +265,54 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
             try:
                 payload = json.loads(row["payload_json"])
             except json.JSONDecodeError:
+                continue
+
+            if event_type == "human_action":
+                # Nuovo formato (raccolta umana "dataset mode"): evento self-contained.
+                player_idx = payload.get("player_index")
+                card_index = payload.get("card_index")
+                observation = payload.get("observation")
+                reward = payload.get("reward", 0)
+                done = payload.get("done")
+                next_obs = payload.get("next_observation")
+
+                if not isinstance(player_idx, int) or not isinstance(card_index, int):
+                    continue
+
+                if config.player_index is not None and player_idx != config.player_index:
+                    counters["records_skipped_player"] += 1
+                    continue
+
+                record: dict[str, Any] = {
+                    "schema_version": config.schema_version,
+                    "game_id": game_id,
+                    "event_id": row["id"],
+                    "server_version": server_version,
+                    "player_index": player_idx,
+                    "is_ai": False,
+                    "metadata": games.get(game_id, {}),
+                    "observation": observation if isinstance(observation, dict) else None,
+                    "action": {"card_index": card_index},
+                    "reward": int(reward) if isinstance(reward, int) else 0,
+                    "result": None,
+                    "next_observation": next_obs
+                    if (config.include_next_state and isinstance(next_obs, dict))
+                    else None,
+                    "done": bool(done is True) if config.include_next_state else None,
+                }
+
+                if record["observation"] is None:
+                    counters["records_missing_observation"] += 1
+
+                if config.include_next_state and record["next_observation"] is None:
+                    counters["records_missing_next_observation"] += 1
+
+                if not config.include_next_state:
+                    record["done"] = bool((record["observation"] or {}).get("game_over") is True)
+
+                with config.out_path.open("a", encoding="utf-8") as f:
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+                counters["records_written"] += 1
                 continue
 
             if event_type == "observation_sent":
@@ -344,6 +437,14 @@ def main() -> int:
         action="store_true",
         help="Esporta senza `next_observation` (solo observation → action).",
     )
+    parser.add_argument(
+        "--include-incomplete",
+        action="store_true",
+        help=(
+            "Include anche partite non complete. Default: esporta solo partite complete "
+            "(definite come `game_over=true`, tracciate via evento `game_finished` o snapshot finali)."
+        ),
+    )
     args = parser.parse_args()
 
     player_index = None if args.all_players else args.player_index
@@ -357,6 +458,7 @@ def main() -> int:
         player_index=player_index,
         include_ai=include_ai,
         include_next_state=not args.no_next_state,
+        only_completed_games=bool(not args.include_incomplete),
     )
 
     if not config.db_path.exists():

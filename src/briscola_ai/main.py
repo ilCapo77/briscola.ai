@@ -134,6 +134,16 @@ def run_server(host="0.0.0.0", port=8000, reload=False):
             "Usa stringa vuota per disabilitare (es. --event-db '')."
         ),
     )
+    parser.add_argument(
+        "--event-log-mode",
+        default=os.getenv("BRISCOLA_EVENT_LOG_MODE", "debug"),
+        choices=["debug", "dataset", "off"],
+        help=(
+            "Modalità event log: "
+            "`debug` (completa), `dataset` (riduce dimensione DB per raccolta umani), `off` (disabilita logging). "
+            "Default: debug."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -151,6 +161,7 @@ def run_server(host="0.0.0.0", port=8000, reload=False):
         os.environ.pop("BRISCOLA_EVENT_DB_PATH", None)
     else:
         os.environ["BRISCOLA_EVENT_DB_PATH"] = args.event_db
+    os.environ["BRISCOLA_EVENT_LOG_MODE"] = args.event_log_mode
 
     uvicorn.run("briscola_ai.main:app", host=host, port=port, reload=reload)
 

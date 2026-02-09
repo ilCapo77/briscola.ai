@@ -266,10 +266,28 @@ Per cambiare percorso (o disabilitare) puoi usare:
 - CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
 - Env: `BRISCOLA_EVENT_DB_PATH=./data/mio_log.sqlite3 briscola-server`
 
+Per cambiare modalità di logging (consigliato `dataset` per raccolta umani):
+- CLI: `briscola-server --event-log-mode dataset`
+- Env: `BRISCOLA_EVENT_LOG_MODE=dataset briscola-server`
+
 Metadati salvati per partita:
 - `seed`
 - `code_version` (override possibile con `BRISCOLA_CODE_VERSION`)
 - `rules_version` (versione semantica del dominio)
+
+#### Modalità logging: `debug` vs `dataset` (raccolta dati umani)
+
+Per default il backend logga in modalità `debug` (completa, utile per troubleshooting).
+Per raccogliere partite giocate da umani e tenere il DB *piccolo*, usa:
+
+- `BRISCOLA_EVENT_LOG_MODE=dataset briscola-server`
+
+In modalità `dataset`:
+- il backend **non** salva `observation_sent` (che è il payload più grande e ridondante);
+- salva invece un evento `human_action` *self-contained* (observation → action → reward/done → next_observation);
+- salva un marker `game_finished` quando `game_over=true` (utile per esportare solo partite complete);
+- **non** salva `player_names` nel DB (privacy/igiene dati);
+- la UI invia un `client_id` pseudonimo (UUID in `localStorage`) per permettere split train/val per giocatore senza PII.
 
 ### Simulazioni (headless)
 
@@ -423,11 +441,17 @@ Default didattico (coerente con la UI attuale):
 - la UI attuale avvia e testa principalmente partite **2-player** (tu vs IA);
 - esporta solo le azioni del `player_index=0`;
 - esclude le azioni dell'IA.
+- esporta **solo partite complete** (`game_over=true`) per avere un dataset più pulito.
 
 Opzioni utili:
 - tutti i player: `--all-players`
 - includi anche IA: `--include-ai`
 - export “supervised only” (senza `next_observation`): `--no-next-state`
+- includi anche partite incomplete (sconsigliato per dataset principale): `--include-incomplete`
+
+Nota su modalità `dataset`:
+- se il backend gira con `BRISCOLA_EVENT_LOG_MODE=dataset`, l'exporter usa preferibilmente l'evento `human_action`
+  (record già self-contained) e non dipende da `observation_sent`.
 
 Nota: lo schema export v1 è pensato soprattutto per il 2-player. In 4-player (a squadre) la nozione di reward
 e l'interpretazione del “vincitore della mano” vanno adattate a livello di team (vedi `PLAN.md`).

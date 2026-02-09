@@ -96,7 +96,11 @@ class EventLog:
                     num_players INTEGER NOT NULL,
                     seed INTEGER,
                     code_version TEXT,
-                    rules_version TEXT
+                    rules_version TEXT,
+                    client_id TEXT,
+                    finished_at REAL,
+                    aborted_at REAL,
+                    aborted_reason TEXT
                 );
                 """
             )
@@ -119,6 +123,10 @@ class EventLog:
             # Compatibilità DB già esistenti (created prima di aggiungere colonne).
             self._ensure_column("games", "code_version", "TEXT")
             self._ensure_column("games", "rules_version", "TEXT")
+            self._ensure_column("games", "client_id", "TEXT")
+            self._ensure_column("games", "finished_at", "REAL")
+            self._ensure_column("games", "aborted_at", "REAL")
+            self._ensure_column("games", "aborted_reason", "TEXT")
             self._conn.commit()
 
     def _ensure_column(self, table: str, column: str, col_type: str) -> None:
@@ -157,6 +165,96 @@ class EventLog:
                 (game_id, now, num_players, seed, code_version, rules_version),
             )
             self._conn.commit()
+
+    def set_client_id(self, game_id: str, *, client_id: str) -> None:
+        """
+        Salva un identificatore pseudonimo del client (best-effort).
+
+        Nota privacy:
+        questo campo serve a poter fare split train/val "per giocatore" senza salvare PII.
+        È responsabilità del frontend generare un UUID (localStorage) o un identificatore
+        equivalente non riconducibile alla persona.
+        """
+        cleaned = str(client_id).strip()
+        if not cleaned:
+            return
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE games
+                SET client_id = COALESCE(client_id, ?)
+                WHERE game_id = ?;
+                """,
+                (cleaned, game_id),
+            )
+            self._conn.commit()
+
+    def try_mark_game_finished(self, game_id: str, *, finished_at: Optional[float] = None) -> bool:
+        """
+        Marca una partita come conclusa (`game_over=true`) in modo idempotente.
+
+        Ritorna True se lo stato è stato aggiornato (prima volta), False se era già marcata.
+        """
+        ts = time.time() if finished_at is None else float(finished_at)
+        with self._lock:
+            self._conn.execute(
+                """
+                UPDATE games
+                SET finished_at = COALESCE(finished_at, ?)
+                WHERE game_id = ?;
+                """,
+                (ts, game_id),
+            )
+            self._conn.commit()
+            # Nota: rowcount può essere 1 anche se finished_at era già settata (dipende da SQLite).
+            # Per evitare ambiguità, facciamo un check esplicito.
+            row = self._conn.execute(
+                "SELECT finished_at FROM games WHERE game_id = ?;",
+                (game_id,),
+            ).fetchone()
+            return bool(row is not None and row[0] == ts)
+
+    def try_mark_game_aborted(
+        self,
+        game_id: str,
+        *,
+        aborted_reason: str,
+        aborted_at: Optional[float] = None,
+    ) -> bool:
+        """
+        Marca una partita come abortita (timeout/inactivity) in modo idempotente.
+
+        Nota:
+        non abortiamo una partita già finita (`finished_at` non null).
+        """
+        ts = time.time() if aborted_at is None else float(aborted_at)
+        reason = str(aborted_reason).strip()[:200]
+        if not reason:
+            reason = "unknown"
+
+        with self._lock:
+            row = self._conn.execute(
+                "SELECT finished_at, aborted_at FROM games WHERE game_id = ?;",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                return False
+            finished_at, existing_aborted_at = row[0], row[1]
+            if finished_at is not None:
+                return False
+            if existing_aborted_at is not None:
+                return False
+
+            cur = self._conn.execute(
+                """
+                UPDATE games
+                SET aborted_at = ?, aborted_reason = ?
+                WHERE game_id = ? AND finished_at IS NULL AND aborted_at IS NULL;
+                """,
+                (ts, reason, game_id),
+            )
+            self._conn.commit()
+            return bool(cur.rowcount == 1)
 
     def log_event(
         self,

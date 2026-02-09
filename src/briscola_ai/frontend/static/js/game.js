@@ -31,6 +31,29 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const TRICK_RESULT_HOLD_MS = 2000;
 
+    /**
+     * Identificatore pseudonimo del client (persistente in localStorage).
+     *
+     * Obiettivo:
+     * - poter fare split train/val "per giocatore" senza salvare nomi o PII nel DB.
+     * - avere un id stabile tra partite, ma non riconducibile a una persona.
+     */
+    const _getClientId = () => {
+        try {
+            const key = 'briscola_client_id';
+            let value = window.localStorage.getItem(key);
+            if (value && typeof value === 'string') return value;
+            value = (window.crypto && typeof window.crypto.randomUUID === 'function')
+                ? window.crypto.randomUUID()
+                : `client_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+            window.localStorage.setItem(key, value);
+            return value;
+        } catch (e) {
+            // Fallback: se localStorage non è disponibile, usiamo un id effimero.
+            return `client_${Math.random().toString(16).slice(2)}_${Date.now()}`;
+        }
+    };
+
     // Game state - minimal, derived from backend
     const store = Store.create({
         gameId: null,
@@ -375,6 +398,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 num_players: 2,
                 player_names: playerNames,
                 ai_agent: aiAgent,
+                client_id: _getClientId(),
             };
             if (aiAgent === 'bc_model') {
                 createPayload.ai_model_id = aiModelId;

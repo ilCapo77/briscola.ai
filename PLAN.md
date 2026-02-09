@@ -189,6 +189,10 @@ Obiettivo: passare da “gioco” a “ambiente addestrabile”.
   - Stato attuale:
     - [x] event log SQLite (schema + writer append-only) configurabile via env/CLI (`BRISCOLA_EVENT_DB_PATH`, `--event-db`)
     - [x] metadati “stabili” salvati per partita: `code_version` + `rules_version` (tabella `games` + payload `game_created`)
+    - [x] raccolta dati umani “dataset mode” (DB più piccolo):
+      - env: `BRISCOLA_EVENT_LOG_MODE=dataset`
+      - eventi: `human_action` (self-contained) + marker `game_finished` (solo quando `game_over=true`)
+      - igiene dati: non salvare `player_names` nel DB; usare `client_id` pseudonimo (UUID UI)
 - Definire un comando di export dataset (per training):
   - da SQLite → JSONL/Parquet con schema versionato
   - campi minimi: `state` (osservazione), `valid_actions`, `action`, `reward`, `done`, `metadata`

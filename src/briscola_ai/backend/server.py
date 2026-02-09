@@ -60,6 +60,7 @@ class GameConfig(BaseModel):
     player_names: Optional[List[str]] = None
     ai_agent: Optional[str] = None
     ai_model_id: Optional[str] = None
+    client_id: Optional[str] = None
 
 
 class GameAction(BaseModel):
@@ -87,6 +88,20 @@ def _get_event_log() -> Optional[EventLog]:
     return getattr(app.state, "event_log", None)
 
 
+def _get_event_log_mode() -> str:
+    """
+    Modalità di logging eventi.
+
+    - `debug` (default): log completo, utile per debug (include `observation_sent` e lifecycle WS).
+    - `dataset`: log minimale, orientato a dataset umano (riduce molto la dimensione del DB).
+    - `off`: non loggare nulla (senza cambiare DB path).
+    """
+    raw = os.getenv("BRISCOLA_EVENT_LOG_MODE", "debug").strip().lower()
+    if raw in {"debug", "dataset", "off"}:
+        return raw
+    return "debug"
+
+
 def _safe_log_event(
     game_id: str,
     event_type: str,
@@ -104,6 +119,16 @@ def _safe_log_event(
     log = _get_event_log()
     if log is None:
         return
+
+    mode = _get_event_log_mode()
+    if mode == "off":
+        return
+    if mode == "dataset":
+        # In modalità dataset riduciamo il DB evitando payload ridondanti e molto grandi
+        # (soprattutto `observation_sent` per tutti i player dopo ogni azione).
+        allowed = {"game_created", "human_action", "game_finished", "game_aborted"}
+        if event_type not in allowed:
+            return
 
     try:
         # Garantiamo che la partita esista nella tabella `games` (idempotente).
@@ -132,6 +157,71 @@ def _safe_log_event(
     except Exception:
         # Best-effort: non propaghiamo eccezioni lato API/WS.
         print(f"Event log SQLite: errore scrittura evento {event_type!r} (game_id={game_id}).")
+
+
+def _safe_set_client_id(game_id: str, client_id: Optional[str]) -> None:
+    """Best-effort: salva `client_id` nella tabella `games` (se event log abilitato)."""
+    if not client_id:
+        return
+    log = _get_event_log()
+    if log is None or _get_event_log_mode() == "off":
+        return
+    try:
+        log.set_client_id(game_id, client_id=str(client_id))
+    except Exception:
+        pass
+
+
+def _maybe_log_game_finished(game_id: str, *, state: DomainGameState) -> None:
+    """
+    Se la partita è finita (`game_over=true`), logga un evento `game_finished` (best-effort).
+
+    Nota didattica:
+    questo evento serve soprattutto per filtrare dataset: esportiamo solo partite complete.
+    """
+    if not state.game_over:
+        return
+
+    log = _get_event_log()
+    if log is None or _get_event_log_mode() == "off":
+        return
+
+    try:
+        # Garantiamo l'anchor in tabella `games` (idempotente).
+        seed = getattr(state, "seed", None)
+        log.ensure_game(
+            game_id,
+            num_players=state.num_players,
+            seed=seed if isinstance(seed, int) else None,
+            code_version=get_code_version(),
+            rules_version=get_rules_version(),
+        )
+        updated = log.try_mark_game_finished(game_id)
+    except Exception:
+        updated = False
+
+    if not updated:
+        return
+
+    final_points = [p.points for p in state.players]
+    winning_index: int | None = None
+    if not state.is_team_game:
+        best = max(final_points) if final_points else 0
+        winners = [i for i, pts in enumerate(final_points) if pts == best]
+        winning_index = winners[0] if len(winners) == 1 else None
+
+    _safe_log_event(
+        game_id,
+        "game_finished",
+        {
+            "game_over": True,
+            "num_players": state.num_players,
+            "is_team_game": state.is_team_game,
+            "final_points_by_player_index": final_points,
+            "winning_player_index": winning_index,
+        },
+        server_version=game_versions.get(game_id, 0),
+    )
 
 
 @asynccontextmanager
@@ -341,15 +431,16 @@ async def create_game(config: GameConfig):
                 "code_version": get_code_version(),
                 "rules_version": get_rules_version(),
                 "num_players": config.num_players,
-                "player_names": [p.name for p in state.players],
                 "is_team_game": state.is_team_game,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
                 "ai_model_id": config.ai_model_id
                 if (config.num_players == 2 and ai_agent_name == "bc_model")
                 else None,
+                "client_id": config.client_id,
             },
             server_version=0,
         )
+        _safe_set_client_id(game_id, config.client_id)
 
         return {
             "game_id": game_id,
@@ -400,10 +491,21 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
 
     async with game_locks[game_id]:
         state = active_games[game_id]
+        server_version_before = game_versions.get(game_id, 0)
 
         # Verifica che sia il turno del giocatore
         if state.current_turn != action.player_index:
             raise HTTPException(status_code=400, detail="Non è il tuo turno")
+
+        observation_before: dict | None = None
+        if _get_event_log_mode() == "dataset":
+            # Per dataset umano usiamo sempre ObservationDTO (vista parziale anti-cheat).
+            try:
+                observation_before = build_observation_dto(
+                    state, action.player_index, server_version_before
+                ).model_dump()
+            except Exception:
+                observation_before = None
 
         # Esegue l'azione
         new_state, step_result = step(
@@ -456,18 +558,47 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
         )
 
         # Event log (opzionale): azione umana + risultato.
-        _safe_log_event(
-            game_id,
-            "action_play_card",
-            {
-                "is_ai": False,
-                "player_index": action.player_index,
-                "card_index": action.card_index,
-                "result": action_result_dto.model_dump(exclude_none=True),
-            },
-            server_version=server_version,
-            player_index=action.player_index,
-        )
+        if _get_event_log_mode() == "dataset":
+            reward = 0
+            if step_result.trick_completed:
+                trick_points = sum(card.rank.points for card, _ in step_result.trick_cards)
+                winner = step_result.trick_winner
+                if isinstance(winner, int):
+                    reward = trick_points if winner == action.player_index else -trick_points
+
+            next_observation: dict | None = None
+            try:
+                next_observation = build_observation_dto(new_state, action.player_index, server_version).model_dump()
+            except Exception:
+                next_observation = None
+
+            _safe_log_event(
+                game_id,
+                "human_action",
+                {
+                    "player_index": action.player_index,
+                    "card_index": action.card_index,
+                    "observation": observation_before,
+                    "reward": reward,
+                    "done": bool(new_state.game_over is True),
+                    "next_observation": next_observation,
+                },
+                server_version=server_version,
+                player_index=action.player_index,
+            )
+        else:
+            _safe_log_event(
+                game_id,
+                "action_play_card",
+                {
+                    "is_ai": False,
+                    "player_index": action.player_index,
+                    "card_index": action.card_index,
+                    "result": action_result_dto.model_dump(exclude_none=True),
+                },
+                server_version=server_version,
+                player_index=action.player_index,
+            )
 
         # Se la mano è stata completata dall'umano, invia notifica con carte e vincitore.
         #
@@ -492,6 +623,8 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
         # Calcoliamo qui se dobbiamo far giocare l'IA (fuori dal lock scheduliamo solo il task).
         if not new_state.game_over and new_state.num_players == 2 and new_state.current_turn != action.player_index:
             should_schedule_ai = True
+        elif new_state.game_over:
+            _maybe_log_game_finished(game_id, state=new_state)
 
     # Modello "standard": se dopo la mossa umana tocca all'IA, il backend gioca automaticamente.
     # Nota UX: non inseriamo `asyncio.sleep()` per animazioni; il frontend gestisce i timing
@@ -666,6 +799,8 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
         server_version=server_version,
         player_index=ai_player_index,
     )
+    if new_state.game_over:
+        _maybe_log_game_finished(game_id, state=new_state)
     return
 
 
@@ -883,6 +1018,32 @@ async def cleanup_inactive_games():
 
         # Rimuove le partite inattive
         for game_id in games_to_remove:
+            # Event log: partita rimossa per inattività (non completa).
+            # Logghiamo prima di eliminare lo stato in memoria, così possiamo salvare anche `server_version`.
+            log = _get_event_log()
+            if log is not None and _get_event_log_mode() != "off":
+                try:
+                    state = active_games.get(game_id)
+                    if state is not None:
+                        seed = getattr(state, "seed", None)
+                        log.ensure_game(
+                            game_id,
+                            num_players=state.num_players,
+                            seed=seed if isinstance(seed, int) else None,
+                            code_version=get_code_version(),
+                            rules_version=get_rules_version(),
+                        )
+                    updated = log.try_mark_game_aborted(game_id, aborted_reason="inactive_timeout")
+                except Exception:
+                    updated = False
+                if updated:
+                    _safe_log_event(
+                        game_id,
+                        "game_aborted",
+                        {"reason": "inactive_timeout"},
+                        server_version=game_versions.get(game_id, 0),
+                    )
+
             if game_id in active_games:
                 del active_games[game_id]
             if game_id in game_timestamps:

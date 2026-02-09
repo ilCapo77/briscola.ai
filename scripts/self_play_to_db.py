@@ -158,7 +158,6 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
                     "code_version": code_version,
                     "rules_version": rules_version,
                     "num_players": state.num_players,
-                    "player_names": [p.name for p in state.players],
                     "is_team_game": state.is_team_game,
                     "agents": {str(i): agents[i].name for i in range(state.num_players)},
                 },
@@ -232,6 +231,28 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
                     event_log, game_id=game_id, state=state, server_version=server_version
                 )
                 counters["observations_written"] += state.num_players
+
+            # Marker esplicito: partita completa (`game_over=true`).
+            #
+            # Serve soprattutto per:
+            # - export “solo complete games” (dataset più pulito);
+            # - statistiche offline senza dover inferire la fine partita da altri eventi.
+            if state.game_over:
+                try:
+                    event_log.try_mark_game_finished(game_id)
+                except Exception:
+                    pass
+                event_log.log_event(
+                    game_id,
+                    "game_finished",
+                    {
+                        "game_over": True,
+                        "num_players": state.num_players,
+                        "is_team_game": state.is_team_game,
+                        "final_points_by_player_index": [p.points for p in state.players],
+                    },
+                    server_version=server_version,
+                )
 
             counters["games_written"] += 1
 

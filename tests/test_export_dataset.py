@@ -1,179 +1,202 @@
 """
-Test per lo script di export dataset (SQLite → JSONL).
+Test per `scripts/export_dataset.py`.
 
-Scopo didattico:
-- verificare che l'export produca un record coerente (observation → action → next_observation)
-- bloccare regressioni sul formato minimo atteso (schema_version, reward, done)
-
-Nota:
-Qui non testiamo il gameplay completo; usiamo un DB SQLite minimale con pochi eventi
-“finti ma realistici” per mantenere il test veloce e ripetibile.
+Obiettivo didattico
+-------------------
+Vogliamo garantire che l'exporter:
+- esporti *di default* solo partite complete (game_over=true);
+- supporti il nuovo evento `human_action` (modalità dataset, DB più piccolo);
+- resti compatibile con DB legacy (action_play_card + observation_sent).
 """
 
 from __future__ import annotations
 
+import importlib.util
 import json
-import sqlite3
-import subprocess
 import sys
 from pathlib import Path
 
+from briscola_ai.backend.event_log import EventLog, EventLogConfig
 
-def _init_minimal_event_db(db_path: Path) -> None:
-    """Crea lo schema minimo (games/events) come prodotto dal logger reale."""
-    conn = sqlite3.connect(db_path)
-    try:
-        conn.execute(
-            """
-            CREATE TABLE games (
-                game_id TEXT PRIMARY KEY,
-                created_at REAL NOT NULL,
-                num_players INTEGER NOT NULL,
-                seed INTEGER
-            );
-            """
-        )
-        conn.execute(
-            """
-            CREATE TABLE events (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                game_id TEXT NOT NULL,
-                created_at REAL NOT NULL,
-                server_version INTEGER,
-                player_index INTEGER,
-                event_type TEXT NOT NULL,
-                payload_json TEXT NOT NULL
-            );
-            """
-        )
-        conn.commit()
-    finally:
-        conn.close()
+# Nota:
+# `scripts/` non è un package Python installato, quindi in test carichiamo il modulo
+# via path (import dinamico). In questo modo testiamo la logica reale dello script
+# senza spostarla nel package.
+_ROOT = Path(__file__).resolve().parents[1]
+_EXPORTER_PATH = _ROOT / "scripts" / "export_dataset.py"
+_spec = importlib.util.spec_from_file_location("export_dataset", _EXPORTER_PATH)
+assert _spec is not None and _spec.loader is not None
+_mod = importlib.util.module_from_spec(_spec)
+sys.modules[_spec.name] = _mod
+_spec.loader.exec_module(_mod)  # type: ignore[misc]
+
+ExportConfig = _mod.ExportConfig
+export_dataset = _mod.export_dataset
 
 
-def test_export_dataset_script_writes_jsonl(tmp_path: Path) -> None:
+def _read_jsonl(path: Path) -> list[dict]:
+    lines = [ln for ln in path.read_text(encoding="utf-8").splitlines() if ln.strip()]
+    return [json.loads(ln) for ln in lines]
+
+
+def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
     """
-    Verifica che lo script:
-    - legga un DB valido
-    - scriva un file JSONL
-    - produca reward/done coerenti quando una mano si completa
+    Caso principale: backend in `BRISCOLA_EVENT_LOG_MODE=dataset` logga `human_action`
+    e un marker `game_finished`. L'exporter deve produrre record puliti e completi.
     """
     db_path = tmp_path / "events.sqlite3"
     out_path = tmp_path / "dataset.jsonl"
-    _init_minimal_event_db(db_path)
 
-    game_id = "g1"
-    conn = sqlite3.connect(db_path)
+    log = EventLog(EventLogConfig(path=str(db_path)))
     try:
-        conn.execute(
-            "INSERT INTO games(game_id, created_at, num_players, seed) VALUES(?, ?, ?, ?);",
-            (game_id, 0.0, 2, 123),
-        )
-
-        insert_event_sql = (
-            "INSERT INTO events(game_id, created_at, server_version, player_index, event_type, payload_json) "
-            "VALUES(?, ?, ?, ?, ?, ?);"
-        )
-
-        # Observation pre-azione: è il turno del player 0 e l'azione 1 è valida.
-        obs_before = {
-            "type": "observation",
-            "server_version": 0,
-            "my_index": 0,
-            "my_turn": True,
-            "my_hand": [
-                {"suit": "cups", "rank": "ACE", "number": 1, "points": 11},
-                {"suit": "coins", "rank": "TWO", "number": 2, "points": 0},
-            ],
-            "valid_actions": [0, 1],
-            "table_cards": [],
-            "trump_suit": "clubs",
-            "cards_remaining_in_deck": 10,
-            "game_over": False,
-            "num_players": 2,
-            "is_team_game": False,
-            "players": [
-                {"index": 0, "name": "P0", "points": 0, "hand_size": 2},
-                {"index": 1, "name": "P1", "points": 0, "hand_size": 2},
-            ],
-        }
-        conn.execute(
-            insert_event_sql,
-            (game_id, 0.0, 0, 0, "observation_sent", json.dumps(obs_before)),
-        )
-
-        # Azione player 0: completa la mano e vince (reward atteso +11).
-        action_payload = {
-            "is_ai": False,
-            "player_index": 0,
-            "card_index": 0,
-            "result": {
-                "server_version": 1,
-                "played_card": {"suit": "cups", "rank": "ACE", "number": 1, "points": 11},
-                "player": 0,
-                "trick_completed": True,
-                "trick_winner": 0,
-                "trick_size": 2,
-                "cards_dealt": False,
-                "trick_cards": [
-                    {"card": {"suit": "cups", "rank": "ACE", "number": 1, "points": 11}, "player_index": 0},
-                    {"card": {"suit": "coins", "rank": "TWO", "number": 2, "points": 0}, "player_index": 1},
-                ],
-                "captured_cards": [],
+        game_id = "game_complete"
+        log.ensure_game(game_id, num_players=2, seed=123, code_version="0.0.0", rules_version="1")
+        log.log_event(game_id, "game_created", {"seed": 123, "num_players": 2}, server_version=0)
+        log.log_event(
+            game_id,
+            "human_action",
+            {
+                "player_index": 0,
+                "card_index": 1,
+                "observation": {"type": "observation", "game_over": False, "my_turn": True, "valid_actions": [1]},
+                "reward": 0,
+                "done": False,
+                "next_observation": {"type": "observation", "game_over": False, "my_turn": False, "valid_actions": []},
             },
-        }
-        conn.execute(
-            insert_event_sql,
-            (game_id, 0.1, 1, 0, "action_play_card", json.dumps(action_payload)),
+            server_version=1,
+            player_index=0,
         )
-
-        # Observation post-azione: il gioco non è finito.
-        obs_after = {
-            "type": "observation",
-            "server_version": 1,
-            "my_index": 0,
-            "my_turn": False,
-            "my_hand": [{"suit": "coins", "rank": "TWO", "number": 2, "points": 0}],
-            "valid_actions": [],
-            "table_cards": [],
-            "trump_suit": "clubs",
-            "cards_remaining_in_deck": 9,
-            "game_over": False,
-            "num_players": 2,
-            "is_team_game": False,
-            "players": [
-                {"index": 0, "name": "P0", "points": 11, "hand_size": 1},
-                {"index": 1, "name": "P1", "points": 0, "hand_size": 2},
-            ],
-        }
-        conn.execute(
-            insert_event_sql,
-            (game_id, 0.2, 1, 0, "observation_sent", json.dumps(obs_after)),
-        )
-
-        conn.commit()
+        log.log_event(game_id, "game_finished", {"game_over": True}, server_version=2)
     finally:
-        conn.close()
+        log.close()
 
-    script_path = Path(__file__).resolve().parent.parent / "scripts" / "export_dataset.py"
-    proc = subprocess.run(
-        [sys.executable, str(script_path), "--db", str(db_path), "--out", str(out_path)],
-        check=True,
-        capture_output=True,
-        text=True,
+    cfg = ExportConfig(
+        db_path=db_path,
+        out_path=out_path,
+        player_index=0,
+        include_ai=False,
+        include_next_state=True,
+        only_completed_games=True,
     )
-    assert "Export completato." in proc.stdout
+    counters = export_dataset(cfg)
+    assert counters["records_written"] == 1
 
-    lines = out_path.read_text(encoding="utf-8").strip().splitlines()
-    assert len(lines) == 1
-    record = json.loads(lines[0])
+    records = _read_jsonl(out_path)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["game_id"] == "game_complete"
+    assert rec["player_index"] == 0
+    assert rec["is_ai"] is False
+    assert rec["action"] == {"card_index": 1}
+    assert rec["observation"]["my_turn"] is True
+    assert isinstance(rec["next_observation"], dict)
 
-    assert record["schema_version"] == 1
-    assert record["game_id"] == game_id
-    assert record["player_index"] == 0
-    assert record["is_ai"] is False
-    assert record["action"]["card_index"] == 0
-    assert record["reward"] == 11
-    assert record["observation"] is not None
-    assert record["next_observation"] is not None
-    assert record["done"] is False
+
+def test_export_skips_incomplete_games_by_default(tmp_path: Path) -> None:
+    """
+    Se manca un marker di completezza (`game_finished` o snapshot `game_over=true`),
+    l'exporter deve scartare la partita quando `only_completed_games=True`.
+    """
+    db_path = tmp_path / "events.sqlite3"
+    out_path = tmp_path / "dataset.jsonl"
+
+    log = EventLog(EventLogConfig(path=str(db_path)))
+    try:
+        game_id = "game_incomplete"
+        log.ensure_game(game_id, num_players=2, seed=1, code_version="0.0.0", rules_version="1")
+        log.log_event(
+            game_id,
+            "human_action",
+            {
+                "player_index": 0,
+                "card_index": 0,
+                "observation": {"type": "observation", "game_over": False, "my_turn": True, "valid_actions": [0]},
+                "reward": 0,
+                "done": False,
+                "next_observation": None,
+            },
+            server_version=1,
+            player_index=0,
+        )
+    finally:
+        log.close()
+
+    cfg = ExportConfig(
+        db_path=db_path,
+        out_path=out_path,
+        player_index=0,
+        include_ai=False,
+        include_next_state=True,
+        only_completed_games=True,
+    )
+    counters = export_dataset(cfg)
+    assert counters["records_written"] == 0
+    assert out_path.read_text(encoding="utf-8").strip() == ""
+
+
+def test_export_legacy_action_play_card_and_observation_sent(tmp_path: Path) -> None:
+    """
+    Compatibilità: DB legacy senza `human_action`.
+
+    L'exporter ricostruisce (s, a, s') usando:
+    - observation_sent prima dell'azione (my_turn=true + valid_actions coerente)
+    - action_play_card
+    - observation_sent dopo (game_over=true) per marcare la partita come completa
+    """
+    db_path = tmp_path / "events.sqlite3"
+    out_path = tmp_path / "dataset.jsonl"
+
+    log = EventLog(EventLogConfig(path=str(db_path)))
+    try:
+        game_id = "game_legacy"
+        log.ensure_game(game_id, num_players=2, seed=42, code_version="0.0.0", rules_version="1")
+
+        # observation prima dell'azione (coerente)
+        log.log_event(
+            game_id,
+            "observation_sent",
+            {"type": "observation", "my_turn": True, "valid_actions": [2], "game_over": False, "my_index": 0},
+            server_version=0,
+            player_index=0,
+        )
+        # azione
+        log.log_event(
+            game_id,
+            "action_play_card",
+            {
+                "is_ai": False,
+                "player_index": 0,
+                "card_index": 2,
+                "result": {"trick_completed": False},
+            },
+            server_version=1,
+            player_index=0,
+        )
+        # observation dopo: game_over=true per segnare partita completa + next_state
+        log.log_event(
+            game_id,
+            "observation_sent",
+            {"type": "observation", "my_turn": False, "valid_actions": [], "game_over": True, "my_index": 0},
+            server_version=2,
+            player_index=0,
+        )
+    finally:
+        log.close()
+
+    cfg = ExportConfig(
+        db_path=db_path,
+        out_path=out_path,
+        player_index=0,
+        include_ai=False,
+        include_next_state=True,
+        only_completed_games=True,
+    )
+    counters = export_dataset(cfg)
+    assert counters["records_written"] == 1
+
+    records = _read_jsonl(out_path)
+    assert len(records) == 1
+    rec = records[0]
+    assert rec["game_id"] == "game_legacy"
+    assert rec["action"] == {"card_index": 2}
+    assert rec["next_observation"]["game_over"] is True
