@@ -321,6 +321,23 @@ Piano di lavoro:
 - [x] Documentazione:
   - aggiornare `README.md`: dove mettere i modelli, come avviare e giocare contro un modello, note di sicurezza/anti-cheat
 
+### Fase 5E — Pipeline esperimenti (training + evaluation) riproducibile
+
+Obiettivo: rendere facile (e ripetibile) iterare sui modelli senza fare comandi “a mano” e senza perdere traccia dei risultati.
+
+Piano di lavoro:
+- [x] Definire un comando unico (script) che:
+  - allena un modello (A2C/PG, con warm-start opzionale)
+  - esegue una evaluation matrix su `medium` e `big` (incluso holdout) e salva JSON
+  - produce un `manifest.json` con: config, comandi, versioni (`code_version`, `rules_version`), percorsi output
+- [x] “Best model” locale:
+  - scelta metrica: `avg_diff` su suite `holdout` vs `heuristic_v1` (preferibilmente su `big`)
+  - salva/aggiorna `data/models/best_<algo>.npz` + JSON di accompagnamento con lo score e la provenienza
+- [x] Test:
+  - unit test per estrazione metrica da JSON della matrice e per naming deterministico dell’esperimento
+- [x] Documentazione:
+  - aggiornare `README.md` con un esempio end-to-end e con la struttura cartelle (`data/models`, `benchmarks/experiments/...`)
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

@@ -379,6 +379,31 @@ Esempio (robusto, `big`):
 python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark big --out-json benchmarks/matrix_big.json
 ```
 
+#### Pipeline esperimenti (training + eval) (consigliata)
+
+Per iterare velocemente sui modelli senza perdere traccia dei risultati, usa:
+- `scripts/run_experiment.py` (un comando unico: training → evaluation matrix → manifest → best model locale).
+
+Output (convenzione):
+- modello: `./data/models/<name>.npz`
+- risultati: `./benchmarks/experiments/<name>/matrix_medium.json`, `matrix_big.json`, `manifest.json`
+- best model (locale): `./data/models/best_<algo>.npz` + `best_<algo>.json` con lo score
+
+Esempio A2C (warm-start + opponent mix, poi eval medium+big):
+
+```
+python scripts/run_experiment.py \
+  --algo a2c \
+  --init ./data/bc_model_teacher_mlp.npz \
+  --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 \
+  --num-games 200000 \
+  --train-seed 5 \
+  --seat-fair
+```
+
+Nota metrica “best model”:
+- per default usiamo `avg_diff` su suite `holdout` vs `heuristic_v1` (preferibilmente benchmark `big`).
+
 ### Export dataset (JSONL)
 
 Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:
