@@ -343,15 +343,16 @@ Workflow consigliato (tuning):
   - 6 run `--benchmarks medium` con warm-start da `data/models/best_a2c.npz`
   - variando solo `--lr` e `--entropy-beta` via args dopo `--`
   - selezione top-1 per `holdout vs heuristic_v1 avg_diff` (benchmark `medium`)
-- [ ] Run “definitiva” (in corso):
+- [x] Run “definitiva”:
   - stessa configurazione top-1, training più lungo e benchmark `medium,big`
   - aggiornare `best_a2c.npz` solo se migliora lo score su `big holdout vs heuristic_v1`
+  - risultato: aggiornato `best_a2c.npz` con `big holdout vs heuristic_v1 avg_diff = +9.71` (seed training=8, `lr=3e-4`, `entropy_beta=1e-3`)
 
 Miglioramenti di ergonomia (pipeline):
-- [ ] Log “live” durante training/eval:
+- [x] Log “live” durante training/eval:
   - evitare buffering su stdout quando i trainer sono eseguiti via pipe (es. `run_experiment.py`)
   - obiettivo: vedere metriche A2C/PG mentre l’esperimento gira (utile per capire subito se diverge)
-- [ ] Modalità “data minimale”:
+- [x] Modalità “data minimale”:
   - mantenere in `data/models/` solo `best_<algo>.npz` + `best_<algo>.json`
   - evitare accumulo di molti `.npz` intermedi (restano i manifest/log in `benchmarks/experiments/`)
 
