@@ -36,6 +36,7 @@ from briscola_ai.ai.experiment_pipeline import (
     utc_now_iso,
     write_json,
 )
+from briscola_ai.ai.training.curriculum import CurriculumPreset, build_curriculum_stages
 from briscola_ai.versioning import get_code_version, get_rules_version
 
 
@@ -151,6 +152,15 @@ def main() -> int:
         default="heuristic_v1:0.7,random:0.2,greedy_points:0.1",
         help="Miscela avversari (se valorizzata, sovrascrive --opponent).",
     )
+    parser.add_argument(
+        "--curriculum",
+        choices=["", "easy_standard_hard"],
+        default="",
+        help=(
+            "Se valorizzato, esegue un curriculum multi-stage (easy→standard→hard) "
+            "e ignora `--opponent/--opponent-mix` (li usa solo se `--curriculum` è vuoto)."
+        ),
+    )
     parser.add_argument("--seat-fair", action="store_true", help="Seat-fair durante training (consigliato).")
     parser.add_argument(
         "--benchmarks",
@@ -217,14 +227,25 @@ def main() -> int:
     if int(args.num_games) <= 0:
         raise ValueError("--num-games deve essere > 0")
 
+    curriculum_raw = str(args.curriculum).strip()
+    curriculum: CurriculumPreset | None = None
+    if curriculum_raw:
+        if curriculum_raw != "easy_standard_hard":
+            raise ValueError(f"--curriculum non supportato: {curriculum_raw!r}")
+        curriculum = "easy_standard_hard"
+
     opponent_mix = args.opponent_mix.strip()
     opponent = args.opponent.strip()
-    if opponent_mix:
+    if curriculum is not None:
         opponent_for_name = None
-        mix_for_name = opponent_mix
+        mix_for_name = f"curriculum:{curriculum}"
     else:
-        opponent_for_name = opponent
-        mix_for_name = None
+        if opponent_mix:
+            opponent_for_name = None
+            mix_for_name = opponent_mix
+        else:
+            opponent_for_name = opponent
+            mix_for_name = None
 
     name = args.name.strip()
     if not name:
@@ -246,19 +267,7 @@ def main() -> int:
 
     # --- Training ---
     trainer_script = "scripts/train_a2c.py" if algo == "a2c" else "scripts/train_pg.py"
-    train_cmd = [sys.executable, trainer_script, "--out", str(model_path)]
-
-    if args.init.strip():
-        train_cmd += ["--init", args.init.strip()]
-
-    if opponent_mix:
-        train_cmd += ["--opponent-mix", opponent_mix]
-    else:
-        train_cmd += ["--opponent", opponent]
-
-    train_cmd += ["--num-games", str(int(args.num_games)), "--seed", str(int(args.train_seed))]
-    if bool(args.seat_fair):
-        train_cmd.append("--seat-fair")
+    env_overrides = {"BRISCOLA_MODELS_DIR": str(models_dir)}
 
     train_extra = list(args.train_extra or [])
     positional_extra = list(args.trainer_args or [])
@@ -275,12 +284,97 @@ def main() -> int:
     forbidden = {"--out", "--data"}
     if any(tok in forbidden for tok in train_extra):
         raise ValueError(f"`--train-extra` non può includere {sorted(forbidden)} (gestiti dalla pipeline).")
-    train_cmd += list(train_extra)
+    stage_records: list[dict] = []
+    primary_train_cmd: list[str] | None = None
 
-    env_overrides = {"BRISCOLA_MODELS_DIR": str(models_dir)}
-    _run(train_cmd, log_path=train_log, env_overrides=env_overrides)
-    if not model_path.exists():
-        raise RuntimeError(f"Training completato ma il modello non esiste: {model_path}")
+    def _build_train_cmd(
+        *, out: Path, init: str, opponent_mix_arg: str | None, opponent_arg: str | None, num: int
+    ) -> list[str]:
+        cmd = [sys.executable, trainer_script, "--out", str(out)]
+        if init:
+            cmd += ["--init", init]
+        if opponent_mix_arg:
+            cmd += ["--opponent-mix", opponent_mix_arg]
+        elif opponent_arg:
+            cmd += ["--opponent", opponent_arg]
+        else:
+            raise ValueError("Serve --opponent o --opponent-mix")
+        cmd += ["--num-games", str(int(num)), "--seed", str(int(args.train_seed))]
+        if bool(args.seat_fair):
+            cmd.append("--seat-fair")
+        cmd += list(train_extra)
+        return cmd
+
+    if curriculum is None:
+        # Training single-stage.
+        train_cmd = _build_train_cmd(
+            out=model_path,
+            init=args.init.strip(),
+            opponent_mix_arg=opponent_mix if opponent_mix else None,
+            opponent_arg=None if opponent_mix else opponent,
+            num=int(args.num_games),
+        )
+        primary_train_cmd = train_cmd
+        _run(train_cmd, log_path=train_log, env_overrides=env_overrides)
+        if not model_path.exists():
+            raise RuntimeError(f"Training completato ma il modello non esiste: {model_path}")
+        stage_records.append(
+            {
+                "name": "single",
+                "num_games": int(args.num_games),
+                "opponent": opponent if not opponent_mix else None,
+                "opponent_mix": opponent_mix if opponent_mix else None,
+                "out_path": str(model_path),
+                "log_path": str(train_log),
+                "cmd": train_cmd,
+            }
+        )
+    else:
+        # Curriculum multi-stage: salviamo gli stage dentro l'esperimento e poi copiamo nel path finale.
+        stages = build_curriculum_stages(preset=curriculum, total_games=int(args.num_games))
+        stages_dir = experiments_dir / "stages"
+        stages_dir.mkdir(parents=True, exist_ok=True)
+
+        init_path = args.init.strip()
+        stage_out_paths: list[Path] = []
+        for i, stage in enumerate(stages, start=1):
+            out_path = stages_dir / f"stage_{i:02d}_{stage.name}.npz"
+            log_path = experiments_dir / f"train_stage_{i:02d}_{stage.name}.log"
+            cmd = _build_train_cmd(
+                out=out_path,
+                init=init_path,
+                opponent_mix_arg=stage.opponent_mix,
+                opponent_arg=None,
+                num=int(stage.num_games),
+            )
+            primary_train_cmd = cmd
+            stage_records.append(
+                {
+                    "name": stage.name,
+                    "num_games": int(stage.num_games),
+                    "opponent_mix": stage.opponent_mix,
+                    "out_path": str(out_path),
+                    "log_path": str(log_path),
+                    "cmd": cmd,
+                }
+            )
+            _run(cmd, log_path=log_path, env_overrides=env_overrides)
+            if not out_path.exists():
+                raise RuntimeError(f"Stage completato ma il modello non esiste: {out_path}")
+            stage_out_paths.append(out_path)
+            init_path = str(out_path)
+
+        # Copiamo il risultato finale nello stesso output “storico” in data/models/.
+        models_dir.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(stage_out_paths[-1], model_path)
+
+        # In modalità minimal, rimuoviamo gli stage intermedi (manteniamo solo il finale).
+        if bool(args.minimal_data):
+            for p in stage_out_paths:
+                try:
+                    p.unlink()
+                except FileNotFoundError:
+                    pass
 
     # Se vogliamo mantenere `data/models/` minimal, copiamo subito una copia del modello
     # dentro la cartella dell'esperimento (così il manifest resta “auto-consistente” anche
@@ -317,6 +411,9 @@ def main() -> int:
         _run(eval_cmd, log_path=log_path, env_overrides=env_overrides)
         matrix_paths[b] = out_json
 
+    if primary_train_cmd is None:
+        raise RuntimeError("Errore interno: primary_train_cmd non impostato")
+
     # --- Manifest + score ---
     manifest: dict = {
         "name": name,
@@ -325,7 +422,9 @@ def main() -> int:
         "rules_version": get_rules_version(),
         "algo": algo,
         "model_path": str(experiment_model_path or model_path),
-        "train": {"cmd": train_cmd},
+        "curriculum": str(curriculum) if curriculum is not None else None,
+        "train_stages": stage_records,
+        "train": {"cmd": primary_train_cmd},
         "eval": [
             {
                 "benchmark": b,

@@ -436,6 +436,33 @@ python scripts/run_experiment.py \
 Warm-start (opzionale):
 - se hai già un best locale, puoi ripartire da `--init ./data/models/best_a2c.npz` (stesso schema pesi/encoder).
 
+#### Curriculum (easy → standard → hard)
+
+Se vuoi un percorso di apprendimento più stabile, puoi usare un **curriculum a stage**:
+lo stesso run viene spezzato in più blocchi consecutivi, passando il modello come `--init` tra gli stage.
+
+Preset supportato:
+- `--curriculum easy_standard_hard` (split 20% / 50% / 30%)
+  - `easy`: `random:0.7,greedy_points:0.3`
+  - `standard`: `heuristic_v1:0.7,random:0.2,greedy_points:0.1`
+  - `hard`: `best_a2c:0.6,heuristic_v1:0.3,random:0.1`
+
+Nota:
+- se imposti `--curriculum`, la pipeline **ignora** `--opponent` e `--opponent-mix` (usa i preset).
+- log per stage: in `benchmarks/experiments/<name>/train_stage_*.log` (utile per capire dove il training migliora o satura).
+
+Esempio (A2C, seed 6, curriculum + eval medium+big, data minimale):
+
+```
+python scripts/run_experiment.py \
+  --algo a2c \
+  --curriculum easy_standard_hard \
+  --num-games 200000 \
+  --train-seed 6 \
+  --seat-fair \
+  --minimal-data
+```
+
 #### League training (avversario “best” congelato) — `best_a2c`
 
 Quando inizi a ottenere modelli RL forti, allenare “sempre contro lo stesso baseline” può diventare limitante.

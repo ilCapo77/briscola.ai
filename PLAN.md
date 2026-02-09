@@ -338,7 +338,15 @@ Roadmap (in ordine):
 
 Stato:
 - [x] (5E.1) Alias agente `best_a2c` (file locale) + documentazione
-- [ ] (5E.2) Preset curriculum + harness “train+eval” riproducibile
+- [x] (5E.2) Preset curriculum + harness “train+eval” riproducibile
+  - [x] definire 3 preset opponent mix: `easy`, `standard`, `hard` (quest’ultimo include `best_a2c`)
+  - [x] aggiungere una modalità “curriculum” alla pipeline `scripts/run_experiment.py`:
+    - eseguire training in 2–3 stage in sequenza (easy → standard → hard)
+    - passare `--init` tra stage (warm-start)
+    - salvare log per stage + includere i comandi nel `manifest.json`
+    - in `--minimal-data`: mantenere solo il modello finale (e rimuovere gli stage intermedi)
+  - [x] aggiungere test unit per la logica di split stage (somma `num_games`, rounding deterministico)
+  - [x] documentare in `README.md`: quando usare curriculum, esempi, trade-off
 - [ ] (5E.3) Spike PPO+GAE (solo se serve)
   - validare che `ai_model_id` punti a un file whitelisted dentro `BRISCOLA_MODELS_DIR` (no `..`, no path arbitrari)
 - [x] Aggiornare frontend:
