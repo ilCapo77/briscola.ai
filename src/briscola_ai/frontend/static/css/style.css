@@ -130,6 +130,29 @@ select:focus {
     line-height: 1.35;
 }
 
+/* Callout evidenziato per la nota anti-cheat (didattica + leggibilità). */
+.anti-cheat-callout {
+    margin-top: 10px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px solid rgba(52, 152, 219, 0.35);
+    background: rgba(52, 152, 219, 0.12);
+}
+
+.anti-cheat-title {
+    font-weight: 700;
+    color: #d7ecff;
+    margin-bottom: 6px;
+    letter-spacing: 0.2px;
+}
+
+.anti-cheat-body {
+    color: var(--text-color);
+    font-size: 0.9rem;
+    line-height: 1.35;
+    white-space: pre-wrap;
+}
+
 button {
     background: linear-gradient(135deg, var(--secondary-color), #2980b9);
     color: white;

@@ -24,6 +24,7 @@ const UI = (() => {
         aiAgentSelect: document.getElementById('ai-agent-select'),
         aiAgentDescription: document.getElementById('ai-agent-description'),
         aiAgentCommonNote: document.getElementById('ai-agent-common-note'),
+        aiAgentCommonNoteText: document.getElementById('ai-agent-common-note-text'),
         aiModelGroup: document.getElementById('ai-model-group'),
         aiModelSelect: document.getElementById('ai-model-select'),
         aiModelDescription: document.getElementById('ai-model-description'),
@@ -63,7 +64,14 @@ const UI = (() => {
         const name = elements.aiAgentSelect?.value;
         const meta = name ? aiAgentMetaByName[name] : null;
         if (elements.aiAgentDescription) elements.aiAgentDescription.textContent = meta?.description_it || '';
-        if (elements.aiAgentCommonNote) elements.aiAgentCommonNote.textContent = aiAgentCommonNoteIt || '';
+        if (elements.aiAgentCommonNote && elements.aiAgentCommonNoteText) {
+            const raw = (aiAgentCommonNoteIt || '').trim();
+            const cleaned = raw.toLowerCase().startsWith('nota anti-cheat:')
+                ? raw.slice('nota anti-cheat:'.length).trim()
+                : raw;
+            elements.aiAgentCommonNoteText.textContent = cleaned;
+            elements.aiAgentCommonNote.classList.toggle('hidden', cleaned.length === 0);
+        }
     };
 
     const _updateConsentUi = () => {
