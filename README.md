@@ -454,6 +454,20 @@ python scripts/run_experiment.py --algo a2c --init ./data/models/bc_teacher_v2.n
   --encoder-version v2
 ```
 
+Nota: il fine-tuning RL può “allontanarsi” dallo stile del teacher (es. reintrodurre un po’ di overkill).
+Se vuoi preservare lo stile *senza* usare il guard, puoi attivare una regolarizzazione verso un anchor BC fisso:
+
+```
+python scripts/train_a2c.py \
+  --init ./data/models/bc_teacher_v2.npz \
+  --bc-anchor ./data/models/bc_teacher_v2.npz \
+  --bc-anchor-beta 0.02 \
+  --encoder-version v2 \
+  --opponent-mix heuristic_v2:0.4,heuristic_v1:0.3,random:0.2,greedy_points:0.1 \
+  --num-games 200000 --seat-fair --seed 6 \
+  --out ./data/models/a2c_from_bc_anchor.npz
+```
+
 Se vuoi *ridurre* questo comportamento durante training A2C, puoi provare un shaping soft:
 - `scripts/train_a2c.py --overkill-penalty-mode flat --overkill-penalty-beta <beta>` (default: 0, disattivato)
 - `--overkill-low-lead-points-max 2` (default) per colpire soprattutto gli “scarti o quasi”.

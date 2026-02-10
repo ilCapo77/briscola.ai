@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.agents import Agent, build_agent
-from briscola_ai.ai.bc_model_agent import MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.bc_model_agent import LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.training.observation_encoder import (
     FEATURE_DIM_2P_V1,
@@ -57,6 +57,7 @@ from briscola_ai.ai.training.observation_encoder import (
     feature_dim_for_encoder_version,
 )
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
+from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
@@ -174,7 +175,10 @@ class StepRecord:
     x: np.ndarray  # (D,)
     z1: np.ndarray  # (H,)
     h: np.ndarray  # (H,)
+    action_mask: np.ndarray  # (40,) bool
     probs: np.ndarray  # (40,)
+    anchor_probs: np.ndarray | None
+    anchor_ce: float
     action_id: int
     value_pred: float
     reward: float  # shaped reward (delta point diff / 120)
@@ -209,6 +213,8 @@ def _play_one_game_2p_collect(
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int | None,
     overkill_penalty_mode: str,
+    bc_anchor: LoadedBCModel | None,
+    bc_anchor_beta: float,
 ) -> tuple[GameState, list[StepRecord], float]:
     """
     Simula una partita 2-player e colleziona la traiettoria vista come MDP "turno della policy".
@@ -254,6 +260,23 @@ def _play_one_game_2p_collect(
         action_id = int(rng_action.choice(40, p=probs))
         card_index = _action_id_to_card_index(action_id=action_id, hand=obs.hand)
 
+        # BC-anchor: regolarizzazione "stay-close-to-teacher" (senza barare).
+        #
+        # Idea:
+        # - l'anchor è un modello BC fisso (teacher distillato) che non aggiorniamo.
+        # - la policy RL viene penalizzata se si allontana troppo dall'anchor (cross-entropy).
+        #
+        # Questo termine di loss agisce durante training, non a inference-time: quindi
+        # se vedi meno overkill nei benchmark senza guard, significa che la policy ha
+        # interiorizzato (almeno in parte) la preferenza.
+        anchor_probs: np.ndarray | None = None
+        anchor_ce: float = 0.0
+        if bc_anchor is not None and float(bc_anchor_beta) > 0.0:
+            anchor_logits = bc_anchor.logits(x)
+            anchor_masked = _masked_logits_1d(anchor_logits, mask)
+            anchor_probs = _softmax_1d(anchor_masked)
+            anchor_ce = cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs)
+
         # Reward shaping opzionale: penalità "overkill briscola" (soft).
         #
         # Importante:
@@ -297,7 +320,10 @@ def _play_one_game_2p_collect(
                 x=x,
                 z1=z1,
                 h=h,
+                action_mask=mask,
                 probs=probs,
+                anchor_probs=anchor_probs,
+                anchor_ce=float(anchor_ce),
                 action_id=action_id,
                 value_pred=float(value_pred),
                 reward=reward,
@@ -332,6 +358,7 @@ class TrainMetrics:
     draw_rate: float
     avg_entropy: float
     value_loss: float
+    avg_anchor_ce: float
 
 
 def main() -> int:
@@ -379,6 +406,21 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate Adam.")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="L2 weight decay (solo pesi).")
     parser.add_argument("--entropy-beta", type=float, default=5e-4, help="Entropia bonus (>=0).")
+    parser.add_argument(
+        "--bc-anchor",
+        default="",
+        help=(
+            "Path a un modello `.npz` usato come anchor fisso (tipicamente un BC teacher). "
+            "Se valorizzato e `--bc-anchor-beta > 0`, aggiunge una regolarizzazione (cross-entropy) "
+            "che mantiene la policy vicina all'anchor (utile per preservare stile anti-overkill senza guard)."
+        ),
+    )
+    parser.add_argument(
+        "--bc-anchor-beta",
+        type=float,
+        default=0.0,
+        help=("Peso (>=0) della regolarizzazione verso l'anchor BC. Valori tipici: 0.005..0.05. Se 0, disattivata."),
+    )
     parser.add_argument(
         "--overkill-penalty-mode",
         choices=["flat", "gap"],
@@ -438,6 +480,10 @@ def main() -> int:
         raise ValueError("--overkill-penalty-beta deve essere >= 0")
     if int(args.overkill_low_lead_points_max) < 0:
         raise ValueError("--overkill-low-lead-points-max deve essere >= 0")
+    if float(args.bc_anchor_beta) < 0.0:
+        raise ValueError("--bc-anchor-beta deve essere >= 0")
+    if float(args.bc_anchor_beta) > 0.0 and not str(args.bc_anchor).strip():
+        raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
 
     out_path = Path(args.out)
     encoder_version: EncoderVersion = str(args.encoder_version)
@@ -495,6 +541,19 @@ def main() -> int:
 
     policy = A2CPolicy(w1=w1, b1=b1, w2=w2, b2=b2, wv=wv, bv=float(bv))
 
+    # Anchor BC (teacher) opzionale: deve avere stessa feature_dim dell'encoder corrente.
+    bc_anchor: LoadedBCModel | None = None
+    bc_anchor_path = str(args.bc_anchor).strip()
+    if bc_anchor_path:
+        loaded_anchor = load_bc_model_npz(Path(bc_anchor_path))
+        if int(loaded_anchor.feature_dim) != int(policy.feature_dim):
+            raise ValueError(
+                "BC-anchor non compatibile con l'encoder corrente: "
+                f"anchor.feature_dim={int(loaded_anchor.feature_dim)} policy.feature_dim={int(policy.feature_dim)}. "
+                "Suggerimento: usa `--encoder-version` coerente con l'anchor (v1=248, v2=288)."
+            )
+        bc_anchor = loaded_anchor
+
     # Adam state.
     st_w1 = _adam_init(policy.w1)
     st_b1 = _adam_init(policy.b1)
@@ -521,6 +580,7 @@ def main() -> int:
     draws = 0
     entropies: list[float] = []
     value_losses: list[float] = []
+    anchor_ces: list[float] = []
 
     num_games = int(args.num_games)
     for game_idx in range(1, num_games + 1):
@@ -540,6 +600,8 @@ def main() -> int:
             overkill_penalty_beta=float(args.overkill_penalty_beta),
             overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
             overkill_penalty_mode=str(args.overkill_penalty_mode),
+            bc_anchor=bc_anchor,
+            bc_anchor_beta=float(args.bc_anchor_beta),
         )
         entropies.append(avg_entropy)
 
@@ -577,6 +639,19 @@ def main() -> int:
                 s = float(np.sum(step_rec.probs * (logp + 1.0)))
                 dent = step_rec.probs * (logp + 1.0 - s)
                 dlogits += beta * dent
+
+            # Regularization: stay-close-to-BC anchor (se attivo).
+            #
+            # Questo termine NON è pesato dall'advantage: è un vincolo "stile" separato dal reward.
+            anchor_beta = float(args.bc_anchor_beta)
+            if anchor_beta > 0.0 and step_rec.anchor_probs is not None:
+                grad_anchor = grad_ce_wrt_logits_from_probs(
+                    pred_probs=step_rec.probs,
+                    target_probs=step_rec.anchor_probs,
+                    action_mask=step_rec.action_mask,
+                )
+                dlogits += anchor_beta * grad_anchor
+                anchor_ces.append(float(step_rec.anchor_ce))
 
             # Actor head grads.
             gw2 += np.outer(step_rec.h, dlogits).astype(np.float32)
@@ -640,6 +715,7 @@ def main() -> int:
             draw_rate = float(draws) / float(update_every)
             avg_ent = float(np.mean(entropies)) if entropies else 0.0
             vloss = float(np.mean(value_losses)) if value_losses else 0.0
+            avg_anchor_ce = float(np.mean(anchor_ces)) if anchor_ces else 0.0
 
             row = TrainMetrics(
                 iter=t,
@@ -649,14 +725,17 @@ def main() -> int:
                 draw_rate=draw_rate,
                 avg_entropy=avg_ent,
                 value_loss=vloss,
+                avg_anchor_ce=avg_anchor_ce,
             )
             metrics.append(row)
 
             if t % int(args.log_every) == 0 or game_idx == update_every:
+                anchor_hint = "" if float(args.bc_anchor_beta) <= 0.0 else f" | anchor_ce {row.avg_anchor_ce:.3f}"
                 print(
                     f"iter {t:04d} | games {game_idx:06d} | "
                     f"avg_return {row.avg_return:+.3f} | win {row.win_rate:.3f} draw {row.draw_rate:.3f} | "
                     f"entropy {row.avg_entropy:.3f} | vloss {row.value_loss:.4f}"
+                    f"{anchor_hint}"
                 )
 
             returns_buf.clear()
@@ -664,6 +743,7 @@ def main() -> int:
             draws = 0
             entropies.clear()
             value_losses.clear()
+            anchor_ces.clear()
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 
@@ -704,6 +784,8 @@ def main() -> int:
         "reward_shaping_overkill_penalty_mode": str(args.overkill_penalty_mode),
         "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
         "reward_shaping_overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
+        "bc_anchor_path": bc_anchor_path or None,
+        "bc_anchor_beta": float(args.bc_anchor_beta),
         "inference_overkill_guard": bool(args.inference_overkill_guard),
         "train": {
             "algorithm": "a2c",

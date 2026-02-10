@@ -589,6 +589,37 @@ Interpretazione:
 - Il fine-tuning A2C migliora la forza vs `heuristic_v1`, ma tende a rialzare un po’ l’overkill complessivo.
   Questo è un buon segnale: lo stile è acquisito, ma l’obiettivo RL (reward) può spingere di nuovo verso mosse più “aggressive”.
 
+Prossimo step (D): A2C “ancorato” al BC (stay-close-to-teacher)
+---------------------------------------------------------------
+
+Obiettivo:
+- mantenere i vantaggi dello stile BC (anti-overkill) durante il fine-tuning RL, senza ricorrere al guard.
+
+Idea:
+- aggiungere a `scripts/train_a2c.py` una regolarizzazione opzionale verso un modello BC fisso:
+  - loss addizionale (actor): `beta * CE(π_anchor || π_policy)` su azioni valide (action mask)
+  - gradiente semplice: `beta * (π_policy - π_anchor)` sui logits
+
+Deliverable:
+- [x] flag CLI: `--bc-anchor <path.npz>` + `--bc-anchor-beta <float>`
+- [x] test unitari per gradiente CE (`tests/test_policy_regularization.py`)
+- [x] run di prova (200k game) init da BC con anchor attivo, e confronto:
+  - `evaluate_matrix.py` (forza)
+  - `evaluate_decision_quality.py` (stile, guard OFF)
+
+Risultati run di prova (anchor attivo, beta=0.02)
+- esperimento: `benchmarks/experiments/a2c_mix_heuristic_v2_0_4_heuristic_v1_0_3_random_0_2_greedy_points_0_1_200kg_seed7_from_bc_teacher_v2_anchor02/`
+- evaluation matrix `medium`:
+  - vs `heuristic_v1` holdout: `avg_diff=+5.85`
+- decision quality `medium` vs `heuristic_v1` (guard OFF):
+  - avg diff `+5.55`
+  - `trump_overkill_rate`: `0.6%`
+  - `trump_overkill_rate_low_lead_points`: `0.5%`
+
+Interpretazione:
+- l'anchor aiuta a tenere basso l'overkill (vs A2C non ancorato), ma con questo `beta` sembra “frenare” troppo la policy,
+  riducendo la forza vs `heuristic_v1`. Prossimo tuning naturale: provare `beta` più piccoli (es. 0.005–0.01) e confrontare.
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.
