@@ -418,6 +418,10 @@ Per diagnosticare comportamenti miopi (es. “spreca briscole alte per prendere 
   quante volte usa una briscola “più costosa del necessario” rispetto alla briscola vincente minima disponibile.
   Utile per misurare il caso “butta briscole alte per prendere scarti”.
 
+Se vuoi *ridurre* questo comportamento durante training A2C, puoi provare un shaping soft:
+- `scripts/train_a2c.py --overkill-penalty-beta <beta>` (default: 0, disattivato)
+- `--overkill-low-lead-points-max 2` (default) per colpire soprattutto gli “scarti o quasi”.
+
 Esempio:
 
 ```

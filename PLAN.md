@@ -458,6 +458,18 @@ Risultati (screening, seed=6, 200k game, encoder v2):
   - best v1 (`data/models/best_a2c.npz`): `trump_overkill_rate≈20.3%` (5692 / 27985), low-lead `≈18.4%` (2199 / 11975)
 - decisione: NON promuovere a best (in questo screening v2 non migliora né forza né `trump_waste_rate`)
 
+Prossimo step (shaping mirato su “spreco briscole alte”):
+- [ ] A2C: aggiungere shaping opzionale `--overkill-penalty-beta` (penalità flat) quando:
+  - siamo secondi di mano
+  - vinciamo con una briscola
+  - esisteva una briscola vincente più economica
+  - (default) carta avversaria sul tavolo vale <=2 punti (`--overkill-low-lead-points-max`)
+- [ ] Sweep rapido (screening):
+  - warm-start da `data/models/best_a2c.npz`
+  - 50k game, benchmark `small`
+  - provare `beta ∈ {0.0, 0.002, 0.005, 0.01}`
+  - criterio: ridurre `trump_overkill_rate_low_lead_points` senza perdere troppo `avg_diff vs heuristic_v1`
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

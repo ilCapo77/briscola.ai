@@ -57,6 +57,7 @@ from briscola_ai.ai.training.observation_encoder import (
     feature_dim_for_encoder_version,
 )
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
+from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
@@ -205,6 +206,8 @@ def _play_one_game_2p_collect(
     policy_seat: int,
     entropy_beta: float,
     encoder_version: EncoderVersion,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int | None,
 ) -> tuple[GameState, list[StepRecord], float]:
     """
     Simula una partita 2-player e colleziona la traiettoria vista come MDP "turno della policy".
@@ -250,6 +253,18 @@ def _play_one_game_2p_collect(
         action_id = int(rng_action.choice(40, p=probs))
         card_index = _action_id_to_card_index(action_id=action_id, hand=obs.hand)
 
+        # Reward shaping opzionale: penalità "overkill briscola" (soft).
+        #
+        # Importante:
+        # questa penalità è calcolata SOLO da `PlayerObservation` (anti-cheat),
+        # quindi non introduce scorciatoie basate su informazione nascosta.
+        extra_penalty = trump_overkill_penalty(
+            obs,
+            chosen_card_index=card_index,
+            beta=float(overkill_penalty_beta),
+            low_lead_points_max=overkill_low_lead_points_max,
+        )
+
         # Applica azione policy.
         state, result = step(state, PlayCardAction(player_index=policy_seat, card_index=card_index))
         if result.error:
@@ -264,7 +279,7 @@ def _play_one_game_2p_collect(
                 raise RuntimeError(f"Errore dominio durante la simulazione: {result.error}")
 
         diff_after = _points_diff(state, policy_seat=policy_seat)
-        reward = float(diff_after - diff_before) / 120.0
+        reward = float(diff_after - diff_before) / 120.0 + float(extra_penalty)
 
         traj.append(
             StepRecord(
@@ -353,6 +368,26 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate Adam.")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="L2 weight decay (solo pesi).")
     parser.add_argument("--entropy-beta", type=float, default=5e-4, help="Entropia bonus (>=0).")
+    parser.add_argument(
+        "--overkill-penalty-beta",
+        type=float,
+        default=0.0,
+        help=(
+            "Penalità flat (>=0) per scoraggiare 'overkill briscola' da secondi di mano. "
+            "Se >0 e la policy vince con una briscola pur avendo una briscola vincente più economica, "
+            "aggiungiamo `-beta` al reward (soft shaping)."
+        ),
+    )
+    parser.add_argument(
+        "--overkill-low-lead-points-max",
+        type=int,
+        default=2,
+        help=(
+            "Applica la penalità overkill solo se la carta avversaria sul tavolo vale "
+            "al massimo questo numero di punti. "
+            "Default: 2 (scarti o quasi)."
+        ),
+    )
     parser.add_argument("--value-coef", type=float, default=0.5, help="Peso loss critic (MSE).")
     parser.add_argument("--gamma", type=float, default=1.0, help="Fattore di sconto per return-to-go (default: 1.0).")
     parser.add_argument("--update-every", type=int, default=20, help="Aggiorna i pesi ogni N partite (batch).")
@@ -370,6 +405,10 @@ def main() -> int:
         raise ValueError("--log-every deve essere > 0")
     if float(args.gamma) <= 0.0 or float(args.gamma) > 1.0:
         raise ValueError("--gamma deve essere in (0,1]")
+    if float(args.overkill_penalty_beta) < 0.0:
+        raise ValueError("--overkill-penalty-beta deve essere >= 0")
+    if int(args.overkill_low_lead_points_max) < 0:
+        raise ValueError("--overkill-low-lead-points-max deve essere >= 0")
 
     out_path = Path(args.out)
     encoder_version: EncoderVersion = str(args.encoder_version)
@@ -469,6 +508,8 @@ def main() -> int:
             policy_seat=policy_seat,
             entropy_beta=float(args.entropy_beta),
             encoder_version=encoder_version,
+            overkill_penalty_beta=float(args.overkill_penalty_beta),
+            overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
         )
         entropies.append(avg_entropy)
 
@@ -630,6 +671,8 @@ def main() -> int:
         "encoder": f"encode_observation_2p:{encoder_version}",
         "encoder_version": encoder_version,
         "reward_shaping": "turn_based_trick_delta_points",
+        "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
+        "reward_shaping_overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
         "train": {
             "algorithm": "a2c",
             "optimizer": "adam",
