@@ -430,6 +430,26 @@ Piano:
   - [x] Test: coprire encoder v2 + path inference (BCModelAgent) + compatibilità catalogo
   - [x] Documentazione: in `README.md` spiegare “card counting lecito” (anti-cheat) e come usare v2
 
+Prossimo esperimento (per verificare che v2 sia “meno miope”):
+- [x] Addestrare A2C con encoder v2 (seed 6) con warm-start dal best v1:
+  - pipeline: `scripts/run_experiment.py`
+  - trainer args: `--encoder-version v2 --upgrade-init-v1-to-v2`
+  - benchmark: almeno `medium` (poi eventualmente `big`)
+- [x] Valutare la qualità decisionale del modello v2 vs `heuristic_v1`:
+  - `scripts/evaluate_decision_quality.py` (benchmark `medium`)
+  - confronto qualitativo: `trump_waste_rate` del v2 vs `best_a2c` v1
+- [ ] (Opzionale) Se migliora forza+qualità, promuovere un “best_a2c” v2 (decisione esplicita):
+  - aggiornare `data/models/best_a2c.npz` solo se migliora su `holdout vs heuristic_v1` e non peggiora troppo su `trump_waste_rate`
+
+Risultati (screening, seed=6, 200k game, encoder v2):
+- esperimento: `benchmarks/experiments/a2c_mix_heuristic_v1_0_7_random_0_2_greedy_points_0_1_200kg_seed6_enc_v2/`
+- evaluation matrix `medium`:
+  - `holdout vs heuristic_v1 avg_diff = +12.25`
+- decision quality `medium` vs `heuristic_v1`:
+  - v2 (`model.npz`): `avg_diff=+12.23`, `trump_waste_rate≈0.1%` (55 / 77189)
+  - best v1 (`data/models/best_a2c.npz`): `avg_diff=+12.89`, `trump_waste_rate≈0.0%` (15 / 77965)
+- decisione: NON promuovere a best (in questo screening v2 non migliora né forza né `trump_waste_rate`)
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.
