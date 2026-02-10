@@ -430,6 +430,14 @@ Operatività (senza env var):
 - [x] Abilitare `inference_overkill_guard=true` nei metadati di `data/models/best_a2c.npz`
   - obiettivo: ottenere gli stessi benefici "guard ON" senza dover impostare `BRISCOLA_BC_OVERKILL_GUARD`
   - verifica (`medium` vs `heuristic_v1`, seed=0): `trump_overkill_rate=0.0%` e low-lead `=0.0%` con `avg_diff≈+12.80`
+
+A/B test (evaluation matrix `medium`, seed=0, stessi avversari):
+- modello guard ON: `data/models/best_a2c.npz` (metadati `inference_overkill_guard=true`)
+- modello guard OFF: `benchmarks/ab_overkill_guard/best_a2c_guard_off.npz`
+- risultati (avg_diff):
+  - vs `heuristic_v1` standard: ON `+12.57` vs OFF `+12.71` (Δ=-0.14)
+  - vs `heuristic_v1` holdout:  ON `+12.15` vs OFF `+12.32` (Δ=-0.17)
+  - differenze piccole (rumore statistico possibile), ma il guard elimina l’overkill per costruzione
 - [x] Stato più ricco (anti-cheat) tramite “storia pubblica”:
   - [x] Definire una mappatura canonica “card -> id” (40 carte) in `domain/` (riusabile da dominio/backend/ai)
   - [x] Aggiungere a `PlayerObservation` `seen_cards_onehot[40]` derivato solo da info pubblica:

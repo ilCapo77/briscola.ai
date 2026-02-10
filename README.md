@@ -424,6 +424,8 @@ Se vuoi eliminare **senza retrain** gran parte dell’“overkill”:
 - come attivarlo:
   - (consigliato) salva il flag nei metadati quando alleni: `scripts/train_a2c.py --inference-overkill-guard` (o `train_bc.py`, `train_pg.py`)
   - (A/B veloce) imposta `BRISCOLA_BC_OVERKILL_GUARD=1` quando lanci server/valutazioni
+- nota: essendo un post-processing deterministico, può cambiare *leggermente* la forza complessiva.
+  Verifica sempre con `scripts/evaluate_matrix.py` e `scripts/evaluate_decision_quality.py`.
 
 Se vuoi *ridurre* questo comportamento durante training A2C, puoi provare un shaping soft:
 - `scripts/train_a2c.py --overkill-penalty-mode flat --overkill-penalty-beta <beta>` (default: 0, disattivato)
