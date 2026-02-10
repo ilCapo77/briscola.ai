@@ -21,7 +21,7 @@ la separazione tra logica di gioco e serializzazione API.
 
 from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from ..domain.models import Card
 
@@ -129,6 +129,13 @@ class ObservationDTO(BaseModel):
 
     # Info sugli altri giocatori (sostituisce player_{n}_*)
     players: list[PlayerInfoDTO]
+
+    # Storia pubblica (card counting lecito): one-hot su 40 carte viste (tavolo + prese + briscola).
+    #
+    # Nota:
+    # - È informazione pubblica, quindi non viola l'anti-cheat.
+    # - È opzionale per backward compatibility (client vecchi possono ignorarla).
+    seen_cards_onehot: list[int] = Field(default_factory=list)
 
     # Campi 4-player (opzionali, None in modalità 2-player)
     my_team: int | None = None

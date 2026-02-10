@@ -18,6 +18,7 @@ vanno ripensate per il team-play.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Literal
 
 from ...domain.models import Card
 from ...domain.observation import PlayerObservation
@@ -46,7 +47,10 @@ _CARD_FEATURES = build_card_features()
 # - briscola onehot sui 4 semi = 4  -> 244
 # - 4 scalari = 4                 -> 248
 FEATURE_DIM_2P_V1 = 248
+FEATURE_DIM_2P_V2 = FEATURE_DIM_2P_V1 + 40
 ACTION_DIM = 40
+
+EncoderVersion = Literal["v1", "v2"]
 
 
 def _one_hot_suit(suit: str | None) -> list[float]:
@@ -157,7 +161,74 @@ def encode_observation_2p(observation: dict) -> EncodedObservation:
     return EncodedObservation(features=features, action_mask=mask)
 
 
-def encode_player_observation_2p(observation: PlayerObservation) -> EncodedObservation:
+def _seen_cards_onehot_to_floats(raw: object) -> list[float]:
+    """
+    Normalizza `seen_cards_onehot` in una lista di float lunga 40.
+
+    Per compatibilità:
+    - se il campo manca/None, ritorniamo 40 zeri (utile per dataset/modelli vecchi).
+    - accettiamo `int`/`bool` e convertiamo in 0.0/1.0.
+    """
+    if raw is None:
+        return [0.0] * 40
+
+    if not isinstance(raw, list):
+        raise ValueError("ObservationDTO invalida: seen_cards_onehot non list")
+
+    if len(raw) != 40:
+        raise ValueError(f"ObservationDTO invalida: seen_cards_onehot len={len(raw)} (atteso 40)")
+
+    out: list[float] = []
+    for v in raw:
+        if isinstance(v, bool):
+            out.append(1.0 if v else 0.0)
+        elif isinstance(v, int):
+            if v not in (0, 1):
+                raise ValueError("ObservationDTO invalida: seen_cards_onehot deve contenere solo 0/1")
+            out.append(float(v))
+        else:
+            raise ValueError("ObservationDTO invalida: seen_cards_onehot deve contenere int/bool")
+    return out
+
+
+def encode_observation_2p_v2(observation: dict) -> EncodedObservation:
+    """
+    Encoder 2-player v2 = v1 + storia pubblica (card counting lecito).
+
+    Aggiungiamo in coda al vettore v1:
+    - `seen_cards_onehot[40]`: 1 se la carta è già stata vista/giocata nella partita.
+
+    Perché è anti-cheat?
+    - Sono **solo** carte pubbliche: briscola scoperta + carte sul tavolo + carte già uscite.
+    - Non include l'ordine del mazzo né la mano avversaria.
+
+    Compatibilità:
+    - Se `seen_cards_onehot` manca, viene trattato come 40 zeri (utile per dataset vecchi).
+      Per training v2 “serio” è comunque consigliato che il backend lo popoli sempre.
+    """
+    base = encode_observation_2p(observation)
+    seen = _seen_cards_onehot_to_floats(observation.get("seen_cards_onehot"))
+    features = list(base.features) + seen
+    return EncodedObservation(features=features, action_mask=base.action_mask)
+
+
+def encode_observation_2p_with_version(observation: dict, *, version: EncoderVersion) -> EncodedObservation:
+    """Selettore esplicito dell'encoder 2-player (v1/v2)."""
+    if version == "v1":
+        return encode_observation_2p(observation)
+    if version == "v2":
+        return encode_observation_2p_v2(observation)
+    raise ValueError(f"Encoder version non supportata: {version!r}")
+
+
+def feature_dim_for_encoder_version(version: EncoderVersion) -> int:
+    """Ritorna la feature_dim attesa dall'encoder 2-player (v1/v2)."""
+    return int(FEATURE_DIM_2P_V1) if version == "v1" else int(FEATURE_DIM_2P_V2)
+
+
+def encode_player_observation_2p(
+    observation: PlayerObservation, *, version: EncoderVersion = "v1"
+) -> EncodedObservation:
     """
     Encoda una `PlayerObservation` (dominio) in feature+mask (2-player).
 
@@ -200,5 +271,6 @@ def encode_player_observation_2p(observation: PlayerObservation) -> EncodedObser
         "table_cards": [{"card": _card_to_dto_dict(c), "player_index": idx} for c, idx in observation.table_cards],
         "cards_remaining_in_deck": observation.deck_size,
         "players": players,
+        "seen_cards_onehot": list(observation.seen_cards_onehot),
     }
-    return encode_observation_2p(dto_like)
+    return encode_observation_2p_with_version(dto_like, version=version)

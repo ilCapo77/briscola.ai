@@ -170,7 +170,8 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     """`GET /ai/models` deve elencare i modelli `.npz` disponibili (senza path assoluti)."""
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
 
-    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible.npz", feature_dim=248)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible_v1.npz", feature_dim=248)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible_v2.npz", feature_dim=288)
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "incompatible.npz", feature_dim=10)
 
     client = TestClient(server.app)
@@ -184,12 +185,17 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
 
     assert "models_dir" not in payload  # non vogliamo esporre path server-side
     by_id = {m["id"]: m for m in models}
-    assert "compatible.npz" in by_id
+    assert "compatible_v1.npz" in by_id
+    assert "compatible_v2.npz" in by_id
     assert "incompatible.npz" in by_id
 
-    ok = by_id["compatible.npz"]
-    assert ok["is_compatible"] is True
-    assert ok.get("compatibility_reason_it") is None
+    ok_v1 = by_id["compatible_v1.npz"]
+    assert ok_v1["is_compatible"] is True
+    assert ok_v1.get("compatibility_reason_it") is None
+
+    ok_v2 = by_id["compatible_v2.npz"]
+    assert ok_v2["is_compatible"] is True
+    assert ok_v2.get("compatibility_reason_it") is None
 
     bad = by_id["incompatible.npz"]
     assert bad["is_compatible"] is False
@@ -201,6 +207,7 @@ def test_create_game_supports_bc_model_with_ai_model_id(monkeypatch: pytest.Monk
     """`POST /games` deve supportare `ai_agent=bc_model` + `ai_model_id` (whitelisted)."""
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "dummy_model.npz", feature_dim=248)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "dummy_model_v2.npz", feature_dim=288)
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "bad_model.npz", feature_dim=10)
 
     client = TestClient(server.app)
@@ -237,6 +244,20 @@ def test_create_game_supports_bc_model_with_ai_model_id(monkeypatch: pytest.Monk
     payload = ok.json()
     assert payload["ai_agent"] == "bc_model"
     assert payload["ai_model_id"] == "dummy_model.npz"
+
+    ok_v2 = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model",
+            "ai_model_id": "dummy_model_v2.npz",
+        },
+    )
+    assert ok_v2.status_code == 200
+    payload_v2 = ok_v2.json()
+    assert payload_v2["ai_agent"] == "bc_model"
+    assert payload_v2["ai_model_id"] == "dummy_model_v2.npz"
 
     bad = client.post(
         "/games",
@@ -666,6 +687,10 @@ def test_http_observation_matches_ws_observation_format() -> None:
     assert isinstance(http_obs.get("table_cards"), list)
     assert isinstance(ws_obs.get("my_hand"), list)
     assert isinstance(http_obs.get("my_hand"), list)
+    assert isinstance(ws_obs.get("seen_cards_onehot"), list)
+    assert isinstance(http_obs.get("seen_cards_onehot"), list)
+    assert len(ws_obs["seen_cards_onehot"]) == 40
+    assert len(http_obs["seen_cards_onehot"]) == 40
 
     # Controllo minimo su un elemento card: deve avere i campi DTO attesi.
     if http_obs["my_hand"]:

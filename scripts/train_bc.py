@@ -45,7 +45,7 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.training.card_action_space import card_dto_to_action_id
-from briscola_ai.ai.training.observation_encoder import encode_observation_2p
+from briscola_ai.ai.training.observation_encoder import EncoderVersion, encode_observation_2p_with_version
 
 
 @dataclass(frozen=True)
@@ -67,7 +67,9 @@ def _iter_jsonl(path: Path):
             yield json.loads(line)
 
 
-def _build_training_examples(path: Path) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+def _build_training_examples(
+    path: Path, *, encoder_version: EncoderVersion
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Carica esempi dal JSONL export.
 
@@ -103,7 +105,7 @@ def _build_training_examples(path: Path) -> tuple[np.ndarray, np.ndarray, np.nda
         played_card = my_hand[card_index]
         y = card_dto_to_action_id(played_card)
 
-        encoded = encode_observation_2p(obs)
+        encoded = encode_observation_2p_with_version(obs, version=encoder_version)
         if not encoded.action_mask[y]:
             # Sanity: il target deve essere sempre una carta in mano.
             continue
@@ -296,6 +298,15 @@ def main() -> int:
     parser.add_argument("--data", required=True, help="Path JSONL (output di scripts/export_dataset.py)")
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
     parser.add_argument(
+        "--encoder-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help=(
+            "Versione encoder per observation 2-player. "
+            "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica)."
+        ),
+    )
+    parser.add_argument(
         "--model",
         choices=["linear", "mlp"],
         default="linear",
@@ -327,6 +338,7 @@ def main() -> int:
 
     data_path = Path(args.data)
     out_path = Path(args.out)
+    encoder_version: EncoderVersion = str(args.encoder_version)
 
     # Metadati UI (opzionali ma utili per la selezione del modello in frontend).
     #
@@ -339,9 +351,10 @@ def main() -> int:
         dataset = data_path.name
         epochs = int(args.epochs)
         lr = float(args.lr) if args.lr is not None else (0.5 if model == "linear" else 1e-3)
+        enc_hint = " (encoder v2, storia pubblica)" if encoder_version == "v2" else ""
 
         if model == "linear":
-            label = f"BC lineare (epoche {epochs})"
+            label = f"BC lineare{enc_hint} (epoche {epochs})"
             description_it = (
                 "Behavior Cloning (supervised): modello lineare softmax su 40 carte + action mask. "
                 f"Addestrato su dataset `{dataset}` (epoche={epochs}, lr={lr:g})."
@@ -349,14 +362,14 @@ def main() -> int:
             return label, description_it
 
         hidden_dim = int(args.hidden_dim)
-        label = f"BC MLP (epoche {epochs})"
+        label = f"BC MLP{enc_hint} (epoche {epochs})"
         description_it = (
             "Behavior Cloning (supervised): MLP (1 hidden layer + ReLU) su 40 carte + action mask. "
             f"Addestrato su dataset `{dataset}` (hidden={hidden_dim}, epoche={epochs}, lr={lr:g})."
         )
         return label, description_it
 
-    x_all, mask_all, y_all = _build_training_examples(data_path)
+    x_all, mask_all, y_all = _build_training_examples(data_path, encoder_version=encoder_version)
 
     rng = np.random.default_rng(args.seed)
     n = x_all.shape[0]
@@ -420,7 +433,8 @@ def main() -> int:
             "action_dim": 40,
             "seed": int(args.seed),
             "data_path": str(data_path),
-            "encoder": "encode_observation_2p:v1",
+            "encoder": f"encode_observation_2p:{encoder_version}",
+            "encoder_version": encoder_version,
             "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
             "metrics": [asdict(metric) for metric in metrics],
         }
@@ -505,7 +519,8 @@ def main() -> int:
         "action_dim": 40,
         "seed": int(args.seed),
         "data_path": str(data_path),
-        "encoder": "encode_observation_2p:v1",
+        "encoder": f"encode_observation_2p:{encoder_version}",
+        "encoder_version": encoder_version,
         "train": {
             "model": "mlp",
             "optimizer": "adam",

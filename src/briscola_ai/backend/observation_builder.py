@@ -13,6 +13,7 @@ Per evitare duplicazione e drift, centralizziamo qui i builder.
 
 from __future__ import annotations
 
+from ..domain.card_id import card_to_id
 from ..domain.state import GameState as DomainGameState
 from .dto import CardDTO, GameStateDTO, ObservationDTO, PlayerInfoDTO, PlayerStateDTO, TableCardDTO
 
@@ -57,6 +58,16 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
             )
         )
 
+    # Storia pubblica (40 carte): tavolo + prese + briscola scoperta.
+    seen = [0] * 40
+    if state.trump_card is not None:
+        seen[card_to_id(state.trump_card)] = 1
+    for card, _ in state.table_cards:
+        seen[card_to_id(card)] = 1
+    for p in state.players:
+        for card in p.captured_cards:
+            seen[card_to_id(card)] = 1
+
     # Campi 4-player (None se 2-player)
     my_team = None
     teammate_index = None
@@ -92,6 +103,7 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
         num_players=state.num_players,
         is_team_game=state.is_team_game,
         players=players,
+        seen_cards_onehot=seen,
         my_team=my_team,
         teammate_index=teammate_index,
         teammate_points=teammate_points,

@@ -31,7 +31,7 @@ from typing import Any, Iterable
 import numpy as np
 
 from .bc_model_agent import load_bc_model_npz
-from .training.observation_encoder import FEATURE_DIM_2P_V1
+from .training.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2
 
 
 @dataclass(frozen=True, slots=True)
@@ -113,16 +113,19 @@ def validate_model_compatible_for_ui(path: Path) -> None:
 
     Criteri:
     - file caricato correttamente (chiavi/shape coerenti);
-    - `feature_dim` coerente con l'encoder 2-player v1 usato dall'agente.
+    - `feature_dim` coerente con uno degli encoder 2-player supportati:
+      - v1 (248): observation "istantanea" (mano+tavolo+briscola+scalari)
+      - v2 (288): v1 + `seen_cards_onehot[40]` (storia pubblica, card counting lecito)
 
     Nota:
-    se in futuro introduciamo encoder diversi, questa funzione dovrà considerare `metadata.encoder`.
+    se in futuro introduciamo encoder diversi (o 4-player), questa funzione dovrà considerare
+    anche `metadata.encoder` e/o `metadata.num_players`.
     """
     model = load_bc_model_npz(path)
-    if int(model.feature_dim) != int(FEATURE_DIM_2P_V1):
+    if int(model.feature_dim) not in {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)}:
         raise ValueError(
             "Model feature_dim mismatch: "
-            f"model={int(model.feature_dim)} expected={int(FEATURE_DIM_2P_V1)} (encoder 2p v1)."
+            f"model={int(model.feature_dim)} expected={int(FEATURE_DIM_2P_V1)} (v1) or {int(FEATURE_DIM_2P_V2)} (v2)."
         )
 
 

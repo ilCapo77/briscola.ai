@@ -28,7 +28,12 @@ import numpy as np
 
 from ..domain.observation import PlayerObservation
 from .training.card_action_space import action_id_from_suit_number
-from .training.observation_encoder import encode_player_observation_2p
+from .training.observation_encoder import (
+    FEATURE_DIM_2P_V1,
+    FEATURE_DIM_2P_V2,
+    EncoderVersion,
+    encode_player_observation_2p,
+)
 
 
 class LoadedBCModel(Protocol):
@@ -123,6 +128,62 @@ def _validate_declared_feature_dim(metadata: dict[str, Any], actual: int) -> Non
         raise ValueError(f"Feature dim mismatch: metadata={declared_dim} actual={actual}")
 
 
+def _infer_encoder_version_from_metadata(metadata: dict[str, Any]) -> EncoderVersion | None:
+    """
+    Estrae (best effort) la versione encoder dai metadati.
+
+    Convenzioni supportate:
+    - `metadata.encoder_version`: "v1" / "v2"
+    - `metadata.encoder`: stringa tipo "encode_observation_2p:v1" / "...:v2"
+    """
+    raw_version = metadata.get("encoder_version")
+    if isinstance(raw_version, str):
+        v = raw_version.strip().lower()
+        if v == "v1":
+            return "v1"
+        if v == "v2":
+            return "v2"
+
+    raw_encoder = metadata.get("encoder")
+    if isinstance(raw_encoder, str):
+        enc = raw_encoder.strip().lower()
+        if enc.endswith(":v1") or enc == "v1":
+            return "v1"
+        if enc.endswith(":v2") or enc == "v2":
+            return "v2"
+
+    return None
+
+
+def _infer_encoder_version_for_model(*, metadata: dict[str, Any], feature_dim: int) -> EncoderVersion:
+    """
+    Decide quale encoder usare per un modello.
+
+    Regola (in ordine):
+    1) se `metadata.encoder[_version]` è presente, lo rispettiamo (e validiamo `feature_dim`);
+    2) altrimenti facciamo fallback su `feature_dim` (248=v1, 288=v2).
+    """
+    declared = _infer_encoder_version_from_metadata(metadata)
+    if declared is not None:
+        expected = int(FEATURE_DIM_2P_V1) if declared == "v1" else int(FEATURE_DIM_2P_V2)
+        if int(feature_dim) != expected:
+            raise ValueError(
+                "Modello incoerente: "
+                f"metadata encoder={declared} ma feature_dim={int(feature_dim)} (atteso {expected})."
+            )
+        return declared
+
+    if int(feature_dim) == int(FEATURE_DIM_2P_V1):
+        return "v1"
+    if int(feature_dim) == int(FEATURE_DIM_2P_V2):
+        return "v2"
+
+    raise ValueError(
+        "Impossibile inferire l'encoder: "
+        f"feature_dim={int(feature_dim)} non è né v1({int(FEATURE_DIM_2P_V1)}) né v2({int(FEATURE_DIM_2P_V2)})."
+    )
+
+
 def load_bc_model_npz(path: Path) -> LoadedBCModel:
     """
     Carica un modello BC da `.npz`.
@@ -202,24 +263,28 @@ class BCModelAgent:
 
     model: LoadedBCModel
     model_path: Path
+    encoder_version: EncoderVersion
 
     @property
     def name(self) -> str:
         """Nome leggibile dell'agente (includiamo solo il basename per evitare path lunghi)."""
-        return f"bc_model({self.model_path.name})"
+        suffix = "" if self.encoder_version == "v1" else f",encoder={self.encoder_version}"
+        return f"bc_model({self.model_path.name}{suffix})"
 
     @classmethod
     def from_npz(cls, path: str | Path) -> BCModelAgent:
         """Costruisce un agente caricando un `.npz` (output di `scripts/train_bc.py`)."""
         model_path = Path(path)
-        return cls(model=load_bc_model_npz(model_path), model_path=model_path)
+        model = load_bc_model_npz(model_path)
+        encoder_version = _infer_encoder_version_for_model(metadata=model.metadata, feature_dim=int(model.feature_dim))
+        return cls(model=model, model_path=model_path, encoder_version=encoder_version)
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
         hand = observation.hand
         if not hand:
             raise ValueError("Mano vuota: nessuna azione possibile")
 
-        encoded = encode_player_observation_2p(observation)
+        encoded = encode_player_observation_2p(observation, version=self.encoder_version)
         if len(encoded.features) != self.model.feature_dim:
             raise ValueError(
                 "Feature dim mismatch: "

@@ -47,6 +47,9 @@ def test_make_player_observation_contains_only_legal_information() -> None:
     # (Controllo "forte": nessuna carta dell'avversario deve apparire nella nostra mano osservata.)
     assert set(state.players[1].hand).isdisjoint(set(obs0.hand))
 
+    # Storia pubblica: è sempre una one-hot di lunghezza 40.
+    assert len(obs0.seen_cards_onehot) == 40
+
 
 def test_make_player_observation_rejects_invalid_player_index() -> None:
     """Indici fuori range devono fallire esplicitamente per evitare bug silenziosi."""

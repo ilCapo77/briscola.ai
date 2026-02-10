@@ -20,11 +20,17 @@ Obiettivo didattico:
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
+from .card_id import card_to_id
 from .models import Card
 from .state import GameState
+
+
+def _empty_seen_cards_onehot() -> tuple[int, ...]:
+    """Default (backward-compatible): nessuna carta “vista” (lunghezza 40)."""
+    return (0,) * 40
 
 
 @dataclass(frozen=True, slots=True)
@@ -68,6 +74,16 @@ class PlayerObservation:
     players_points: tuple[int, ...]
     players_hand_sizes: tuple[int, ...]
 
+    # Storia pubblica (card counting lecito): one-hot sulle 40 carte.
+    #
+    # Contiene solo informazione pubblica, quindi è anti-cheat:
+    # - carte già giocate e finite nelle prese (captured_cards di tutti)
+    # - carte attualmente sul tavolo
+    # - briscola scoperta (se presente)
+    #
+    # Non include mai carte specifiche in mano agli avversari.
+    seen_cards_onehot: tuple[int, ...] = field(default_factory=_empty_seen_cards_onehot)
+
 
 def make_player_observation(state: GameState, player_index: int) -> PlayerObservation:
     """
@@ -82,6 +98,19 @@ def make_player_observation(state: GameState, player_index: int) -> PlayerObserv
     """
     if player_index < 0 or player_index >= state.num_players:
         raise ValueError(f"player_index fuori range: {player_index} (num_players={state.num_players})")
+
+    # Costruiamo la storia pubblica (40 carte) senza leak:
+    # - prese di tutti i player (pubbliche)
+    # - tavolo (pubblico)
+    # - briscola scoperta (pubblica)
+    seen = [0] * 40
+    if state.trump_card is not None:
+        seen[card_to_id(state.trump_card)] = 1
+    for card, _ in state.table_cards:
+        seen[card_to_id(card)] = 1
+    for p in state.players:
+        for card in p.captured_cards:
+            seen[card_to_id(card)] = 1
 
     return PlayerObservation(
         num_players=state.num_players,
@@ -100,4 +129,5 @@ def make_player_observation(state: GameState, player_index: int) -> PlayerObserv
         winning_team=state.winning_team,
         players_points=tuple(p.points for p in state.players),
         players_hand_sizes=tuple(len(p.hand) for p in state.players),
+        seen_cards_onehot=tuple(seen),
     )

@@ -95,6 +95,7 @@ class TestObservationDTO:
                 PlayerInfoDTO(index=0, name="Player", points=21, hand_size=3),
                 PlayerInfoDTO(index=1, name="AI", points=10, hand_size=3),
             ],
+            seen_cards_onehot=[0] * 40,
         )
 
         data = dto.model_dump()
@@ -105,6 +106,7 @@ class TestObservationDTO:
         assert len(data["players"]) == 2
         assert data["players"][0]["name"] == "Player"
         assert data["players"][1]["name"] == "AI"
+        assert len(data["seen_cards_onehot"]) == 40
 
 
 class TestAiCardRevealDTO:

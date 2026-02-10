@@ -49,7 +49,13 @@ import numpy as np
 from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
-from briscola_ai.ai.training.observation_encoder import encode_player_observation_2p
+from briscola_ai.ai.training.observation_encoder import (
+    FEATURE_DIM_2P_V1,
+    FEATURE_DIM_2P_V2,
+    EncoderVersion,
+    encode_player_observation_2p,
+    feature_dim_for_encoder_version,
+)
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
@@ -198,6 +204,7 @@ def _play_one_game_2p_collect(
     game_seed: int,
     policy_seat: int,
     entropy_beta: float,
+    encoder_version: EncoderVersion,
 ) -> tuple[GameState, list[StepRecord], float]:
     """
     Simula una partita 2-player e colleziona la traiettoria vista come MDP "turno della policy".
@@ -229,7 +236,7 @@ def _play_one_game_2p_collect(
         # Ora tocca alla policy: definiamo uno step dell'MDP.
         diff_before = _points_diff(state, policy_seat=policy_seat)
         obs = make_player_observation(state, policy_seat)
-        encoded = encode_player_observation_2p(obs)
+        encoded = encode_player_observation_2p(obs, version=encoder_version)
 
         x = np.asarray(encoded.features, dtype=np.float32)
         mask = np.asarray(encoded.action_mask, dtype=bool)
@@ -306,6 +313,23 @@ def main() -> int:
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC/RL).")
     parser.add_argument(
+        "--encoder-version",
+        choices=["v1", "v2"],
+        default="v1",
+        help=(
+            "Versione encoder per observation 2-player. "
+            "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica)."
+        ),
+    )
+    parser.add_argument(
+        "--upgrade-init-v1-to-v2",
+        action="store_true",
+        help=(
+            "Se usi `--encoder-version v2` e `--init` è un modello v1, "
+            "espande `w1` aggiungendo 40 righe a zero (warm-start compatibile)."
+        ),
+    )
+    parser.add_argument(
         "--opponent",
         default="heuristic_v1",
         help=(
@@ -348,6 +372,7 @@ def main() -> int:
         raise ValueError("--gamma deve essere in (0,1]")
 
     out_path = Path(args.out)
+    encoder_version: EncoderVersion = str(args.encoder_version)
     rng_action = np.random.default_rng(args.seed)
     rng_game = np.random.default_rng(args.seed ^ 0x9E3779B9)
     rng_opponent_select = np.random.default_rng(args.seed ^ 0xA5A5A5A5)
@@ -364,6 +389,7 @@ def main() -> int:
         opponent = build_agent(args.opponent)
 
     # Inizializzazione policy/critic.
+    target_feature_dim = int(feature_dim_for_encoder_version(encoder_version))
     if args.init.strip():
         loaded = load_bc_model_npz(Path(args.init))
         if not isinstance(loaded, MLPBCModel):
@@ -373,11 +399,24 @@ def main() -> int:
         w2 = loaded.w2.copy()
         b2 = loaded.b2.copy()
         hdim = int(w1.shape[1])
+        init_dim = int(w1.shape[0])
+        if init_dim != target_feature_dim:
+            if (
+                bool(args.upgrade_init_v1_to_v2)
+                and init_dim == int(FEATURE_DIM_2P_V1)
+                and target_feature_dim == int(FEATURE_DIM_2P_V2)
+            ):
+                pad = np.zeros((target_feature_dim - init_dim, hdim), dtype=np.float32)
+                w1 = np.vstack([w1, pad])
+            else:
+                raise ValueError(
+                    "Feature dim mismatch tra `--init` e encoder scelto: "
+                    f"init={init_dim} target={target_feature_dim} (encoder={encoder_version}). "
+                    "Soluzioni: usa `--encoder-version` coerente, oppure abilita `--upgrade-init-v1-to-v2`."
+                )
     else:
-        # Dimensione feature dal nostro encoder (v1): 40*6 + 4 + 4 = 248.
-        feature_dim = 40 * 6 + 4 + 4
         hdim = int(args.hidden_dim)
-        w1 = rng_action.normal(loc=0.0, scale=0.02, size=(feature_dim, hdim)).astype(np.float32)
+        w1 = rng_action.normal(loc=0.0, scale=0.02, size=(target_feature_dim, hdim)).astype(np.float32)
         b1 = np.zeros((hdim,), dtype=np.float32)
         w2 = rng_action.normal(loc=0.0, scale=0.02, size=(hdim, 40)).astype(np.float32)
         b2 = np.zeros((40,), dtype=np.float32)
@@ -429,6 +468,7 @@ def main() -> int:
             game_seed=game_seed,
             policy_seat=policy_seat,
             entropy_beta=float(args.entropy_beta),
+            encoder_version=encoder_version,
         )
         entropies.append(avg_entropy)
 
@@ -587,7 +627,8 @@ def main() -> int:
         "opponent": str(args.opponent) if not opponent_mix_raw else None,
         "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
         "init": args.init.strip() or None,
-        "encoder": "encode_observation_2p:v1",
+        "encoder": f"encode_observation_2p:{encoder_version}",
+        "encoder_version": encoder_version,
         "reward_shaping": "turn_based_trick_delta_points",
         "train": {
             "algorithm": "a2c",

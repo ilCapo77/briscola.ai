@@ -407,6 +407,63 @@ Esempio (robusto, `big`):
 python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark big --out-json benchmarks/matrix_big.json
 ```
 
+#### Metriche “qualità decisionale” (diagnosi stile di gioco)
+
+Win-rate e punti medi misurano la *forza* di un modello, ma non sempre spiegano *perché* fa certe mosse.
+Per diagnosticare comportamenti miopi (es. “spreca briscole alte per prendere scarti”) usiamo una metrica semplice:
+
+- `trump_waste_rate` (2-player, solo “secondo di mano”): quante volte l’agente gioca una briscola
+  **pur avendo** almeno una risposta vincente **non-briscola**.
+
+Esempio:
+
+```
+python scripts/evaluate_decision_quality.py \
+  --agent-a bc_model --agent-a-model ./data/models/best_a2c.npz \
+  --agent-b heuristic_v1 \
+  --benchmark medium
+```
+
+#### Encoder v2: “storia pubblica” (card counting lecito, anti-cheat)
+
+Molti comportamenti “miopi” (es. usare briscole alte per prendere scarti) emergono quando lo stato
+che diamo al modello è troppo “istantaneo”: vede mano+tavolo+briscola+punti, ma non *il corso* della partita.
+
+Per abilitare strategia senza barare, introduciamo un encoder **v2** che aggiunge una feature:
+
+- `seen_cards_onehot[40]`: one-hot delle carte **già viste** (briscola scoperta + tavolo + carte già uscite).
+
+Perché è anti-cheat?
+- Sono informazioni pubbliche. In una partita reale il giocatore le vede e può ricordarle.
+- Non include mai: ordine del mazzo, mano avversaria, o altre informazioni nascoste.
+
+Uso pratico:
+- Training BC (supervised) su dataset esportato:
+
+```
+python scripts/train_bc.py --data ./data/dataset.jsonl --out ./data/models/bc_v2.npz --encoder-version v2
+```
+
+- Training RL (PG/A2C):
+  - da zero: `--encoder-version v2`
+  - warm-start da un modello v1: `--upgrade-init-v1-to-v2` (aggiunge 40 righe a zero in `w1` e poi il training le “riempie”)
+
+Esempio A2C:
+
+```
+python scripts/train_a2c.py \
+  --out ./data/models/a2c_v2.npz \
+  --init ./data/models/best_a2c.npz \
+  --encoder-version v2 \
+  --upgrade-init-v1-to-v2 \
+  --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 \
+  --num-games 200000 --seat-fair --seed 0
+```
+
+Nota: in partita (`ai_agent=bc_model`) il backend sceglie automaticamente l’encoder corretto
+in base ai metadati del modello (`metadata.encoder`) o, in fallback, dalla `feature_dim`
+(248=v1, 288=v2).
+
 #### Pipeline esperimenti (training + eval) (consigliata)
 
 Per iterare velocemente sui modelli senza perdere traccia dei risultati, usa:

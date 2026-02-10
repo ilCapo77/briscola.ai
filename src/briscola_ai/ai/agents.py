@@ -30,7 +30,7 @@ from ..domain.observation import PlayerObservation
 from ..domain.rules import trick_points, who_wins_trick
 from .bc_model_agent import BCModelAgent
 from .model_catalog import get_models_dir_from_env, resolve_model_path
-from .training.observation_encoder import FEATURE_DIM_2P_V1
+from .training.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2
 
 
 class Agent(Protocol):
@@ -343,11 +343,11 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
             ) from exc
 
         agent = BCModelAgent.from_npz(path)
-        if int(agent.model.feature_dim) != int(FEATURE_DIM_2P_V1):
+        if int(agent.model.feature_dim) not in {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)}:
+            expected = f"{int(FEATURE_DIM_2P_V1)} (v1) or {int(FEATURE_DIM_2P_V2)} (v2)"
             raise ValueError(
-                "Agente 'best_a2c' non compatibile: feature_dim non coerente con l'encoder 2-player v1. "
-                f"model={int(agent.model.feature_dim)} expected={int(FEATURE_DIM_2P_V1)} "
-                f"({path})."
+                "Agente 'best_a2c' non compatibile: feature_dim non coerente con un encoder 2-player supportato. "
+                f"model={int(agent.model.feature_dim)} expected={expected} ({path})."
             )
         return agent
 

@@ -403,6 +403,33 @@ Prossimi esperimenti (A2C):
   - criterio di successo: aggiornare `best_a2c.npz` se migliora `big holdout vs heuristic_v1 avg_diff`
   - risultato: aggiornato `best_a2c.npz` con `big holdout vs heuristic_v1 avg_diff = +11.19` (seed training=9, 500k game)
 
+### Fase 5F — Comportamenti più “strategici”: storia pubblica + metriche qualità (in progress)
+
+Obiettivo: ridurre comportamenti miopi (es. “spreco briscole alte per prendere scarti”) rendendoli:
+1) **misurabili** (metriche qualità decisionale), e
+2) **apprendibili** (stato più ricco: card counting lecito tramite storia pubblica).
+
+Piano:
+- [x] Metrica qualità v1: `trump_waste_rate` (secondo di mano)
+  - definizione: l'agente gioca una briscola pur avendo una risposta vincente non-briscola
+  - script: `scripts/evaluate_decision_quality.py`
+- [x] Stato più ricco (anti-cheat) tramite “storia pubblica”:
+  - [x] Definire una mappatura canonica “card -> id” (40 carte) in `domain/` (riusabile da dominio/backend/ai)
+  - [x] Aggiungere a `PlayerObservation` `seen_cards_onehot[40]` derivato solo da info pubblica:
+    - briscola scoperta (carta sotto il mazzo)
+    - carte sul tavolo (in corso)
+    - carte già uscite (ricostruite dalle prese/captured)
+  - [x] Esporre `seen_cards_onehot` in `ObservationDTO` (UI + dataset logging) e popolarlo dal backend
+  - [x] Encoder v2 (2-player) che include `seen_cards_onehot`:
+    - mantenere l'ordine feature v1 e aggiungere `seen_cards_onehot[40]` in coda (feature_dim: 248 -> 288)
+    - compatibilità: v1 resta default (modelli esistenti)
+  - [x] Inference: aggiornare `BCModelAgent` per selezionare l'encoder in base ai metadati del modello
+    - regola: `metadata.encoder` (se presente) > fallback su `feature_dim` (248=v1, 288=v2)
+  - [x] UI catalog: accettare modelli v1 e v2 (feature_dim coerente) e spiegare la compatibilità in errore
+  - [x] Training: aggiungere `--encoder-version {v1,v2}` ai trainer (BC/PG/A2C) + salvare `metadata.encoder`
+  - [x] Test: coprire encoder v2 + path inference (BCModelAgent) + compatibilità catalogo
+  - [x] Documentazione: in `README.md` spiegare “card counting lecito” (anti-cheat) e come usare v2
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.
