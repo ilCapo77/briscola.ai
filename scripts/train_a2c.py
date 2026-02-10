@@ -57,7 +57,7 @@ from briscola_ai.ai.training.observation_encoder import (
     feature_dim_for_encoder_version,
 )
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
-from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty
+from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
@@ -208,6 +208,7 @@ def _play_one_game_2p_collect(
     encoder_version: EncoderVersion,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int | None,
+    overkill_penalty_mode: str,
 ) -> tuple[GameState, list[StepRecord], float]:
     """
     Simula una partita 2-player e colleziona la traiettoria vista come MDP "turno della policy".
@@ -258,12 +259,22 @@ def _play_one_game_2p_collect(
         # Importante:
         # questa penalità è calcolata SOLO da `PlayerObservation` (anti-cheat),
         # quindi non introduce scorciatoie basate su informazione nascosta.
-        extra_penalty = trump_overkill_penalty(
-            obs,
-            chosen_card_index=card_index,
-            beta=float(overkill_penalty_beta),
-            low_lead_points_max=overkill_low_lead_points_max,
-        )
+        if overkill_penalty_mode == "flat":
+            extra_penalty = trump_overkill_penalty(
+                obs,
+                chosen_card_index=card_index,
+                beta=float(overkill_penalty_beta),
+                low_lead_points_max=overkill_low_lead_points_max,
+            )
+        elif overkill_penalty_mode == "gap":
+            extra_penalty = trump_overkill_penalty_gap(
+                obs,
+                chosen_card_index=card_index,
+                beta=float(overkill_penalty_beta),
+                low_lead_points_max=overkill_low_lead_points_max,
+            )
+        else:
+            raise ValueError(f"overkill_penalty_mode non supportato: {overkill_penalty_mode!r}")
 
         # Applica azione policy.
         state, result = step(state, PlayCardAction(player_index=policy_seat, card_index=card_index))
@@ -368,6 +379,15 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate Adam.")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="L2 weight decay (solo pesi).")
     parser.add_argument("--entropy-beta", type=float, default=5e-4, help="Entropia bonus (>=0).")
+    parser.add_argument(
+        "--overkill-penalty-mode",
+        choices=["flat", "gap"],
+        default="flat",
+        help=(
+            "Modalità penalità overkill briscola: "
+            "`flat` aggiunge `-beta` quando overkill, `gap` aggiunge `-beta * gap_norm` (più informativa)."
+        ),
+    )
     parser.add_argument(
         "--overkill-penalty-beta",
         type=float,
@@ -510,6 +530,7 @@ def main() -> int:
             encoder_version=encoder_version,
             overkill_penalty_beta=float(args.overkill_penalty_beta),
             overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+            overkill_penalty_mode=str(args.overkill_penalty_mode),
         )
         entropies.append(avg_entropy)
 
@@ -671,6 +692,7 @@ def main() -> int:
         "encoder": f"encode_observation_2p:{encoder_version}",
         "encoder_version": encoder_version,
         "reward_shaping": "turn_based_trick_delta_points",
+        "reward_shaping_overkill_penalty_mode": str(args.overkill_penalty_mode),
         "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
         "reward_shaping_overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
         "train": {

@@ -8,7 +8,12 @@ Scopo:
 
 from __future__ import annotations
 
-from briscola_ai.ai.training.reward_shaping import analyze_trump_overkill_second_hand, trump_overkill_penalty
+from briscola_ai.ai.training.reward_shaping import (
+    analyze_trump_overkill_second_hand,
+    trump_overkill_gap_norm,
+    trump_overkill_penalty,
+    trump_overkill_penalty_gap,
+)
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
 
@@ -73,3 +78,23 @@ def test_trump_overkill_penalty_is_flat_negative_when_overkill() -> None:
 
     p3 = trump_overkill_penalty(obs, chosen_card_index=1, beta=0.0, low_lead_points_max=2)
     assert p3 == 0.0
+
+
+def test_trump_overkill_gap_norm_is_positive_and_penalty_scales() -> None:
+    """
+    Gap norm deve essere >0 quando scelgo una briscola molto più costosa del minimo.
+    In questo caso:
+    - min trump = TWO (points=0, strength=1)
+    - chosen trump = ACE (points=11, strength=10)
+    gap = 11/11 + 9/10 = 1.9
+    """
+    obs = _obs_second_hand(
+        hand=(Card(Suit.CUPS, Rank.TWO), Card(Suit.CUPS, Rank.ACE)),
+        lead=Card(Suit.SWORDS, Rank.TWO),
+        trump=Card(Suit.CUPS, Rank.THREE),
+    )
+    gap = trump_overkill_gap_norm(obs, chosen_card_index=1, low_lead_points_max=2)
+    assert gap == 1.9
+
+    penalty = trump_overkill_penalty_gap(obs, chosen_card_index=1, beta=0.01, low_lead_points_max=2)
+    assert penalty == -0.019

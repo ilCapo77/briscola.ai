@@ -483,6 +483,14 @@ Conclusione (per ora):
   - cambiare forma penalità: proporzionale al “gap” (es. differenza strength/punti tra briscole vincenti);
   - introdurre una seconda penalità: “trump_on_low_value_trick” (anche quando non è overkill) se il valore sul tavolo è basso.
 
+Prossimo step (shaping “gap”, più informativo):
+- [ ] A2C: aggiungere `--overkill-penalty-mode gap`:
+  - penalità = `-beta * gap_norm`, dove `gap_norm` misura quanto la briscola scelta è “più costosa” della briscola vincente minima
+- [ ] Mini-sweep (benchmark `medium`):
+  - 50k game, seed training=6, warm-start da `best_a2c`
+  - confrontare `beta ∈ {0.0, 0.005, 0.01}` in modalità `gap`
+  - criterio: ridurre `trump_overkill_rate_low_lead_points` senza peggiorare troppo `avg_diff vs heuristic_v1`
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

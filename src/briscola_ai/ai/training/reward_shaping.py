@@ -210,3 +210,87 @@ def trump_overkill_penalty(
     if not info.is_overkill:
         return 0.0
     return -float(beta)
+
+
+def trump_overkill_gap_norm(
+    observation: PlayerObservation,
+    *,
+    chosen_card_index: int,
+    low_lead_points_max: int | None = 2,
+) -> float:
+    """
+    Ritorna un "gap" normalizzato (>=0) che misura quanto la briscola scelta è overkill.
+
+    Definizione:
+    - si applica solo quando:
+      - siamo secondi di mano (`len(table_cards)==1`)
+      - la briscola è nota
+      - la carta scelta è una briscola e vince la presa
+      - opzionale: la carta avversaria sul tavolo vale <= `low_lead_points_max`
+    - calcoliamo tra le briscole vincenti in mano il costo minimo (points, strength)
+    - gap = (Δpoints/11) + (Δstrength/10), dove:
+      - Δpoints = chosen.points - min.points
+      - Δstrength = chosen.strength - min.strength
+
+    Interpretazione:
+    - 0.0 => non overkill (o non applicabile)
+    - valori più alti => briscola scelta molto più "costosa" di una vincente minima
+    """
+    info = analyze_trump_overkill_second_hand(
+        observation,
+        chosen_card_index=chosen_card_index,
+        low_lead_points_max=low_lead_points_max,
+    )
+    if not info.applicable or not info.chosen_is_trump or not info.chosen_wins or not info.winning_trump_exists:
+        return 0.0
+
+    if observation.trump_card is None:
+        return 0.0
+
+    trump_suit = observation.trump_card.suit
+    lead_card, lead_player = observation.table_cards[0]
+    chosen = observation.hand[chosen_card_index]
+
+    # Ricostruiamo i costi delle briscole vincenti (già usate in analyze, ma qui serve anche il minimo).
+    winning_costs: list[tuple[int, int]] = []
+    for card in observation.hand:
+        if card.suit != trump_suit:
+            continue
+        trick_cards = ((lead_card, lead_player), (card, observation.player_index))
+        if who_wins_trick(trick_cards, trump_suit) == observation.player_index:
+            winning_costs.append(_trump_cost_tuple(card, trump_suit=trump_suit))
+
+    if not winning_costs:
+        return 0.0
+
+    min_points, min_strength = min(winning_costs)
+    chosen_points, chosen_strength = _trump_cost_tuple(chosen, trump_suit=trump_suit)
+    dp = max(0, int(chosen_points) - int(min_points))
+    ds = max(0, int(chosen_strength) - int(min_strength))
+    return float(dp) / 11.0 + float(ds) / 10.0
+
+
+def trump_overkill_penalty_gap(
+    observation: PlayerObservation,
+    *,
+    chosen_card_index: int,
+    beta: float,
+    low_lead_points_max: int | None = 2,
+) -> float:
+    """
+    Penalità proporzionale al gap (<=0) per scoraggiare overkill briscola.
+
+    Output:
+    - 0.0 se disattivata/non applicabile
+    - altrimenti `-beta * gap_norm`
+    """
+    if float(beta) <= 0.0:
+        return 0.0
+    gap = trump_overkill_gap_norm(
+        observation,
+        chosen_card_index=chosen_card_index,
+        low_lead_points_max=low_lead_points_max,
+    )
+    if gap <= 0.0:
+        return 0.0
+    return -float(beta) * float(gap)
