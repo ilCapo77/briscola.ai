@@ -19,6 +19,7 @@ accesso allo stato completo (`GameState`, `deck`, mani avversarie).
 from __future__ import annotations
 
 import json
+import os
 import random
 from dataclasses import dataclass
 from pathlib import Path
@@ -27,6 +28,7 @@ from typing import Any, Protocol
 import numpy as np
 
 from ..domain.observation import PlayerObservation
+from ..domain.rules import who_wins_trick
 from .training.card_action_space import action_id_from_suit_number
 from .training.observation_encoder import (
     FEATURE_DIM_2P_V1,
@@ -184,6 +186,93 @@ def _infer_encoder_version_for_model(*, metadata: dict[str, Any], feature_dim: i
     )
 
 
+def _infer_overkill_guard_enabled(metadata: dict[str, Any]) -> bool:
+    """
+    Decide se abilitare un post-processing anti-overkill (secondo di mano).
+
+    Motivazione:
+    alcune policy possono vincere spesso ma "sprecare" briscole alte (es. Asso di briscola)
+    quando una briscola bassa avrebbe comunque vinto. Questo comportamento è facilmente
+    correggibile a inference-time senza retrain.
+
+    Precedenza:
+    1) `metadata.inference_overkill_guard` (bool) oppure `metadata.inference.overkill_guard`
+    2) env var `BRISCOLA_BC_OVERKILL_GUARD` in {"1","true","yes","on"} (fallback, utile per A/B test)
+    """
+    raw = metadata.get("inference_overkill_guard")
+    if isinstance(raw, bool):
+        return bool(raw)
+
+    inf = metadata.get("inference")
+    if isinstance(inf, dict):
+        raw2 = inf.get("overkill_guard")
+        if isinstance(raw2, bool):
+            return bool(raw2)
+
+    env = os.getenv("BRISCOLA_BC_OVERKILL_GUARD", "").strip().lower()
+    return env in {"1", "true", "yes", "on"}
+
+
+def _card_cost_tuple_trump_only(card) -> tuple[int, int]:
+    """
+    Ordine "economico" tra briscole per post-processing.
+
+    Usiamo un ordine lessicografico:
+    - points (0..11) prima
+    - trick_strength (1..10) poi
+    """
+    return (int(card.rank.points), int(card.rank.trick_strength))
+
+
+def _apply_overkill_guard_second_hand(observation: PlayerObservation, *, chosen_card_index: int) -> int:
+    """
+    Post-processing anti-overkill (2-player, secondo di mano).
+
+    Regola:
+    - se stiamo per vincere una presa giocando una briscola,
+      scegliamo la briscola vincente "minima" disponibile in mano (per conservare risorse).
+
+    Anti-cheat:
+    - usa solo `PlayerObservation` (mano + carta sul tavolo + briscola pubblica).
+    """
+    if observation.num_players != 2:
+        return chosen_card_index
+    if observation.game_over:
+        return chosen_card_index
+    if observation.trump_card is None:
+        return chosen_card_index
+    if observation.current_turn != observation.player_index:
+        return chosen_card_index
+    if len(observation.table_cards) != 1:
+        return chosen_card_index
+    if chosen_card_index < 0 or chosen_card_index >= len(observation.hand):
+        return chosen_card_index
+
+    trump_suit = observation.trump_card.suit
+    lead_card, lead_player = observation.table_cards[0]
+    chosen = observation.hand[chosen_card_index]
+    if chosen.suit != trump_suit:
+        return chosen_card_index
+
+    trick_cards = ((lead_card, lead_player), (chosen, observation.player_index))
+    if who_wins_trick(trick_cards, trump_suit) != observation.player_index:
+        return chosen_card_index
+
+    winning_trumps: list[tuple[tuple[int, int], int]] = []
+    for idx, card in enumerate(observation.hand):
+        if card.suit != trump_suit:
+            continue
+        trick_cards = ((lead_card, lead_player), (card, observation.player_index))
+        if who_wins_trick(trick_cards, trump_suit) == observation.player_index:
+            winning_trumps.append((_card_cost_tuple_trump_only(card), idx))
+
+    if not winning_trumps:
+        return chosen_card_index
+
+    _min_cost, min_idx = min(winning_trumps)
+    return int(min_idx)
+
+
 def load_bc_model_npz(path: Path) -> LoadedBCModel:
     """
     Carica un modello BC da `.npz`.
@@ -264,11 +353,14 @@ class BCModelAgent:
     model: LoadedBCModel
     model_path: Path
     encoder_version: EncoderVersion
+    overkill_guard_enabled: bool
 
     @property
     def name(self) -> str:
         """Nome leggibile dell'agente (includiamo solo il basename per evitare path lunghi)."""
         suffix = "" if self.encoder_version == "v1" else f",encoder={self.encoder_version}"
+        if self.overkill_guard_enabled:
+            suffix += ",overkill_guard=on"
         return f"bc_model({self.model_path.name}{suffix})"
 
     @classmethod
@@ -277,7 +369,13 @@ class BCModelAgent:
         model_path = Path(path)
         model = load_bc_model_npz(model_path)
         encoder_version = _infer_encoder_version_for_model(metadata=model.metadata, feature_dim=int(model.feature_dim))
-        return cls(model=model, model_path=model_path, encoder_version=encoder_version)
+        overkill_guard_enabled = _infer_overkill_guard_enabled(model.metadata)
+        return cls(
+            model=model,
+            model_path=model_path,
+            encoder_version=encoder_version,
+            overkill_guard_enabled=overkill_guard_enabled,
+        )
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
         hand = observation.hand
@@ -310,15 +408,26 @@ class BCModelAgent:
         for i, card in enumerate(hand):
             cid = action_id_from_suit_number(suit=card.suit.value, number=card.rank.number)
             if cid == action_id:
-                return i
+                card_index = i
+                break
+        else:
+            card_index = -1
 
         # Fallback difensivo: se per qualche motivo non troviamo la carta corrispondente,
         # scegliamo una carta valida in mano in modo riproducibile.
-        valid: list[int] = []
-        for i, card in enumerate(hand):
-            cid = action_id_from_suit_number(suit=card.suit.value, number=card.rank.number)
-            if bool(mask[cid]):
-                valid.append(i)
-        if not valid:
-            return rng.randrange(len(hand))
-        return valid[rng.randrange(len(valid))]
+        if card_index < 0:
+            valid: list[int] = []
+            for i, card in enumerate(hand):
+                cid = action_id_from_suit_number(suit=card.suit.value, number=card.rank.number)
+                if bool(mask[cid]):
+                    valid.append(i)
+            if not valid:
+                card_index = rng.randrange(len(hand))
+            else:
+                card_index = valid[rng.randrange(len(valid))]
+
+        # Post-processing opzionale: anti-overkill (secondo di mano).
+        if self.overkill_guard_enabled:
+            card_index = _apply_overkill_guard_second_hand(observation, chosen_card_index=int(card_index))
+
+        return int(card_index)

@@ -408,6 +408,15 @@ def main() -> int:
             "Default: 2 (scarti o quasi)."
         ),
     )
+    parser.add_argument(
+        "--inference-overkill-guard",
+        action="store_true",
+        help=(
+            "Salva nei metadati del modello un flag per abilitare, a inference-time, "
+            "un post-processing anti-overkill: se stiamo per vincere con una briscola da secondi di mano, "
+            "giochiamo automaticamente la briscola vincente minima disponibile."
+        ),
+    )
     parser.add_argument("--value-coef", type=float, default=0.5, help="Peso loss critic (MSE).")
     parser.add_argument("--gamma", type=float, default=1.0, help="Fattore di sconto per return-to-go (default: 1.0).")
     parser.add_argument("--update-every", type=int, default=20, help="Aggiorna i pesi ogni N partite (batch).")
@@ -695,6 +704,7 @@ def main() -> int:
         "reward_shaping_overkill_penalty_mode": str(args.overkill_penalty_mode),
         "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
         "reward_shaping_overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
+        "inference_overkill_guard": bool(args.inference_overkill_guard),
         "train": {
             "algorithm": "a2c",
             "optimizer": "adam",

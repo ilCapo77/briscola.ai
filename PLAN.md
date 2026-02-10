@@ -418,6 +418,13 @@ Piano:
     rispetto alla briscola vincente minima disponibile (es. Asso di briscola invece di 2 di briscola)
   - variante: `trump_overkill_rate_low_lead` (solo quando la carta dell'avversario sul tavolo vale pochi punti)
   - scopo: catturare lo stile “butta briscole alte per scarti” che non sempre emerge da `trump_waste_rate`
+- [x] Inference: post-processing anti-overkill per `bc_model` (no retrain)
+  - regola: 2-player, secondo di mano; se il modello sta per vincere giocando una briscola, sostituisci con la briscola vincente minima
+  - attivazione: `metadata.inference_overkill_guard=true` (o env var `BRISCOLA_BC_OVERKILL_GUARD=1`)
+
+Validazione rapida (benchmark decision-quality `medium` vs `heuristic_v1`, seed=0, stesso modello `best_a2c.npz`):
+- guard OFF: `avg_diff=+12.89`, `trump_overkill_rate≈20.3%`, low-lead `≈18.4%`
+- guard ON (`--force-overkill-guard`): `avg_diff=+12.80`, `trump_overkill_rate=0.0%`, low-lead `=0.0%`
 - [x] Stato più ricco (anti-cheat) tramite “storia pubblica”:
   - [x] Definire una mappatura canonica “card -> id” (40 carte) in `domain/` (riusabile da dominio/backend/ai)
   - [x] Aggiungere a `PlayerObservation` `seen_cards_onehot[40]` derivato solo da info pubblica:

@@ -307,6 +307,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--inference-overkill-guard",
+        action="store_true",
+        help=(
+            "Salva nei metadati del modello un flag per abilitare, a inference-time, "
+            "un post-processing anti-overkill: se stiamo per vincere con una briscola da secondi di mano, "
+            "giochiamo automaticamente la briscola vincente minima disponibile."
+        ),
+    )
+    parser.add_argument(
         "--model",
         choices=["linear", "mlp"],
         default="linear",
@@ -435,6 +444,7 @@ def main() -> int:
             "data_path": str(data_path),
             "encoder": f"encode_observation_2p:{encoder_version}",
             "encoder_version": encoder_version,
+            "inference_overkill_guard": bool(args.inference_overkill_guard),
             "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
             "metrics": [asdict(metric) for metric in metrics],
         }
@@ -521,6 +531,7 @@ def main() -> int:
         "data_path": str(data_path),
         "encoder": f"encode_observation_2p:{encoder_version}",
         "encoder_version": encoder_version,
+        "inference_overkill_guard": bool(args.inference_overkill_guard),
         "train": {
             "model": "mlp",
             "optimizer": "adam",

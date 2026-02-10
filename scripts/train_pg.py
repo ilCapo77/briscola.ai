@@ -309,6 +309,15 @@ def main() -> int:
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate Adam.")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="L2 weight decay (solo pesi).")
     parser.add_argument("--entropy-beta", type=float, default=0.0, help="Entropia bonus (>=0).")
+    parser.add_argument(
+        "--inference-overkill-guard",
+        action="store_true",
+        help=(
+            "Salva nei metadati del modello un flag per abilitare, a inference-time, "
+            "un post-processing anti-overkill: se stiamo per vincere con una briscola da secondi di mano, "
+            "giochiamo automaticamente la briscola vincente minima disponibile."
+        ),
+    )
     parser.add_argument("--update-every", type=int, default=10, help="Aggiorna i pesi ogni N partite (grad batch).")
     parser.add_argument(
         "--log-every",
@@ -550,6 +559,7 @@ def main() -> int:
         "init": args.init.strip() or None,
         "encoder": f"encode_observation_2p:{encoder_version}",
         "encoder_version": encoder_version,
+        "inference_overkill_guard": bool(args.inference_overkill_guard),
         "train": {
             "algorithm": "reinforce",
             "optimizer": "adam",

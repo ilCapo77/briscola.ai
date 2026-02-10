@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 from dataclasses import asdict
 from pathlib import Path
 
@@ -30,6 +31,15 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta match seat-fair + metriche qualità decisionale (2-player).")
     parser.add_argument("--benchmark", choices=["small", "medium", "big"], default="medium")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità).")
+    parser.add_argument(
+        "--force-overkill-guard",
+        action="store_true",
+        help=(
+            "Forza l'abilitazione del post-processing anti-overkill per `bc_model` impostando "
+            "`BRISCOLA_BC_OVERKILL_GUARD=1` nel processo corrente. Utile per A/B test senza "
+            "dover modificare i metadati del modello."
+        ),
+    )
     agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
     parser.add_argument("--agent-a", default="bc_model", choices=agent_names, help="Agente A (misuriamo qualità su A).")
     parser.add_argument("--agent-b", default="heuristic_v1", choices=agent_names, help="Agente B (avversario).")
@@ -41,6 +51,9 @@ def main() -> int:
     num_games = {"small": 2000, "medium": 10000, "big": 100000}[args.benchmark]
     if num_games % 2 != 0:
         raise ValueError("Benchmark interno invalido (num_games deve essere pari).")
+
+    if bool(args.force_overkill_guard):
+        os.environ["BRISCOLA_BC_OVERKILL_GUARD"] = "1"
 
     def _build(*, agent_name: str, model_path: str, flag: str):
         if agent_name == "bc_model":
