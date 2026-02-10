@@ -459,16 +459,29 @@ Risultati (screening, seed=6, 200k game, encoder v2):
 - decisione: NON promuovere a best (in questo screening v2 non migliora né forza né `trump_waste_rate`)
 
 Prossimo step (shaping mirato su “spreco briscole alte”):
-- [ ] A2C: aggiungere shaping opzionale `--overkill-penalty-beta` (penalità flat) quando:
+- [x] A2C: aggiungere shaping opzionale `--overkill-penalty-beta` (penalità flat) quando:
   - siamo secondi di mano
   - vinciamo con una briscola
   - esisteva una briscola vincente più economica
   - (default) carta avversaria sul tavolo vale <=2 punti (`--overkill-low-lead-points-max`)
-- [ ] Sweep rapido (screening):
+- [x] Sweep rapido (screening):
   - warm-start da `data/models/best_a2c.npz`
   - 50k game, benchmark `small`
   - provare `beta ∈ {0.0, 0.002, 0.005, 0.01}`
   - criterio: ridurre `trump_overkill_rate_low_lead_points` senza perdere troppo `avg_diff vs heuristic_v1`
+
+Risultati sweep (seed training=6, 50k game, benchmark decision-quality=small vs `heuristic_v1`, seed eval=0):
+- `beta=0.0` (`..._okb0`): `avg_diff=+12.63`, overkill `19.58%`, low-lead `16.09%` (407/2530)
+- `beta=0.002` (`..._okb2e3`): `avg_diff=+12.64`, overkill `21.31%`, low-lead `18.38%` (462/2513)
+- `beta=0.005` (`..._okb5e3`): `avg_diff=+12.26`, overkill `19.56%`, low-lead `16.62%` (413/2485)
+- `beta=0.01` (`..._okb1e2`): `avg_diff=+13.56`, overkill `18.87%`, low-lead `17.09%` (422/2469)
+
+Conclusione (per ora):
+- La penalità flat, in questo sweep “veloce”, NON riduce in modo affidabile `trump_overkill_rate_low_lead_points`.
+- Possibili next step:
+  - aumentare durata (es. 200k) e valutare su `medium` (meno rumore);
+  - cambiare forma penalità: proporzionale al “gap” (es. differenza strength/punti tra briscole vincenti);
+  - introdurre una seconda penalità: “trump_on_low_value_trick” (anche quando non è overkill) se il valore sul tavolo è basso.
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
