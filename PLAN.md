@@ -484,12 +484,22 @@ Conclusione (per ora):
   - introdurre una seconda penalità: “trump_on_low_value_trick” (anche quando non è overkill) se il valore sul tavolo è basso.
 
 Prossimo step (shaping “gap”, più informativo):
-- [ ] A2C: aggiungere `--overkill-penalty-mode gap`:
+- [x] A2C: aggiungere `--overkill-penalty-mode gap`:
   - penalità = `-beta * gap_norm`, dove `gap_norm` misura quanto la briscola scelta è “più costosa” della briscola vincente minima
-- [ ] Mini-sweep (benchmark `medium`):
+- [x] Mini-sweep (benchmark `medium`):
   - 50k game, seed training=6, warm-start da `best_a2c`
   - confrontare `beta ∈ {0.0, 0.005, 0.01}` in modalità `gap`
   - criterio: ridurre `trump_overkill_rate_low_lead_points` senza peggiorare troppo `avg_diff vs heuristic_v1`
+
+Risultati mini-sweep “gap” (seed training=6, 50k game, decision-quality `medium` vs `heuristic_v1`, seed eval=0):
+- `beta=0.0` (`..._okbgap0`): `avg_diff=+12.21`, overkill `19.16%`, low-lead `16.51%` (2051/12420)
+- `beta=0.005` (`..._okbgap5e3`): `avg_diff=+11.86`, overkill `21.33%`, low-lead `19.69%` (2450/12441)
+- `beta=0.01` (`..._okbgap1e2`): `avg_diff=+12.29`, overkill `20.65%`, low-lead `17.98%` (2208/12280)
+
+Conclusione:
+- Anche la penalità “gap”, in questo setting, NON migliora la metrica `trump_overkill_*` (tende anzi a peggiorarla).
+- Quindi conviene cambiare approccio: shaping diverso (es. penalità per “giocare briscola su low-value” anche quando non è overkill)
+  oppure intervenire direttamente in inference (post-processing: scegliere la briscola vincente minima tra le top-k azioni del modello).
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
