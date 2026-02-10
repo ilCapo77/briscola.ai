@@ -160,10 +160,13 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert "random" in by_name
     assert "greedy_points" in by_name
     assert "heuristic_v1" in by_name
+    assert "heuristic_v2" in by_name
     assert "bc_model" in by_name
 
     assert isinstance(by_name["heuristic_v1"].get("description_it"), str)
     assert by_name["heuristic_v1"]["description_it"]
+    assert isinstance(by_name["heuristic_v2"].get("description_it"), str)
+    assert by_name["heuristic_v2"]["description_it"]
 
 
 def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:

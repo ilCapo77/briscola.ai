@@ -521,6 +521,26 @@ Conclusione:
 - Quindi conviene cambiare approccio: shaping diverso (es. penalità per “giocare briscola su low-value” anche quando non è overkill)
   oppure intervenire direttamente in inference (post-processing: scegliere la briscola vincente minima tra le top-k azioni del modello).
 
+Roadmap breve (per un modello ancora più “strategico”)
+-----------------------------------------------------
+
+Questa roadmap è pensata per fare un passo avanti “vero” rispetto a:
+- shaping (che qui non sta funzionando bene), e
+- post-processing (utile, ma non sostituisce uno stato/teacher migliori).
+
+Piano (ordine consigliato, 1→2→3):
+- [x] (1) Implementare un teacher più forte: `heuristic_v2` (card counting lecito + gestione briscole)
+  - usa `PlayerObservation.seen_cards_onehot[40]` (info pubblica) per stimare fase e risorse rimaste
+  - regole più “da umano”: conservazione briscole alte, evitare sprechi in early game, aggressività in late game
+  - obiettivo: usare `heuristic_v2` come avversario e come teacher per BC
+- [ ] (2) Generare un dataset BC “pulito” via self-play del teacher:
+  - `scripts/self_play_to_db.py` con `--agents heuristic_v2,heuristic_v2` (o mix)
+  - `scripts/export_dataset.py` → JSONL
+  - `scripts/train_bc.py --encoder-version v2` (consigliato `--model mlp`) per ottenere `bc_teacher_v2.npz`
+- [ ] (3) Fine-tuning A2C (encoder v2) partendo da BC:
+  - init = `bc_teacher_v2.npz`, opponent mix più robusto (`heuristic_v1` + `heuristic_v2` + baseline)
+  - valutare con `evaluate_matrix.py` + `evaluate_decision_quality.py` (forza + stile)
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

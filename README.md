@@ -19,7 +19,7 @@ Obiettivo finale: arrivare a un’IA (rete neurale) che impari a giocare in modo
 - Interfaccia utente web
 - Aggiornamenti in tempo reale via WebSocket
 - IA selezionabile (baseline + modelli locali) con modello "standard" server‑driven:
-  - Agenti baseline: `random`, `greedy_points`, `heuristic_v1` (metadati e descrizioni in italiano esposti dal backend)
+  - Agenti baseline: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2` (metadati e descrizioni in italiano esposti dal backend)
   - Modelli locali: `bc_model` carica un file `.npz` scelto dalla UI (catalogo server-side, no path arbitrari dal browser)
   - Il backend avanza automaticamente la partita quando è il turno dell'IA
   - Il backend non introduce delay di presentazione (niente `asyncio.sleep()` per animazioni)
@@ -338,6 +338,7 @@ Agenti disponibili (baseline):
 - `random`: sceglie una carta casuale tra quelle in mano (baseline “zero”).
 - `greedy_points`: gioca la carta con più punti in mano (euristica minimale e spiegabile).
 - `heuristic_v1`: euristica 2-player che prova a prendere “a basso costo” quando conviene e scarta in modo economico quando non conviene.
+- `heuristic_v2`: euristica 2-player che usa anche la “storia pubblica” (`seen_cards_onehot`) per una gestione briscole più strategica (teacher utile per BC).
 
 #### Anti-cheat: osservazione parziale (information set)
 
@@ -601,7 +602,7 @@ e l'interpretazione del “vincitore della mano” vanno adattate a livello di t
 ### Primo modello (Behavior Cloning)
 
 Scopo didattico: partire con un modello supervisionato semplice che imita un “teacher”
-(es. `heuristic_v1`) invece di partire subito con RL.
+(es. `heuristic_v1` o `heuristic_v2`) invece di partire subito con RL.
 
 Scelta chiave: spazio azioni fisso “**40 carte + action mask**”.
 - Il modello predice una carta tra 40 classi (ogni carta del mazzo).
@@ -610,6 +611,7 @@ Scelta chiave: spazio azioni fisso “**40 carte + action mask**”.
 Workflow minimo:
 1. Genera un DB con self-play (es. teacher vs random):
    - `python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 200 --seed 42 --num-players 2 --agents heuristic_v1,random`
+   - variante (teacher più “strategico”): `python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 200 --seed 42 --num-players 2 --agents heuristic_v2,random`
 2. Esporta un JSONL di esempi:
    - `python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl --all-players --include-ai`
 3. Allena il primo modello (baseline lineare):
