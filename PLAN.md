@@ -541,6 +541,54 @@ Piano (ordine consigliato, 1→2→3):
   - init = `bc_teacher_v2.npz`, opponent mix più robusto (`heuristic_v1` + `heuristic_v2` + baseline)
   - valutare con `evaluate_matrix.py` + `evaluate_decision_quality.py` (forza + stile)
 
+Esperimento guidato (A→B→C): “imparare davvero” a ridurre l’overkill (senza guard)
+-------------------------------------------------------------------------------
+
+Obiettivo pratico:
+- ottenere un `.npz` che riduce `trump_overkill_rate` *perché lo ha imparato* (dataset/ottimizzazione),
+  non perché lo forziamo con `inference_overkill_guard`.
+
+Nota importante:
+- per misurare l’apprendimento, le valutazioni qui vanno fatte con guard OFF
+  (non impostare `BRISCOLA_BC_OVERKILL_GUARD` e non salvare `inference_overkill_guard` nel modello).
+
+Piano:
+- [x] (A) Generare un dataset BC da `heuristic_v2` (self-play) e allenare un primo modello BC v2
+  - output pesante (DB + JSONL) in temp dir, poi cleanup per mantenere repo “minimale”
+  - output modello: `benchmarks/experiments/bc_teacher_v2_seed42/bc_teacher_v2.npz`
+- [x] (B) Valutare lo stile del BC (guard OFF) con `evaluate_decision_quality.py` (benchmark `medium`)
+  - output JSON: `benchmarks/experiments/bc_teacher_v2_seed42/decision_quality_medium.json`
+- [x] (C) Fine-tuning A2C inizializzato dal BC (encoder v2) + evaluation matrix `medium`
+  - `scripts/run_experiment.py --algo a2c --init <bc_teacher_v2.npz> --benchmarks medium ...`
+  - poi decision quality `medium` (guard OFF) per verificare se RL conserva o peggiora lo stile
+
+Risultati (esecuzione completa A→B→C)
+------------------------------------
+
+(A) Self-play + export + BC (teacher `heuristic_v2`)
+- self-play: 5000 partite (seed=42) → 200k azioni
+- train BC (MLP, encoder v2, 10 epoche): `benchmarks/experiments/bc_teacher_v2_seed42/bc_teacher_v2.npz`
+  - training/val acc: ~0.97 / ~0.96 (vedi `train_bc.log`)
+
+(B) Decision quality (BC vs `heuristic_v1`, benchmark `medium`, seed=0, guard OFF)
+- match: avg diff punti (A-B) `+2.63`
+- `trump_overkill_rate`: `0.4%` (96 / 24144)
+- `trump_overkill_rate_low_lead_points`: `0.5%` (68; vedi JSON)
+
+(C) A2C init da BC (encoder v2) + eval matrix `medium` (guard OFF)
+- esperimento: `benchmarks/experiments/a2c_mix_heuristic_v2_0_4_heuristic_v1_0_3_random_0_2_greedy_points_0_1_200kg_seed6_from_bc_teacher_v2/`
+- evaluation matrix `medium`:
+  - vs `heuristic_v1` holdout: `avg_diff=+8.83`
+- decision quality `medium` vs `heuristic_v1`:
+  - avg diff `+8.65`
+  - `trump_overkill_rate`: `1.5%`
+  - `trump_overkill_rate_low_lead_points`: `0.3%`
+
+Interpretazione:
+- Il BC “impara davvero” lo stile anti-overkill (da ~20% → <1% senza guard).
+- Il fine-tuning A2C migliora la forza vs `heuristic_v1`, ma tende a rialzare un po’ l’overkill complessivo.
+  Questo è un buon segnale: lo stile è acquisito, ma l’obiettivo RL (reward) può spingere di nuovo verso mosse più “aggressive”.
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

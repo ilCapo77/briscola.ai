@@ -428,6 +428,32 @@ Se vuoi eliminare **senza retrain** gran parte dell’“overkill”:
 - nota: essendo un post-processing deterministico, può cambiare *leggermente* la forza complessiva.
   Verifica sempre con `scripts/evaluate_matrix.py` e `scripts/evaluate_decision_quality.py`.
 
+Se invece vuoi che il modello **lo impari davvero** (senza guard):
+- Usa un *teacher* che non faccia overkill (es. `heuristic_v2`) e fai Behavior Cloning (BC) su encoder v2.
+- Valuta sempre con guard OFF (non impostare `BRISCOLA_BC_OVERKILL_GUARD` e non salvare `inference_overkill_guard` nel `.npz`).
+
+Workflow consigliato (BC → RL):
+
+```
+# 1) Self-play del teacher (DB temporaneo)
+python scripts/self_play_to_db.py --db /tmp/selfplay.sqlite3 --num-games 5000 --seed 42 --num-players 2 --agents heuristic_v2,heuristic_v2
+
+# 2) Export esempi per BC (solo observation->action, più leggero)
+python scripts/export_dataset.py --db /tmp/selfplay.sqlite3 --out /tmp/dataset.jsonl --all-players --include-ai --no-next-state
+
+# 3) BC v2 (teacher distillato in una rete)
+python scripts/train_bc.py --encoder-version v2 --model mlp --hidden-dim 128 --epochs 10 --lr 0.001 --seed 42 \
+  --data /tmp/dataset.jsonl --out ./data/models/bc_teacher_v2.npz
+
+# 4) Verifica stile (guard OFF)
+python scripts/evaluate_decision_quality.py --agent-a bc_model --agent-a-model ./data/models/bc_teacher_v2.npz --agent-b heuristic_v1 --benchmark medium
+
+# 5) (Opzionale) Fine-tuning A2C partendo dal BC
+python scripts/run_experiment.py --algo a2c --init ./data/models/bc_teacher_v2.npz --benchmarks medium --num-games 200000 --train-seed 6 --seat-fair \
+  --opponent-mix heuristic_v2:0.4,heuristic_v1:0.3,random:0.2,greedy_points:0.1 --no-update-best --minimal-data -- \
+  --encoder-version v2
+```
+
 Se vuoi *ridurre* questo comportamento durante training A2C, puoi provare un shaping soft:
 - `scripts/train_a2c.py --overkill-penalty-mode flat --overkill-penalty-beta <beta>` (default: 0, disattivato)
 - `--overkill-low-lead-points-max 2` (default) per colpire soprattutto gli “scarti o quasi”.
