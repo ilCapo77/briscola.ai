@@ -425,6 +425,11 @@ Piano:
 Validazione rapida (benchmark decision-quality `medium` vs `heuristic_v1`, seed=0, stesso modello `best_a2c.npz`):
 - guard OFF: `avg_diff=+12.89`, `trump_overkill_rate≈20.3%`, low-lead `≈18.4%`
 - guard ON (`--force-overkill-guard`): `avg_diff=+12.80`, `trump_overkill_rate=0.0%`, low-lead `=0.0%`
+
+Operatività (senza env var):
+- [x] Abilitare `inference_overkill_guard=true` nei metadati di `data/models/best_a2c.npz`
+  - obiettivo: ottenere gli stessi benefici "guard ON" senza dover impostare `BRISCOLA_BC_OVERKILL_GUARD`
+  - verifica (`medium` vs `heuristic_v1`, seed=0): `trump_overkill_rate=0.0%` e low-lead `=0.0%` con `avg_diff≈+12.80`
 - [x] Stato più ricco (anti-cheat) tramite “storia pubblica”:
   - [x] Definire una mappatura canonica “card -> id” (40 carte) in `domain/` (riusabile da dominio/backend/ai)
   - [x] Aggiungere a `PlayerObservation` `seen_cards_onehot[40]` derivato solo da info pubblica:
