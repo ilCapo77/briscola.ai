@@ -10,9 +10,12 @@ In pratica, quando osservi una policy forte che però “spreca briscole” (es.
 briscola alta per prendere uno scarto), vuoi una metrica che renda quel comportamento
 misurabile e quindi ottimizzabile.
 
-Questo modulo definisce una prima metrica semplice (2-player):
+Questo modulo definisce due metriche semplici (2-player):
 - **trump_waste_rate**: quante volte, da secondi di mano, l'agente gioca una briscola
   pur avendo almeno una risposta vincente non-briscola.
+- **trump_overkill_rate**: quante volte, quando l'agente *vince* giocando una briscola,
+  usa una briscola “più costosa del necessario” rispetto alla briscola vincente minima
+  disponibile in mano.
 
 Nota anti-cheat
 ---------------
@@ -48,6 +51,10 @@ class DecisionQualityStats:
     num_second_hand_decisions: int
     num_second_hand_with_winning_reply: int
     num_trump_waste: int
+    num_second_hand_trump_wins: int
+    num_trump_overkill: int
+    num_second_hand_trump_wins_low_lead_points: int
+    num_trump_overkill_low_lead_points: int
 
     @property
     def trump_waste_rate(self) -> float:
@@ -55,6 +62,109 @@ class DecisionQualityStats:
         if self.num_second_hand_with_winning_reply <= 0:
             return 0.0
         return float(self.num_trump_waste) / float(self.num_second_hand_with_winning_reply)
+
+    @property
+    def trump_overkill_rate(self) -> float:
+        """
+        Frazione di “overkill briscola” (0..1).
+
+        Definizione:
+        - consideriamo solo decisioni (secondo di mano) in cui la scelta dell'agente:
+          - è una briscola
+          - vince la mano
+        - overkill = esisteva una briscola vincente “più economica” in mano.
+        """
+        if self.num_second_hand_trump_wins <= 0:
+            return 0.0
+        return float(self.num_trump_overkill) / float(self.num_second_hand_trump_wins)
+
+    @property
+    def trump_overkill_rate_low_lead_points(self) -> float:
+        """
+        Come `trump_overkill_rate`, ma solo quando la carta avversaria sul tavolo vale pochi punti.
+
+        Scopo:
+        rendere più “mirata” la diagnosi del caso tipico:
+        “uso briscole alte per prendere scarti (0–2 punti)”.
+        """
+        if self.num_second_hand_trump_wins_low_lead_points <= 0:
+            return 0.0
+        return float(self.num_trump_overkill_low_lead_points) / float(self.num_second_hand_trump_wins_low_lead_points)
+
+
+def _card_cost_for_conservation(*, card, trump_suit) -> tuple[int, int, int]:
+    """
+    Funzione di costo (euristica) per stimare quanto una carta sia “preziosa da conservare”.
+
+    Usiamo un ordinamento lessicografico:
+    - prima: briscola vs non-briscola (conservare briscole è spesso importante)
+    - poi: punti della carta (conservare carichi può essere utile in molte fasi)
+    - poi: forza nella mano (trick_strength)
+
+    Nota:
+    questa non è una regola di gioco: è solo una *metrica* per misurare lo stile di decisione.
+    """
+    is_trump = 1 if (trump_suit is not None and card.suit == trump_suit) else 0
+    return (is_trump, int(card.rank.points), int(card.rank.trick_strength))
+
+
+def _is_trump_overkill_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> Optional[bool]:
+    """
+    Ritorna True/False se la scelta è un “overkill briscola”, oppure None se non applicabile.
+
+    Applicabile solo in 2-player quando:
+    - è il turno di `player_index`
+    - sul tavolo c'è già una carta (siamo secondi di mano)
+    - `chosen_card_index` è valido
+
+    Definizione operativa (didattica):
+    - se l'agente NON vince la mano giocando una briscola -> non applichiamo (None)
+    - altrimenti, tra le briscole in mano che vincerebbero la mano, troviamo quella con costo minimo
+      (`_card_cost_for_conservation` ristretto alle briscole).
+    - overkill = la briscola scelta ha un costo maggiore del minimo.
+    """
+    if state.num_players != 2:
+        return None
+    if state.game_over:
+        return None
+    if state.current_turn != player_index:
+        return None
+    if len(state.table_cards) != 1:
+        return None
+
+    hand = state.players[player_index].hand
+    if chosen_card_index < 0 or chosen_card_index >= len(hand):
+        return None
+
+    trump_suit = state.trump_card.suit if state.trump_card else None
+    if trump_suit is None:
+        return None
+
+    lead_card, lead_player = state.table_cards[0]
+    chosen = hand[chosen_card_index]
+
+    if chosen.suit != trump_suit:
+        return None
+
+    trick_cards = ((lead_card, lead_player), (chosen, player_index))
+    if who_wins_trick(trick_cards, trump_suit) != player_index:
+        return None
+
+    winning_trumps: list[tuple[int, int]] = []
+    for card in hand:
+        if card.suit != trump_suit:
+            continue
+        trick_cards = ((lead_card, lead_player), (card, player_index))
+        if who_wins_trick(trick_cards, trump_suit) == player_index:
+            # Costo ristretto ai trumps: (points, strength)
+            winning_trumps.append((int(card.rank.points), int(card.rank.trick_strength)))
+
+    if not winning_trumps:
+        return None
+
+    min_cost = min(winning_trumps)
+    chosen_cost = (int(chosen.rank.points), int(chosen.rank.trick_strength))
+    return bool(chosen_cost > min_cost)
 
 
 def _is_trump_waste_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> Optional[bool]:
@@ -122,6 +232,10 @@ def play_one_game_2p_collect_quality(
     num_second = 0
     num_second_with_win = 0
     num_waste = 0
+    num_trump_wins = 0
+    num_trump_overkill = 0
+    num_trump_wins_low = 0
+    num_trump_overkill_low = 0
 
     safety = 5000
     while not state.game_over and safety > 0:
@@ -139,6 +253,28 @@ def play_one_game_2p_collect_quality(
                 if waste:
                     num_waste += 1
 
+            # Overkill briscola: applicabile solo se la scelta è una briscola vincente.
+            trump_suit = state.trump_card.suit if state.trump_card else None
+            lead_card, lead_player = state.table_cards[0]
+            chosen = state.players[current].hand[card_index]
+            lead_points = int(lead_card.rank.points)
+            low_lead = lead_points <= 2  # 0 oppure 2: “scarto” o quasi
+
+            if trump_suit is not None and chosen.suit == trump_suit:
+                trick_cards = ((lead_card, lead_player), (chosen, current))
+                if who_wins_trick(trick_cards, trump_suit) == current:
+                    num_trump_wins += 1
+                    if low_lead:
+                        num_trump_wins_low += 1
+
+                    overkill = _is_trump_overkill_second_hand(
+                        state=state, player_index=current, chosen_card_index=card_index
+                    )
+                    if overkill:
+                        num_trump_overkill += 1
+                        if low_lead:
+                            num_trump_overkill_low += 1
+
         state, result = step(state, PlayCardAction(player_index=current, card_index=card_index))
         if result.error:
             raise RuntimeError(f"Errore dominio durante la simulazione: {result.error}")
@@ -152,6 +288,10 @@ def play_one_game_2p_collect_quality(
             num_second_hand_decisions=num_second,
             num_second_hand_with_winning_reply=num_second_with_win,
             num_trump_waste=num_waste,
+            num_second_hand_trump_wins=num_trump_wins,
+            num_trump_overkill=num_trump_overkill,
+            num_second_hand_trump_wins_low_lead_points=num_trump_wins_low,
+            num_trump_overkill_low_lead_points=num_trump_overkill_low,
         ),
     )
 
@@ -199,6 +339,10 @@ def evaluate_seat_fair_match_2p_with_quality(
     q_num_second = 0
     q_num_second_with_win = 0
     q_num_waste = 0
+    q_num_trump_wins = 0
+    q_num_trump_overkill = 0
+    q_num_trump_wins_low = 0
+    q_num_trump_overkill_low = 0
 
     for i in range(num_pairs):
         game_seed = seeds[i]
@@ -222,6 +366,10 @@ def evaluate_seat_fair_match_2p_with_quality(
         q_num_second += q1.num_second_hand_decisions
         q_num_second_with_win += q1.num_second_hand_with_winning_reply
         q_num_waste += q1.num_trump_waste
+        q_num_trump_wins += q1.num_second_hand_trump_wins
+        q_num_trump_overkill += q1.num_trump_overkill
+        q_num_trump_wins_low += q1.num_second_hand_trump_wins_low_lead_points
+        q_num_trump_overkill_low += q1.num_trump_overkill_low_lead_points
 
         # Game 2: A=P1, B=P0
         s2, q2 = play_one_game_2p_collect_quality(
@@ -242,6 +390,10 @@ def evaluate_seat_fair_match_2p_with_quality(
         q_num_second += q2.num_second_hand_decisions
         q_num_second_with_win += q2.num_second_hand_with_winning_reply
         q_num_waste += q2.num_trump_waste
+        q_num_trump_wins += q2.num_second_hand_trump_wins
+        q_num_trump_overkill += q2.num_trump_overkill
+        q_num_trump_wins_low += q2.num_second_hand_trump_wins_low_lead_points
+        q_num_trump_overkill_low += q2.num_trump_overkill_low_lead_points
 
     match = SeatFairStats(
         num_games=num_games,
@@ -258,5 +410,9 @@ def evaluate_seat_fair_match_2p_with_quality(
         num_second_hand_decisions=q_num_second,
         num_second_hand_with_winning_reply=q_num_second_with_win,
         num_trump_waste=q_num_waste,
+        num_second_hand_trump_wins=q_num_trump_wins,
+        num_trump_overkill=q_num_trump_overkill,
+        num_second_hand_trump_wins_low_lead_points=q_num_trump_wins_low,
+        num_trump_overkill_low_lead_points=q_num_trump_overkill_low,
     )
     return SeatFairStatsWithQuality(match=match, quality=quality)

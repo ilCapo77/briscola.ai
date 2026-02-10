@@ -414,6 +414,9 @@ Per diagnosticare comportamenti miopi (es. “spreca briscole alte per prendere 
 
 - `trump_waste_rate` (2-player, solo “secondo di mano”): quante volte l’agente gioca una briscola
   **pur avendo** almeno una risposta vincente **non-briscola**.
+- `trump_overkill_rate` (2-player, solo “secondo di mano”): quando l’agente **vince** giocando una briscola,
+  quante volte usa una briscola “più costosa del necessario” rispetto alla briscola vincente minima disponibile.
+  Utile per misurare il caso “butta briscole alte per prendere scarti”.
 
 Esempio:
 

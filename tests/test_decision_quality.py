@@ -7,7 +7,7 @@ Obiettivo:
 
 from __future__ import annotations
 
-from briscola_ai.ai.decision_quality import _is_trump_waste_second_hand
+from briscola_ai.ai.decision_quality import _is_trump_overkill_second_hand, _is_trump_waste_second_hand
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.state import GameState, PlayerState
 
@@ -48,3 +48,41 @@ def test_trump_waste_detected_when_non_trump_wins() -> None:
 
     no_waste = _is_trump_waste_second_hand(state=state, player_index=1, chosen_card_index=0)
     assert no_waste is False
+
+
+def test_trump_overkill_detected_when_cheaper_trump_wins() -> None:
+    """
+    Caso:
+    - briscola = cups
+    - avversario gioca swords TWO (scarto)
+    - io (player 1) ho in mano cups TWO e cups ACE: entrambe vincono (sono briscole)
+    - se gioco cups ACE -> overkill (potevo vincere con cups TWO)
+    """
+    state = GameState(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        players=(
+            PlayerState(name="P0", hand=tuple(), captured_cards=tuple(), points=0),
+            PlayerState(
+                name="P1",
+                hand=(Card(Suit.CUPS, Rank.TWO), Card(Suit.CUPS, Rank.ACE)),
+                captured_cards=tuple(),
+                points=0,
+            ),
+        ),
+        deck=tuple(),
+        trump_card=Card(Suit.CUPS, Rank.THREE),
+        table_cards=((Card(Suit.SWORDS, Rank.TWO), 0),),
+        current_turn=1,
+        first_player=0,
+        game_over=False,
+        winner_index=None,
+        winning_team=None,
+    )
+
+    overkill = _is_trump_overkill_second_hand(state=state, player_index=1, chosen_card_index=1)
+    assert overkill is True
+
+    no_overkill = _is_trump_overkill_second_hand(state=state, player_index=1, chosen_card_index=0)
+    assert no_overkill is False

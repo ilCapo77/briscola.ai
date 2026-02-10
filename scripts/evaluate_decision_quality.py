@@ -64,6 +64,12 @@ def main() -> int:
     print(f"- second_hand_decisions: {out.quality.num_second_hand_decisions}")
     print(f"- second_hand_with_winning_reply: {out.quality.num_second_hand_with_winning_reply}")
     print(f"- trump_waste: {out.quality.num_trump_waste} (rate={out.quality.trump_waste_rate * 100.0:.1f}%)")
+    print(f"- trump_wins: {out.quality.num_second_hand_trump_wins}")
+    print(f"- trump_overkill: {out.quality.num_trump_overkill} (rate={out.quality.trump_overkill_rate * 100.0:.1f}%)")
+    print(
+        f"- trump_overkill_low_lead_points: {out.quality.num_trump_overkill_low_lead_points} "
+        f"(rate={out.quality.trump_overkill_rate_low_lead_points * 100.0:.1f}%)"
+    )
 
     if args.out_json.strip():
         payload = {
@@ -75,6 +81,8 @@ def main() -> int:
             "quality": {
                 **asdict(out.quality),
                 "trump_waste_rate": out.quality.trump_waste_rate,
+                "trump_overkill_rate": out.quality.trump_overkill_rate,
+                "trump_overkill_rate_low_lead_points": out.quality.trump_overkill_rate_low_lead_points,
             },
         }
         Path(args.out_json).parent.mkdir(parents=True, exist_ok=True)

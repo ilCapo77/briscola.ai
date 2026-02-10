@@ -413,6 +413,11 @@ Piano:
 - [x] Metrica qualità v1: `trump_waste_rate` (secondo di mano)
   - definizione: l'agente gioca una briscola pur avendo una risposta vincente non-briscola
   - script: `scripts/evaluate_decision_quality.py`
+- [x] Metrica qualità v2: `trump_overkill_rate` (secondo di mano)
+  - definizione: quando l'agente vince giocando una briscola, quanto spesso usa una briscola “più costosa del necessario”
+    rispetto alla briscola vincente minima disponibile (es. Asso di briscola invece di 2 di briscola)
+  - variante: `trump_overkill_rate_low_lead` (solo quando la carta dell'avversario sul tavolo vale pochi punti)
+  - scopo: catturare lo stile “butta briscole alte per scarti” che non sempre emerge da `trump_waste_rate`
 - [x] Stato più ricco (anti-cheat) tramite “storia pubblica”:
   - [x] Definire una mappatura canonica “card -> id” (40 carte) in `domain/` (riusabile da dominio/backend/ai)
   - [x] Aggiungere a `PlayerObservation` `seen_cards_onehot[40]` derivato solo da info pubblica:
@@ -448,6 +453,9 @@ Risultati (screening, seed=6, 200k game, encoder v2):
 - decision quality `medium` vs `heuristic_v1`:
   - v2 (`model.npz`): `avg_diff=+12.23`, `trump_waste_rate≈0.1%` (55 / 77189)
   - best v1 (`data/models/best_a2c.npz`): `avg_diff=+12.89`, `trump_waste_rate≈0.0%` (15 / 77965)
+- decision quality “overkill briscola” (stesso match `medium` vs `heuristic_v1`):
+  - v2 (`model.npz`): `trump_overkill_rate≈20.6%` (5845 / 28313), low-lead `≈18.5%` (2287 / 12348)
+  - best v1 (`data/models/best_a2c.npz`): `trump_overkill_rate≈20.3%` (5692 / 27985), low-lead `≈18.4%` (2199 / 11975)
 - decisione: NON promuovere a best (in questo screening v2 non migliora né forza né `trump_waste_rate`)
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
