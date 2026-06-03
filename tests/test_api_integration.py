@@ -348,6 +348,33 @@ def test_play_action_rejects_wrong_turn() -> None:
     assert r.json()["detail"] == "Non è il tuo turno"
 
 
+def test_play_action_rejects_ai_controlled_player(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Un client HTTP non deve poter pilotare manualmente il player controllato dall'IA."""
+
+    async def _no_ai(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setattr(server, "_maybe_ai_turn", _no_ai)
+
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "IA"]})
+    game_id = create.json()["game_id"]
+
+    obs = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+    first = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},
+    )
+    assert first.status_code == 200
+
+    blocked = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 1, "card_index": 0},
+    )
+    assert blocked.status_code == 400
+    assert "controllato dall'IA" in blocked.json()["detail"]
+
+
 def test_main_app_serves_ui_and_mounts_api() -> None:
     """La FastAPI principale deve servire UI statica e montare `/api/`."""
     client = TestClient(main_app)
@@ -599,6 +626,8 @@ def test_server_version_is_monotone_on_actions_when_ai_disabled(monkeypatch: pyt
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
+    # Questo test esercita volutamente il loop HTTP manuale per entrambi i player.
+    server.game_ai_agents.pop(game_id, None)
 
     # Versione iniziale: 0
     obs0 = client.get(f"/games/{game_id}", params={"player_index": 0}).json()

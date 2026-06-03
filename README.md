@@ -1,6 +1,6 @@
 # Briscola AI
 
-![Coverage](https://img.shields.io/badge/coverage-81%25-brightgreen)
+![Coverage](https://img.shields.io/badge/coverage-74%25-yellowgreen)
 
 Un progetto didattico “end‑to‑end” nato da un’esigenza concreta: **studiare le reti neurali con un progetto reale**, non con esempi astratti.
 

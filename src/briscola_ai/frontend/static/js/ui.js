@@ -530,26 +530,35 @@ const UI = (() => {
     };
 
     const displayGameResult = (result) => {
-        let html = '';
+        elements.resultContent.replaceChildren();
 
-        if (result.winner === 'Pareggio') {
-            html = '<h3>Pareggio!</h3>';
-        } else {
-            html = `<h3>${result.winner} vince!</h3>`;
-        }
+        const title = document.createElement('h3');
+        title.textContent = result.winner === 'Pareggio'
+            ? 'Pareggio!'
+            : `${result.winner || 'Risultato'} vince!`;
+        elements.resultContent.appendChild(title);
 
-        html += '<div class="scores">';
+        const scores = document.createElement('div');
+        scores.className = 'scores';
+
         for (const [name, points] of Object.entries(result.points || {})) {
-            html += `
-                <div class="score-item">
-                    <div class="score-label">${name}</div>
-                    <div class="score-value">${points}</div>
-                </div>
-            `;
-        }
-        html += '</div>';
+            const item = document.createElement('div');
+            item.className = 'score-item';
 
-        elements.resultContent.innerHTML = html;
+            const label = document.createElement('div');
+            label.className = 'score-label';
+            label.textContent = name;
+
+            const value = document.createElement('div');
+            value.className = 'score-value';
+            value.textContent = String(points);
+
+            item.appendChild(label);
+            item.appendChild(value);
+            scores.appendChild(item);
+        }
+
+        elements.resultContent.appendChild(scores);
         showGameResult();
     };
 

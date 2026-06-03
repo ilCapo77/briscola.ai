@@ -35,8 +35,8 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **79** (pytest).
-- Coverage: misurata con `pytest-cov` (attuale ~81% su `briscola_ai`; obiettivo: crescita progressiva).
+- Test attuali: **105** (pytest).
+- Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
 
@@ -89,8 +89,8 @@ Obiettivo: aggiornare senza rompere API e comportamento, usando i test come rete
 Stato attuale (dopo upgrade):
 - venv: Python 3.14
 - stack: FastAPI + Pydantic v2
-- tests: verdi (79)
-- coverage totale: ~81% (focus prossimo: aumentare copertura di `main.py` e dei rami non coperti del backend)
+- tests: verdi (105)
+- coverage totale: ~74% (focus prossimo: aumentare copertura di `main.py`, `decision_quality.py`, `model_catalog.py` e dei rami non coperti del backend)
 
 Prossimi step (per aumentare coverage, focus 2-player):
 - [x] Testare più rami API: `404 partita`, `player_index` invalido, `get_game_result` e fine partita.

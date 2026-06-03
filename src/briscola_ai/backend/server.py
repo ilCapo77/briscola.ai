@@ -361,6 +361,29 @@ connected_clients: Dict[str, Dict[int, WebSocket]] = {}
 _DEFAULT_AI_AGENT_NAME = "random"
 
 
+def _is_ai_controlled_player(game_id: str, player_index: int) -> bool:
+    """
+    Ritorna True se `player_index` è controllato dal backend per questa partita.
+
+    Nota di sicurezza:
+    la UI attuale espone solo l'umano come player 0 e l'IA come player 1. L'endpoint HTTP
+    resta però chiamabile manualmente: questa guardia evita che un client giochi le mosse
+    del player controllato dall'IA.
+    """
+    return player_index in game_ai_agents.get(game_id, {})
+
+
+def _remove_websocket_if_current(game_id: str, player_index: int, websocket: WebSocket) -> None:
+    """
+    Rimuove una connessione WS solo se è ancora quella registrata per il player.
+
+    Questo evita che una connessione vecchia, chiudendosi dopo un reconnect, cancelli
+    la connessione nuova appena registrata per lo stesso `player_index`.
+    """
+    if connected_clients.get(game_id, {}).get(player_index) is websocket:
+        del connected_clients[game_id][player_index]
+
+
 @app.get("/ai/agents", response_model=Dict)
 async def list_ai_agents():
     """Elenca gli agenti IA disponibili (metadati per UI)."""
@@ -553,6 +576,15 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
         # Verifica che sia il turno del giocatore
         if state.current_turn != action.player_index:
             raise HTTPException(status_code=400, detail="Non è il tuo turno")
+
+        if _is_ai_controlled_player(game_id, action.player_index):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Il giocatore {action.player_index} è controllato dall'IA: "
+                    "le sue mosse vengono eseguite automaticamente dal server."
+                ),
+            )
 
         observation_before: dict | None = None
         if _get_event_log_mode() == "dataset":
@@ -786,11 +818,11 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
             player_index=ai_player_index,
         )
         reveal_json = reveal_dto.model_dump_json()
-        for client in connected_clients[game_id].values():
+        for player_idx, client in list(connected_clients[game_id].items()):
             try:
                 await client.send_text(reveal_json)
             except Exception:
-                pass
+                _remove_websocket_if_current(game_id, player_idx, client)
 
     new_state, step_result = step(state, PlayCardAction(player_index=ai_player_index, card_index=card_index))
     if step_result.error:
@@ -951,7 +983,13 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     # Salva la connessione
     if game_id not in connected_clients:
         connected_clients[game_id] = {}
+    previous = connected_clients[game_id].get(player_index)
     connected_clients[game_id][player_index] = websocket
+    if previous is not None and previous is not websocket:
+        try:
+            await previous.close(code=1000, reason="Sostituita da una nuova connessione")
+        except Exception:
+            pass
 
     try:
         # Invia lo stato iniziale della partita (usando DTO)
@@ -987,8 +1025,7 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
 
     except WebSocketDisconnect:
         # Rimuove la connessione quando il client si disconnette
-        if game_id in connected_clients and player_index in connected_clients[game_id]:
-            del connected_clients[game_id][player_index]
+        _remove_websocket_if_current(game_id, player_index, websocket)
         _safe_log_event(
             game_id,
             "ws_disconnected",
@@ -1007,7 +1044,7 @@ async def notify_clients(game_id: str):
 
     # Invia lo stato aggiornato a ogni client connesso (usando DTO)
     server_version = game_versions.get(game_id, 0)
-    for player_idx, websocket in connected_clients[game_id].items():
+    for player_idx, websocket in list(connected_clients[game_id].items()):
         try:
             dto = build_observation_dto(state, player_idx, server_version)
             _safe_log_event(
@@ -1020,7 +1057,7 @@ async def notify_clients(game_id: str):
             await websocket.send_text(dto.model_dump_json())
         except Exception:
             # Gestisce client disconnessi
-            pass
+            _remove_websocket_if_current(game_id, player_idx, websocket)
 
 
 async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int, points: int):
@@ -1056,11 +1093,11 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
     )
     trick_result_json = trick_result_dto.model_dump_json()
 
-    for _, websocket in connected_clients[game_id].items():
+    for player_idx, websocket in list(connected_clients[game_id].items()):
         try:
             await websocket.send_text(trick_result_json)
         except Exception:
-            pass
+            _remove_websocket_if_current(game_id, player_idx, websocket)
 
 
 async def cleanup_inactive_games():
