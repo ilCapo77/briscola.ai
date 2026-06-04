@@ -187,3 +187,41 @@ def test_numba_a2c_trajectory_shapes_and_rewards_are_valid(feature_dim: int) -> 
     assert np.allclose(traj.probs, again.probs)
     assert np.array_equal(traj.action_ids, again.action_ids)
     assert np.allclose(traj.rewards, again.rewards)
+
+
+def test_numba_a2c_trajectory_supports_mlp_opponent() -> None:
+    """Il collector JIT deve poter usare un opponent MLP `.npz`-style con argmax mascherato."""
+    warm_up_numba_mlp_rollout()
+
+    policy_hidden = 8
+    opponent_hidden = 6
+    w1 = np.zeros((int(FEATURE_DIM_2P_V1), policy_hidden), dtype=np.float32)
+    b1 = np.zeros((policy_hidden,), dtype=np.float32)
+    w2 = np.zeros((policy_hidden, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    wv = np.zeros((policy_hidden,), dtype=np.float32)
+    opponent_w1 = np.zeros((int(FEATURE_DIM_2P_V1), opponent_hidden), dtype=np.float32)
+    opponent_b1 = np.zeros((opponent_hidden,), dtype=np.float32)
+    opponent_w2 = np.zeros((opponent_hidden, 40), dtype=np.float32)
+    opponent_b2 = np.zeros((40,), dtype=np.float32)
+
+    traj = collect_a2c_trajectory_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="bc_model",
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
+        opponent_overkill_guard=True,
+        game_seed=456,
+        policy_seat=1,
+    )
+
+    assert traj.policy_points + traj.opponent_points == 120
+    assert 1 <= len(traj.rewards) <= 20
+    assert float(np.sum(traj.rewards)) == pytest.approx((traj.policy_points - traj.opponent_points) / 120.0)

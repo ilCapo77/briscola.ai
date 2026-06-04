@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **157** (pytest).
+- Test attuali: **159** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -818,9 +818,14 @@ Prossimi step performance (ordine consigliato):
   - profilare il path `--fast-rollout numba` con hidden=128/200k game
   - valutare backprop batch-oriented su array NumPy invece del loop Python per step
   - valutare JIT solo del calcolo return/grad se resta un hotspot misurato
-- [ ] Estendere il rollout fast A2C a opponent `.npz`
-  - supportare policy `.npz` direttamente su encoder fast
-  - poi agganciare `best_a2c` senza passare da `PlayerObservation`
+- [x] Estendere il rollout fast A2C a opponent `.npz`
+  - supporto: `scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --opponent best_a2c`
+  - supporto esplicito: `--opponent bc_model --opponent-model path/to/model.npz`
+  - scope: opponent `.npz` MLP (`w1/b1/w2/b2`) con forward argmax mascherato nel core JIT
+  - supporto guard: `inference_overkill_guard` viene applicato con post-processing numerico anti-overkill
+  - test: smoke trainer con opponent `.npz` esplicito
+  - benchmark training A2C vs `best_a2c`, 5k game, hidden=32: `~4.31s`
+  - limite: il mix opponent nel fast path resta rule-based; opponent `.npz` singolo richiede `--fast-rollout numba`
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

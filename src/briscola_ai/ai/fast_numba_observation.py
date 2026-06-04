@@ -325,6 +325,173 @@ def _record_mlp_policy_decision_numba(
 
 
 @njit(cache=True)
+def _argmax_mlp_policy_action_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    points: np.ndarray,
+    table_cards: np.ndarray,
+    table_size: int,
+    deck_size: int,
+    current_turn: int,
+    trump_card: int,
+    player_index: int,
+    seen_cards: np.ndarray,
+) -> int:
+    """Forward MLP deterministico: ritorna l'action_id valido con logit massimo."""
+    feature_dim = w1.shape[0]
+    hidden_dim = w1.shape[1]
+    features, action_mask = encode_fast_observation_arrays_numba(
+        hands,
+        hand_sizes,
+        points,
+        table_cards,
+        table_size,
+        deck_size,
+        current_turn,
+        trump_card,
+        player_index,
+        seen_cards,
+        feature_dim,
+    )
+
+    hidden = np.empty(hidden_dim, dtype=np.float32)
+    for h_idx in range(hidden_dim):
+        value = b1[h_idx]
+        for f_idx in range(feature_dim):
+            value += features[f_idx] * w1[f_idx, h_idx]
+        hidden[h_idx] = value if value > 0.0 else 0.0
+
+    best_action = 0
+    best_logit = -1.0e30
+    for action_id in range(ACTION_DIM):
+        if not action_mask[action_id]:
+            continue
+        logit = b2[action_id]
+        for h_idx in range(hidden_dim):
+            logit += hidden[h_idx] * w2[h_idx, action_id]
+        if logit > best_logit:
+            best_logit = logit
+            best_action = action_id
+
+    return int(best_action)
+
+
+@njit(cache=True)
+def _apply_overkill_guard_numba(
+    action_id: int,
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    player_index: int,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    table_size: int,
+    trump_card: int,
+    enabled: bool,
+) -> int:
+    """Post-processing anti-overkill numerico equivalente al guard del `BCModelAgent`."""
+    if not enabled:
+        return action_id
+    if table_size != 1:
+        return action_id
+
+    trump_suit = CARD_SUIT_NUMBA[trump_card]
+    if CARD_SUIT_NUMBA[action_id] != trump_suit:
+        return action_id
+
+    lead_card = table_cards[0]
+    lead_player = table_players[0]
+    if _who_wins_trick_numba(lead_card, lead_player, action_id, player_index, trump_card) != player_index:
+        return action_id
+
+    best_action = action_id
+    best_points = CARD_POINTS_NUMBA[action_id]
+    best_strength = CARD_STRENGTH_NUMBA[action_id]
+    for i in range(hand_sizes[player_index]):
+        card = hands[player_index, i]
+        if CARD_SUIT_NUMBA[card] != trump_suit:
+            continue
+        if _who_wins_trick_numba(lead_card, lead_player, card, player_index, trump_card) != player_index:
+            continue
+        points = CARD_POINTS_NUMBA[card]
+        strength = CARD_STRENGTH_NUMBA[card]
+        if points < best_points or (points == best_points and strength < best_strength):
+            best_action = card
+            best_points = points
+            best_strength = strength
+
+    return int(best_action)
+
+
+@njit(cache=True)
+def _choose_opponent_card_index_numba(
+    opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    points: np.ndarray,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    table_size: int,
+    deck_size: int,
+    current_turn: int,
+    trump_card: int,
+    seen_cards: np.ndarray,
+) -> int:
+    """Sceglie l'indice carta per opponent rule-based o MLP `.npz`."""
+    if opponent_model_enabled:
+        action_id = _argmax_mlp_policy_action_numba(
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            current_turn,
+            seen_cards,
+        )
+        action_id = _apply_overkill_guard_numba(
+            action_id,
+            hands,
+            hand_sizes,
+            current_turn,
+            table_cards,
+            table_players,
+            table_size,
+            trump_card,
+            opponent_overkill_guard,
+        )
+        return _action_id_to_hand_index_numba(hands, hand_sizes, current_turn, action_id)
+
+    return _choose_policy_card_index_numba(
+        opponent_code,
+        hands,
+        hand_sizes,
+        current_turn,
+        table_cards,
+        table_players,
+        table_size,
+        deck_size,
+        trump_card,
+        seen_cards,
+    )
+
+
+@njit(cache=True)
 def _play_mlp_policy_game_numba(
     w1: np.ndarray,
     b1: np.ndarray,
@@ -545,6 +712,12 @@ def _collect_mlp_policy_game_numba(
     wv: np.ndarray,
     bv: float,
     opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
     seed: int,
     policy_seat: int,
 ) -> tuple[
@@ -614,15 +787,22 @@ def _collect_mlp_policy_game_numba(
         safety -= 1
 
         while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
-            opp_card_index = _choose_policy_card_index_numba(
+            opp_card_index = _choose_opponent_card_index_numba(
                 opponent_code,
+                opponent_model_enabled,
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                opponent_overkill_guard,
                 hands,
                 hand_sizes,
-                current_turn,
+                points,
                 table_cards,
                 table_players,
                 table_size,
                 deck_size,
+                current_turn,
                 trump_card,
                 seen_cards,
             )
@@ -690,15 +870,22 @@ def _collect_mlp_policy_game_numba(
         )
 
         while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
-            opp_card_index = _choose_policy_card_index_numba(
+            opp_card_index = _choose_opponent_card_index_numba(
                 opponent_code,
+                opponent_model_enabled,
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                opponent_overkill_guard,
                 hands,
                 hand_sizes,
-                current_turn,
+                points,
                 table_cards,
                 table_players,
                 table_size,
                 deck_size,
+                current_turn,
                 trump_card,
                 seen_cards,
             )
@@ -895,6 +1082,11 @@ def collect_a2c_trajectory_numba_2p(
     opponent_name: str,
     game_seed: int,
     policy_seat: int,
+    opponent_w1: np.ndarray | None = None,
+    opponent_b1: np.ndarray | None = None,
+    opponent_w2: np.ndarray | None = None,
+    opponent_b2: np.ndarray | None = None,
+    opponent_overkill_guard: bool = False,
 ) -> NumbaA2CTrajectory:
     """
     Raccoglie una traiettoria A2C full-JIT per il trainer.
@@ -922,6 +1114,36 @@ def collect_a2c_trajectory_numba_2p(
     if wv_arr.shape != (hidden_dim,):
         raise ValueError(f"wv shape={wv_arr.shape}; atteso {(hidden_dim,)}")
 
+    opponent_model_enabled = (
+        opponent_w1 is not None or opponent_b1 is not None or opponent_w2 is not None or opponent_b2 is not None
+    )
+    if opponent_model_enabled:
+        if opponent_w1 is None or opponent_b1 is None or opponent_w2 is None or opponent_b2 is None:
+            raise ValueError("Opponent model incompleto: servono opponent_w1/b1/w2/b2.")
+        opponent_w1_arr = _as_float32_matrix("opponent_w1", opponent_w1)
+        opponent_b1_arr = _as_float32_vector("opponent_b1", opponent_b1)
+        opponent_w2_arr = _as_float32_matrix("opponent_w2", opponent_w2)
+        opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
+        opp_feature_dim = int(opponent_w1_arr.shape[0])
+        opp_hidden_dim = int(opponent_w1_arr.shape[1])
+        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+            raise ValueError(
+                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
+            )
+        if opponent_b1_arr.shape != (opp_hidden_dim,):
+            raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
+        if opponent_w2_arr.shape != (opp_hidden_dim, ACTION_DIM):
+            raise ValueError(f"opponent_w2 shape={opponent_w2_arr.shape}; atteso {(opp_hidden_dim, ACTION_DIM)}")
+        if opponent_b2_arr.shape != (ACTION_DIM,):
+            raise ValueError(f"opponent_b2 shape={opponent_b2_arr.shape}; atteso {(ACTION_DIM,)}")
+        opponent_code = 0
+    else:
+        opponent_w1_arr = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
+        opponent_b1_arr = np.zeros((1,), dtype=np.float32)
+        opponent_w2_arr = np.zeros((1, ACTION_DIM), dtype=np.float32)
+        opponent_b2_arr = np.zeros((ACTION_DIM,), dtype=np.float32)
+        opponent_code = numba_agent_code(opponent_name)
+
     (
         policy_points,
         opponent_points,
@@ -943,7 +1165,13 @@ def collect_a2c_trajectory_numba_2p(
         b2_arr,
         wv_arr,
         float(bv),
-        numba_agent_code(opponent_name),
+        int(opponent_code),
+        bool(opponent_model_enabled),
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        bool(opponent_overkill_guard),
         int(game_seed),
         int(policy_seat),
     )
@@ -996,4 +1224,24 @@ def warm_up_numba_mlp_rollout() -> None:
     b2 = np.zeros((ACTION_DIM,), dtype=np.float32)
     _evaluate_mlp_policy_numba(w1, b1, w2, b2, numba_agent_code("random"), 1, 0, False)
     wv = np.zeros((4,), dtype=np.float32)
-    _collect_mlp_policy_game_numba(w1, b1, w2, b2, wv, 0.0, numba_agent_code("random"), 0, 0)
+    opponent_w1 = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
+    opponent_b1 = np.zeros((1,), dtype=np.float32)
+    opponent_w2 = np.zeros((1, ACTION_DIM), dtype=np.float32)
+    opponent_b2 = np.zeros((ACTION_DIM,), dtype=np.float32)
+    _collect_mlp_policy_game_numba(
+        w1,
+        b1,
+        w2,
+        b2,
+        wv,
+        0.0,
+        numba_agent_code("random"),
+        False,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        False,
+        0,
+        0,
+    )

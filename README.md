@@ -764,6 +764,7 @@ Rollout fast sperimentale (avversari fast-compatible):
 - `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-encoder numba --out ./data/a2c_fast_numba_encoder_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_rollout_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
+- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_vs_best.npz --opponent best_a2c --num-games 20000 --seat-fair --seed 0`
 
 Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
 solo `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2` e non supporta `--overkill-penalty-beta > 0`.
@@ -772,6 +773,8 @@ lo stato viene ancora convertito da liste Python durante il training.
 `--fast-rollout numba` usa invece un collector full-JIT per stato, encoder, forward MLP, sampling, opponent e reward;
 il backprop/Adam restano NumPy. Benchmark locale 5k game vs `random`: hidden=32 `~5.06s -> ~2.52s` (`~2.0x`),
 hidden=128 `~6.83s -> ~4.93s` (`~1.39x`).
+Con opponent `.npz` MLP locale: `--opponent best_a2c` funziona nel rollout Numba; benchmark locale 5k game,
+hidden=32: `~4.31s`.
 
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.

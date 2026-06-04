@@ -47,7 +47,7 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.agents import Agent, build_agent
-from briscola_ai.ai.bc_model_agent import LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.bc_model_agent import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
 from briscola_ai.ai.fast_numba_observation import collect_a2c_trajectory_numba_2p, encode_fast_observation_numba_2p
@@ -136,6 +136,14 @@ class OpponentPool:
     def to_metadata(self) -> list[dict[str, float | str]]:
         """Rappresentazione serializzabile (ordine stabile) per `metadata_json`."""
         return [{"name": item.name, "prob": float(item.prob)} for item in self.items]
+
+
+@dataclass(frozen=True, slots=True)
+class FastNumbaModelOpponent:
+    """Opponent MLP caricato da `.npz` per il rollout A2C Numba."""
+
+    agent: BCModelAgent
+    model: MLPBCModel
 
 
 @dataclass
@@ -356,6 +364,29 @@ def _points_diff_fast(state: Fast2PState, *, policy_seat: int) -> int:
     return p0 - p1 if policy_seat == 0 else p1 - p0
 
 
+def _load_fast_numba_model_opponent(*, opponent_name: str, opponent_model_path: str) -> FastNumbaModelOpponent:
+    """Carica un opponent `.npz` per `--rollout-engine fast --fast-rollout numba`."""
+    if opponent_name == "best_a2c":
+        agent = build_agent("best_a2c")
+    elif opponent_name == "bc_model":
+        if not opponent_model_path.strip():
+            raise ValueError("`--opponent bc_model` richiede `--opponent-model <path.npz>`.")
+        agent = build_agent("bc_model", model_path=Path(opponent_model_path.strip()))
+    else:
+        raise ValueError(f"Opponent modello non supportato nel fast rollout Numba: {opponent_name!r}")
+
+    if not isinstance(agent, BCModelAgent):
+        raise ValueError(f"Opponent {opponent_name!r} non ha prodotto un BCModelAgent.")
+    if not isinstance(agent.model, MLPBCModel):
+        raise ValueError("Il fast rollout Numba supporta per ora solo opponent `.npz` MLP (w1/b1/w2/b2).")
+    if int(agent.model.feature_dim) not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+        raise ValueError(
+            "Opponent MLP non compatibile: "
+            f"feature_dim={int(agent.model.feature_dim)} atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}."
+        )
+    return FastNumbaModelOpponent(agent=agent, model=agent.model)
+
+
 def _play_one_fast_game_2p_collect(
     *,
     policy: A2CPolicy,
@@ -557,6 +588,13 @@ def main() -> int:
             "Se presente, sovrascrive `--opponent`."
         ),
     )
+    parser.add_argument(
+        "--opponent-model",
+        default="",
+        help=(
+            "Path al modello `.npz` quando `--opponent bc_model` (supportato nel rollout domain e fast-rollout numba)."
+        ),
+    )
     parser.add_argument("--num-games", type=int, default=20000, help="Numero partite di training (2-player).")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità).")
     parser.add_argument(
@@ -689,6 +727,7 @@ def main() -> int:
     rng_opponent = random.Random(args.seed ^ 0xC0FFEE)
 
     opponent_pool: OpponentPool | None = None
+    fast_numba_model_opponent: FastNumbaModelOpponent | None = None
     opponent_mix_raw = args.opponent_mix.strip()
     if opponent_mix_raw:
         items = parse_opponent_mix(opponent_mix_raw)
@@ -704,13 +743,28 @@ def main() -> int:
         opponent_pool = OpponentPool(items=items, agents_by_name=agents_by_name)
         opponent = build_agent(items[0].name)
     else:
-        if rollout_engine == "fast" and str(args.opponent) not in FAST_EVALUATION_AGENT_NAMES:
+        opponent_name = str(args.opponent)
+        if rollout_engine == "fast" and opponent_name in {"best_a2c", "bc_model"}:
+            if fast_rollout != "numba":
+                raise ValueError("Opponent `.npz` nel fast path richiede `--fast-rollout numba`.")
+            fast_numba_model_opponent = _load_fast_numba_model_opponent(
+                opponent_name=opponent_name,
+                opponent_model_path=str(args.opponent_model),
+            )
+            opponent = fast_numba_model_opponent.agent
+        elif rollout_engine == "fast" and opponent_name not in FAST_EVALUATION_AGENT_NAMES:
             supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
             raise ValueError(
-                f"`--rollout-engine fast` supporta solo avversari fast-compatible: {supported}. "
+                f"`--rollout-engine fast` supporta avversari fast-compatible ({supported}) "
+                "oppure `best_a2c`/`bc_model` con `--fast-rollout numba`. "
                 f"Ottenuto: {args.opponent!r}"
             )
-        opponent = build_agent(args.opponent)
+        elif opponent_name == "bc_model":
+            if not str(args.opponent_model).strip():
+                raise ValueError("`--opponent bc_model` richiede `--opponent-model <path.npz>`.")
+            opponent = build_agent("bc_model", model_path=Path(str(args.opponent_model).strip()))
+        else:
+            opponent = build_agent(opponent_name)
 
     # Inizializzazione policy/critic.
     target_feature_dim = int(feature_dim_for_encoder_version(encoder_version))
@@ -809,6 +863,15 @@ def main() -> int:
                     wv=policy.wv,
                     bv=float(policy.bv),
                     opponent_name=current_opponent.name,
+                    opponent_w1=(fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None),
+                    opponent_b1=(fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None),
+                    opponent_w2=(fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None),
+                    opponent_b2=(fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None),
+                    opponent_overkill_guard=(
+                        bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
+                        if fast_numba_model_opponent is not None
+                        else False
+                    ),
                     game_seed=game_seed,
                     policy_seat=policy_seat,
                 )
@@ -1084,6 +1147,7 @@ def main() -> int:
         "fast_encoder": fast_encoder if rollout_engine == "fast" else None,
         "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
         "opponent": str(args.opponent) if not opponent_mix_raw else None,
+        "opponent_model": str(args.opponent_model).strip() or None,
         "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
         "init": args.init.strip() or None,
         "encoder": f"encode_observation_2p:{encoder_version}",
