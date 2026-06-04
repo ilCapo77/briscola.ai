@@ -402,6 +402,18 @@ Prossimi esperimenti (A2C):
   - benchmark: `medium,big`
   - criterio di successo: aggiornare `best_a2c.npz` se migliora `big holdout vs heuristic_v1 avg_diff`
   - risultato: aggiornato `best_a2c.npz` con `big holdout vs heuristic_v1 avg_diff = +11.19` (seed training=9, 500k game)
+- [x] Run “league” 1M contro il best congelato:
+  - warm-start da `data/models/best_a2c.npz` precedente
+  - config: `lr=1e-4`, `entropy_beta=2e-4`, mix `best_a2c:0.60,heuristic_v1:0.25,greedy_points:0.10,random:0.05`, seat-fair
+  - esperimento: `benchmarks/experiments/a2c_league_best60_h25_g10_r05_1m_seed17/`
+  - benchmark `medium,big` completati; criterio ufficiale `big holdout vs heuristic_v1`
+  - risultato: promosso nuovo `data/models/best_a2c.npz` (`A2C shaped 1.0M game`)
+  - score di promozione (policy guard OFF): `big holdout vs heuristic_v1 avg_diff = +13.12788`
+  - confronto col best precedente: `+12.69434 -> +13.12788` (`+0.43354`, circa `+3.4%` sul vantaggio medio)
+  - head-to-head vs best precedente (`big` holdout, 100k, seat-fair):
+    - nuovo `50080` win, vecchio best `47018` win, draw `2902`
+    - `avg_point_diff = +0.9772` a favore del nuovo modello
+  - robustezza `big holdout`: vs `random` `+43.85694`, vs `greedy_points` `+42.06212`
 
 ### Fase 5F — Comportamenti più “strategici”: storia pubblica + metriche qualità (in progress)
 
@@ -425,14 +437,18 @@ Piano:
 Validazione rapida (benchmark decision-quality `medium` vs `heuristic_v1`, seed=0, stesso modello `best_a2c.npz`):
 - guard OFF: `avg_diff=+12.89`, `trump_overkill_rate≈20.3%`, low-lead `≈18.4%`
 - guard ON (`--force-overkill-guard`): `avg_diff=+12.80`, `trump_overkill_rate=0.0%`, low-lead `=0.0%`
+- Nota storica: questi numeri si riferiscono al precedente best v1, prima della promozione del modello 1M
+  (`A2C shaped 1.0M game`, seed=17). Il best attuale ha `inference_overkill_guard=false`.
 
 Operatività (senza env var):
 - [x] Abilitare `inference_overkill_guard=true` nei metadati di `data/models/best_a2c.npz`
   - obiettivo: ottenere gli stessi benefici "guard ON" senza dover impostare `BRISCOLA_BC_OVERKILL_GUARD`
   - verifica (`medium` vs `heuristic_v1`, seed=0): `trump_overkill_rate=0.0%` e low-lead `=0.0%` con `avg_diff≈+12.80`
+- Nota: questa scelta era valida per il best precedente. Dopo la promozione del modello 1M, il nuovo
+  `data/models/best_a2c.npz` non usa il guard in metadati; prima di riattivarlo va rifatta una A/B decision-quality.
 
-A/B test (evaluation matrix `medium`, seed=0, stessi avversari):
-- modello guard ON: `data/models/best_a2c.npz` (metadati `inference_overkill_guard=true`)
+A/B test storico (evaluation matrix `medium`, seed=0, stessi avversari, prima della promozione del modello 1M):
+- modello guard ON: vecchio `data/models/best_a2c.npz` (metadati `inference_overkill_guard=true`)
 - modello guard OFF: `benchmarks/ab_overkill_guard/best_a2c_guard_off.npz`
 - risultati (avg_diff):
   - vs `heuristic_v1` standard: ON `+12.57` vs OFF `+12.71` (Δ=-0.14)
@@ -472,11 +488,35 @@ Risultati (screening, seed=6, 200k game, encoder v2):
   - `holdout vs heuristic_v1 avg_diff = +12.25`
 - decision quality `medium` vs `heuristic_v1`:
   - v2 (`model.npz`): `avg_diff=+12.23`, `trump_waste_rate≈0.1%` (55 / 77189)
-  - best v1 (`data/models/best_a2c.npz`): `avg_diff=+12.89`, `trump_waste_rate≈0.0%` (15 / 77965)
+  - best v1 dell'epoca (`data/models/best_a2c.npz` prima della promozione 1M):
+    `avg_diff=+12.89`, `trump_waste_rate≈0.0%` (15 / 77965)
 - decision quality “overkill briscola” (stesso match `medium` vs `heuristic_v1`):
   - v2 (`model.npz`): `trump_overkill_rate≈20.6%` (5845 / 28313), low-lead `≈18.5%` (2287 / 12348)
-  - best v1 (`data/models/best_a2c.npz`): `trump_overkill_rate≈20.3%` (5692 / 27985), low-lead `≈18.4%` (2199 / 11975)
+  - best v1 dell'epoca (`data/models/best_a2c.npz` prima della promozione 1M):
+    `trump_overkill_rate≈20.3%` (5692 / 27985), low-lead `≈18.4%` (2199 / 11975)
 - decisione: NON promuovere a best (in questo screening v2 non migliora né forza né `trump_waste_rate`)
+
+Prossimo controllo consigliato sul best attuale 1M:
+- [x] Eseguire `evaluate_decision_quality.py` sul nuovo `data/models/best_a2c.npz`
+  - confrontare guard OFF vs guard forzato ON
+  - decidere se salvare `inference_overkill_guard=true` anche sul best 1M oppure tenerlo “puro”
+  - risultati `medium` vs `heuristic_v1`, seed=0:
+    - guard OFF (`data/models/best_a2c.npz`): `avg_diff=+13.21`, `trump_waste_rate≈0.03%`,
+      `trump_overkill_rate≈19.3%`, low-lead `≈17.1%`
+    - guard ON (copia temporanea con metadato `inference_overkill_guard=true`): `avg_diff=+13.03`,
+      `trump_waste_rate≈0.03%`, `trump_overkill_rate=0.0%`, low-lead `=0.0%`
+  - decisione tecnica provvisoria: il guard elimina l'overkill con costo piccolo su `medium` (`Δ≈-0.18` punti),
+    ma prima di salvarlo nel best ufficiale conviene fare un A/B su `big` oppure almeno un head-to-head rapido.
+  - nota tooling: `--force-overkill-guard` non sovrascrive un metadato esplicito
+    `inference_overkill_guard=false`; per questo A/B è stata usata una copia temporanea del modello.
+- [x] A/B guard su `big` per decisione finale sul best 1M:
+  - guard OFF (`data/models/best_a2c.npz` prima della modifica): `avg_diff=+12.9557`,
+    `trump_overkill_rate≈19.6%`, low-lead `≈17.0%`, `trump_waste_rate≈0.02%`
+  - guard ON (copia temporanea con metadato `inference_overkill_guard=true`): `avg_diff=+12.8115`,
+    `trump_overkill_rate=0.0%`, low-lead `=0.0%`, `trump_waste_rate≈0.02%`
+  - costo guard su `big`: `Δ≈-0.1442` punti medi vs `heuristic_v1`
+  - decisione: abilitato `inference_overkill_guard=true` nel best ufficiale `data/models/best_a2c.npz`
+    e registrata la decisione in `data/models/best_a2c.json`
 
 Prossimo step (shaping mirato su “spreco briscole alte”):
 - [x] A2C: aggiungere shaping opzionale `--overkill-penalty-beta` (penalità flat) quando:
