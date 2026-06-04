@@ -22,7 +22,7 @@ import random
 import uuid
 from contextlib import asynccontextmanager
 from datetime import datetime
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
 from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -384,6 +384,21 @@ def _remove_websocket_if_current(game_id: str, player_index: int, websocket: Web
         del connected_clients[game_id][player_index]
 
 
+def _metadata_for_model_catalog_ui(metadata: dict[str, Any]) -> dict[str, Any]:
+    """
+    Riduce i metadati del modello alla parte utile per il browser.
+
+    I file `.npz` possono conservare serie lunghe di metriche di training. Quelle sono corrette
+    come artefatto locale, ma non devono viaggiare nell'endpoint della UI a ogni caricamento:
+    basta un conteggio sintetico e manteniamo invece i campi descrittivi/inferenziali.
+    """
+    out = dict(metadata)
+    metrics = out.pop("metrics", None)
+    if isinstance(metrics, list):
+        out["metrics_count"] = len(metrics)
+    return out
+
+
 @app.get("/ai/agents", response_model=Dict)
 async def list_ai_agents():
     """Elenca gli agenti IA disponibili (metadati per UI)."""
@@ -414,7 +429,7 @@ async def list_ai_models():
                 "filename": m.filename,
                 "label": m.label,
                 "description_it": m.description_it,
-                "metadata": m.metadata,
+                "metadata": _metadata_for_model_catalog_ui(m.metadata),
                 "last_modified_utc": m.last_modified_utc,
                 "is_compatible": m.is_compatible,
                 "compatibility_reason_it": m.compatibility_reason_it,

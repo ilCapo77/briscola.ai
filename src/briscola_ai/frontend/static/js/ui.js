@@ -74,6 +74,45 @@ const UI = (() => {
         }
     };
 
+    const _isBestAiModel = (model) => {
+        const id = model?.id || '';
+        const filename = model?.filename || '';
+        return id === 'best_a2c.npz' || filename === 'best_a2c.npz';
+    };
+
+    const _formatAiModelOptionLabel = (model) => {
+        const label = model?.label || model?.filename || model?.id || 'Modello locale';
+        const filename = model?.filename || model?.id || '';
+        const suffix = filename && filename !== label ? ` (${filename})` : '';
+        const prefix = _isBestAiModel(model) ? 'Consigliato - ' : '';
+        return `${prefix}${label}${suffix}`;
+    };
+
+    const _formatAiModelDescription = (model) => {
+        if (!model) return '';
+
+        const lines = [];
+        if (_isBestAiModel(model)) {
+            lines.push('Stato: best attuale consigliato');
+        }
+
+        const filename = model.filename || model.id;
+        if (filename) {
+            lines.push(`File: ${filename}`);
+        }
+
+        const guard = model.metadata?.inference_overkill_guard ?? model.metadata?.inference?.overkill_guard;
+        if (typeof guard === 'boolean') {
+            lines.push(`Guard anti-overkill: ${guard ? 'attivo' : 'non attivo'}`);
+        }
+
+        const desc = model.description_it || '';
+        if (desc) {
+            lines.push(desc);
+        }
+        return lines.join('\n');
+    };
+
     const _updateConsentUi = () => {
         if (!elements.startGameButton) return;
         if (!dataConsentRequired) {
@@ -100,7 +139,7 @@ const UI = (() => {
         const modelId = elements.aiModelSelect?.value;
         const meta = modelId ? aiModelMetaById[modelId] : null;
         if (elements.aiModelDescription) {
-            const desc = meta?.description_it || '';
+            const desc = _formatAiModelDescription(meta);
             const compatible = meta?.is_compatible;
             const reason = meta?.compatibility_reason_it || '';
             if (compatible === false) {
@@ -258,12 +297,18 @@ const UI = (() => {
             return;
         }
 
-        models.forEach((m) => {
+        const orderedModels = [...models].sort((a, b) => {
+            if (_isBestAiModel(a) && !_isBestAiModel(b)) return -1;
+            if (!_isBestAiModel(a) && _isBestAiModel(b)) return 1;
+            return 0;
+        });
+
+        orderedModels.forEach((m) => {
             if (!m?.id) return;
             aiModelMetaById[m.id] = m;
             const option = document.createElement('option');
             option.value = m.id;
-            option.textContent = m.label || m.filename || m.id;
+            option.textContent = _formatAiModelOptionLabel(m);
             if (m.is_compatible === false) {
                 option.disabled = true;
                 const reason = m.compatibility_reason_it ? ` (${m.compatibility_reason_it})` : '';
@@ -272,10 +317,10 @@ const UI = (() => {
             elements.aiModelSelect.appendChild(option);
         });
 
-        // Default: primo modello compatibile (se presente), altrimenti il primo.
-        const firstCompatible = models.find((m) => m?.id && m.is_compatible !== false);
+        // Default: best compatibile (se presente), altrimenti il primo modello compatibile.
+        const firstCompatible = orderedModels.find((m) => m?.id && m.is_compatible !== false);
         if (firstCompatible?.id) elements.aiModelSelect.value = firstCompatible.id;
-        else if (models[0]?.id) elements.aiModelSelect.value = models[0].id;
+        else if (orderedModels[0]?.id) elements.aiModelSelect.value = orderedModels[0].id;
 
         _updateAiModelUi();
     };

@@ -316,6 +316,10 @@ Piano di lavoro:
 - [x] Migliorare la robustezza UX:
   - il catalogo indica `is_compatible` + un motivo `compatibility_reason_it` per modelli non caricabili/incompatibili
   - la UI disabilita la selezione di modelli non compatibili e fallisce presto in modo chiaro
+- [x] Rifinire la selezione modello in UI:
+  - `best_a2c.npz` viene ordinato come scelta consigliata e mostra anche il nome file
+  - la descrizione espone i dettagli utili per giocare (file selezionato e guard anti-overkill)
+  - `GET /ai/models` sintetizza le metriche lunghe (`metrics_count`) invece di inviare la cronologia completa al browser
 - [x] Estendere creazione partita:
   - supportare `ai_agent="bc_model"` + `ai_model_id`
 

@@ -130,6 +130,10 @@ select:focus {
     line-height: 1.35;
 }
 
+#ai-model-description {
+    white-space: pre-wrap;
+}
+
 /* Callout evidenziato per la nota anti-cheat (didattica + leggibilità). */
 .anti-cheat-callout {
     margin-top: 10px;

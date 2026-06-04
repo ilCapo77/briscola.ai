@@ -76,7 +76,12 @@ def _write_dummy_bc_model_npz(path: Path) -> None:
     np.savez(path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json=json.dumps(metadata, ensure_ascii=False))
 
 
-def _write_dummy_bc_model_npz_with_feature_dim(path: Path, *, feature_dim: int) -> None:
+def _write_dummy_bc_model_npz_with_feature_dim(
+    path: Path,
+    *,
+    feature_dim: int,
+    metrics: list[dict[str, float]] | None = None,
+) -> None:
     """Come `_write_dummy_bc_model_npz`, ma con feature_dim configurabile (per test compatibilità)."""
     d = int(feature_dim)
     h = 8
@@ -94,6 +99,8 @@ def _write_dummy_bc_model_npz_with_feature_dim(path: Path, *, feature_dim: int) 
         "label": "Dummy",
         "description_it": "Modello dummy per test compatibilità.",
     }
+    if metrics is not None:
+        metadata["metrics"] = metrics
     np.savez(path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json=json.dumps(metadata, ensure_ascii=False))
 
 
@@ -173,7 +180,11 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     """`GET /ai/models` deve elencare i modelli `.npz` disponibili (senza path assoluti)."""
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
 
-    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible_v1.npz", feature_dim=248)
+    _write_dummy_bc_model_npz_with_feature_dim(
+        tmp_path / "compatible_v1.npz",
+        feature_dim=248,
+        metrics=[{"episode": 1.0, "avg_score_diff": 2.0}, {"episode": 2.0, "avg_score_diff": 3.0}],
+    )
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible_v2.npz", feature_dim=288)
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "incompatible.npz", feature_dim=10)
 
@@ -195,6 +206,8 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     ok_v1 = by_id["compatible_v1.npz"]
     assert ok_v1["is_compatible"] is True
     assert ok_v1.get("compatibility_reason_it") is None
+    assert ok_v1["metadata"]["metrics_count"] == 2
+    assert "metrics" not in ok_v1["metadata"]
 
     ok_v2 = by_id["compatible_v2.npz"]
     assert ok_v2["is_compatible"] is True
