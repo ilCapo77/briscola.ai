@@ -15,6 +15,7 @@ Questa implementazione è dominio-only (no HTTP/WS) e riusa `evaluate_seat_fair_
 from __future__ import annotations
 
 import json
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Literal
@@ -122,6 +123,21 @@ def build_suites_for_benchmark(
     ]
 
 
+def _evaluate_matrix_row_job(args: tuple[str, str, int, SuiteSpec, list[int]]) -> MatrixRow:
+    """Valuta una singola riga della matrix. Funzione top-level per multiprocessing."""
+    model_path, opponent_name, seed, suite, seeds = args
+    model = BCModelAgent.from_npz(model_path)
+    opponent = build_agent(opponent_name)
+    stats = evaluate_seat_fair_match_2p(
+        model,
+        opponent,
+        num_games=len(seeds) * 2,
+        seed=int(seed),
+        game_seeds=seeds,
+    )
+    return MatrixRow(suite=suite, opponent=opponent_name, stats=stats)
+
+
 def evaluate_model_matrix(
     *,
     model_path: str | Path,
@@ -131,6 +147,7 @@ def evaluate_model_matrix(
     standard_start: int = 0,
     holdout_start: int = 1_000_000,
     range_step: int = 1,
+    workers: int = 1,
 ) -> EvaluationMatrix:
     """
     Valuta un modello `.npz` contro una lista di avversari su 2 suite (standard + holdout).
@@ -139,7 +156,6 @@ def evaluate_model_matrix(
     - sempre seat-fair (riduce bias “chi inizia”)
     - suite generate via range (evitiamo file enormi)
     """
-    model = BCModelAgent.from_npz(model_path)
     num_games = benchmark_num_games(benchmark)
 
     suites = build_suites_for_benchmark(
@@ -149,10 +165,16 @@ def evaluate_model_matrix(
         step=range_step,
     )
 
-    rows: list[MatrixRow] = []
+    jobs: list[tuple[str, str, int, SuiteSpec, list[int]]] = []
     for suite in suites:
         seeds = make_range_seed_suite(start=suite.range_start, step=suite.range_step, count=suite.num_seeds)
         for opp_name in opponents:
+            jobs.append((str(Path(model_path)), opp_name, int(seed), suite, seeds))
+
+    if int(workers) <= 1:
+        model = BCModelAgent.from_npz(model_path)
+        rows = []
+        for _, opp_name, _, suite, seeds in jobs:
             opponent = build_agent(opp_name)
             stats = evaluate_seat_fair_match_2p(
                 model,
@@ -162,6 +184,10 @@ def evaluate_model_matrix(
                 game_seeds=seeds,
             )
             rows.append(MatrixRow(suite=suite, opponent=opp_name, stats=stats))
+    else:
+        worker_count = max(1, min(int(workers), len(jobs)))
+        with ProcessPoolExecutor(max_workers=worker_count) as executor:
+            rows = list(executor.map(_evaluate_matrix_row_job, jobs))
 
     return EvaluationMatrix(
         model_path=str(Path(model_path)),

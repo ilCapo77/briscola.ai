@@ -168,6 +168,12 @@ def main() -> int:
         help="Benchmark da eseguire in evaluation matrix (CSV: small,medium,big). Default: medium,big.",
     )
     parser.add_argument(
+        "--eval-workers",
+        type=int,
+        default=1,
+        help="Numero processi per parallelizzare le righe di `evaluate_matrix.py` (default: 1).",
+    )
+    parser.add_argument(
         "--name",
         default="",
         help="Nome esperimento (se vuoto, viene costruito in modo deterministico dai parametri).",
@@ -226,6 +232,8 @@ def main() -> int:
     algo: AlgoName = args.algo
     if int(args.num_games) <= 0:
         raise ValueError("--num-games deve essere > 0")
+    if int(args.eval_workers) <= 0:
+        raise ValueError("--eval-workers deve essere > 0")
 
     curriculum_raw = str(args.curriculum).strip()
     curriculum: CurriculumPreset | None = None
@@ -407,6 +415,8 @@ def main() -> int:
             str(out_json),
             "--format",
             "csv",
+            "--workers",
+            str(int(args.eval_workers)),
         ]
         _run(eval_cmd, log_path=log_path, env_overrides=env_overrides)
         matrix_paths[b] = out_json
@@ -429,6 +439,7 @@ def main() -> int:
             {
                 "benchmark": b,
                 "matrix_json": str(p),
+                "workers": int(args.eval_workers),
             }
             for b, p in matrix_paths.items()
         ],

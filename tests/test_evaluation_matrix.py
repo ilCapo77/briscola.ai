@@ -12,7 +12,17 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from briscola_ai.ai.evaluation_matrix import EvaluationMatrix, build_suites_for_benchmark, make_range_seed_suite
+import numpy as np
+import pytest
+
+from briscola_ai.ai import evaluation_matrix
+from briscola_ai.ai.evaluation_matrix import (
+    EvaluationMatrix,
+    build_suites_for_benchmark,
+    evaluate_model_matrix,
+    make_range_seed_suite,
+)
+from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
 
 
 def test_make_range_seed_suite_length_and_32bit_normalization() -> None:
@@ -39,3 +49,40 @@ def test_evaluation_matrix_json_serialization_is_stable(tmp_path: Path) -> None:
     parsed = json.loads(text)
     assert parsed["model_path"] == "data/model.npz"
     assert parsed["benchmark"] == "small"
+
+
+def test_evaluation_matrix_parallel_matches_serial(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """La matrix parallela deve aggregare le stesse righe della versione seriale."""
+    monkeypatch.setattr(evaluation_matrix, "benchmark_num_games", lambda benchmark: 20)
+
+    d = int(FEATURE_DIM_2P_V1)
+    h = 4
+    model_path = tmp_path / "dummy.npz"
+    np.savez(
+        model_path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h, 40), dtype=np.float32),
+        b2=np.zeros((40,), dtype=np.float32),
+        metadata_json=json.dumps({"format": "mlp_bc_v1", "feature_dim": d}, ensure_ascii=False),
+    )
+
+    serial = evaluate_model_matrix(
+        model_path=model_path,
+        opponents=["heuristic_v1"],
+        benchmark="small",
+        seed=7,
+        workers=1,
+    )
+    parallel = evaluate_model_matrix(
+        model_path=model_path,
+        opponents=["heuristic_v1"],
+        benchmark="small",
+        seed=7,
+        workers=2,
+    )
+
+    assert parallel.to_json_dict() == serial.to_json_dict()

@@ -26,6 +26,7 @@ ma la policy continua a ricevere solo `PlayerObservation`.
 from __future__ import annotations
 
 import random
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
@@ -304,6 +305,188 @@ class SeatFairStatsWithQuality:
     quality: DecisionQualityStats
 
 
+@dataclass(frozen=True, slots=True)
+class _SeatFairQualityTotals:
+    """Somme interne, più comode da aggregare tra processi."""
+
+    num_games: int
+    agent_a_name: str
+    agent_b_name: str
+    wins_a: int
+    wins_b: int
+    draws: int
+    sum_a: int
+    sum_b: int
+    sum_diff: int
+    q_num_second: int
+    q_num_second_with_win: int
+    q_num_waste: int
+    q_num_trump_wins: int
+    q_num_trump_overkill: int
+    q_num_trump_wins_low: int
+    q_num_trump_overkill_low: int
+
+
+def _pair_action_rng(*, seed: int, pair_index: int) -> random.Random:
+    """
+    RNG azioni indipendente per coppia seat-fair.
+
+    Questo rende la valutazione parallela riproducibile indipendentemente da come
+    suddividiamo i seed tra worker. Per agenti deterministici produce gli stessi risultati
+    della valutazione seriale storica; per agenti stocastici cambia solo la sequenza RNG,
+    non la suite di shuffle.
+    """
+    mixed = (int(seed) ^ 0x9E3779B9 ^ ((int(pair_index) + 1) * 0x85EBCA6B)) & 0xFFFFFFFF
+    return random.Random(mixed)
+
+
+def _evaluate_quality_seed_pairs_independent_rng(
+    *,
+    agent_a: Agent,
+    agent_b: Agent,
+    seeds: Sequence[int],
+    seed: int,
+    pair_offset: int,
+) -> _SeatFairQualityTotals:
+    """
+    Valuta un sottoinsieme di coppie seat-fair con RNG indipendente per pair.
+
+    E' il core usato dalla versione parallela: ogni chunk puo' girare in un processo diverso
+    e poi essere sommato senza dipendenze d'ordine.
+    """
+    wins_a = 0
+    wins_b = 0
+    draws = 0
+    sum_a = 0
+    sum_b = 0
+    sum_diff = 0
+
+    q_num_second = 0
+    q_num_second_with_win = 0
+    q_num_waste = 0
+    q_num_trump_wins = 0
+    q_num_trump_overkill = 0
+    q_num_trump_wins_low = 0
+    q_num_trump_overkill_low = 0
+
+    for local_i, game_seed in enumerate(seeds):
+        pair_index = int(pair_offset) + local_i
+        rng_action = _pair_action_rng(seed=int(seed), pair_index=pair_index)
+
+        # Game 1: A=P0, B=P1
+        s1, q1 = play_one_game_2p_collect_quality(
+            agent_a, agent_b, tracked_agent_index=0, rng=rng_action, game_seed=int(game_seed)
+        )
+        p0, p1 = s1.players[0].points, s1.players[1].points
+        sum_a += p0
+        sum_b += p1
+        sum_diff += p0 - p1
+        w = _winner_index_2p(s1)
+        if w is None:
+            draws += 1
+        elif w == 0:
+            wins_a += 1
+        else:
+            wins_b += 1
+
+        q_num_second += q1.num_second_hand_decisions
+        q_num_second_with_win += q1.num_second_hand_with_winning_reply
+        q_num_waste += q1.num_trump_waste
+        q_num_trump_wins += q1.num_second_hand_trump_wins
+        q_num_trump_overkill += q1.num_trump_overkill
+        q_num_trump_wins_low += q1.num_second_hand_trump_wins_low_lead_points
+        q_num_trump_overkill_low += q1.num_trump_overkill_low_lead_points
+
+        # Game 2: A=P1, B=P0. Usiamo la stessa RNG della coppia, in sequenza.
+        s2, q2 = play_one_game_2p_collect_quality(
+            agent_b, agent_a, tracked_agent_index=1, rng=rng_action, game_seed=int(game_seed)
+        )
+        p0, p1 = s2.players[0].points, s2.players[1].points
+        sum_b += p0
+        sum_a += p1
+        sum_diff += p1 - p0
+        w = _winner_index_2p(s2)
+        if w is None:
+            draws += 1
+        elif w == 0:
+            wins_b += 1
+        else:
+            wins_a += 1
+
+        q_num_second += q2.num_second_hand_decisions
+        q_num_second_with_win += q2.num_second_hand_with_winning_reply
+        q_num_waste += q2.num_trump_waste
+        q_num_trump_wins += q2.num_second_hand_trump_wins
+        q_num_trump_overkill += q2.num_trump_overkill
+        q_num_trump_wins_low += q2.num_second_hand_trump_wins_low_lead_points
+        q_num_trump_overkill_low += q2.num_trump_overkill_low_lead_points
+
+    return _SeatFairQualityTotals(
+        num_games=len(seeds) * 2,
+        agent_a_name=agent_a.name,
+        agent_b_name=agent_b.name,
+        wins_a=wins_a,
+        wins_b=wins_b,
+        draws=draws,
+        sum_a=sum_a,
+        sum_b=sum_b,
+        sum_diff=sum_diff,
+        q_num_second=q_num_second,
+        q_num_second_with_win=q_num_second_with_win,
+        q_num_waste=q_num_waste,
+        q_num_trump_wins=q_num_trump_wins,
+        q_num_trump_overkill=q_num_trump_overkill,
+        q_num_trump_wins_low=q_num_trump_wins_low,
+        q_num_trump_overkill_low=q_num_trump_overkill_low,
+    )
+
+
+def _evaluate_quality_chunk(args: tuple[Agent, Agent, list[int], int, int]) -> _SeatFairQualityTotals:
+    """Wrapper top-level per `ProcessPoolExecutor` (serve una funzione picklable)."""
+    agent_a, agent_b, seeds, seed, pair_offset = args
+    return _evaluate_quality_seed_pairs_independent_rng(
+        agent_a=agent_a,
+        agent_b=agent_b,
+        seeds=seeds,
+        seed=seed,
+        pair_offset=pair_offset,
+    )
+
+
+def _merge_quality_totals(parts: Sequence[_SeatFairQualityTotals]) -> SeatFairStatsWithQuality:
+    """Somma chunk paralleli in un unico output pubblico."""
+    if not parts:
+        raise ValueError("Nessun risultato da aggregare")
+
+    num_games = sum(p.num_games for p in parts)
+    first = parts[0]
+    sum_a = sum(p.sum_a for p in parts)
+    sum_b = sum(p.sum_b for p in parts)
+    sum_diff = sum(p.sum_diff for p in parts)
+
+    match = SeatFairStats(
+        num_games=num_games,
+        agent_a_name=first.agent_a_name,
+        agent_b_name=first.agent_b_name,
+        wins_agent_a=sum(p.wins_a for p in parts),
+        wins_agent_b=sum(p.wins_b for p in parts),
+        draws=sum(p.draws for p in parts),
+        avg_points_agent_a=sum_a / num_games if num_games else 0.0,
+        avg_points_agent_b=sum_b / num_games if num_games else 0.0,
+        avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
+    )
+    quality = DecisionQualityStats(
+        num_second_hand_decisions=sum(p.q_num_second for p in parts),
+        num_second_hand_with_winning_reply=sum(p.q_num_second_with_win for p in parts),
+        num_trump_waste=sum(p.q_num_waste for p in parts),
+        num_second_hand_trump_wins=sum(p.q_num_trump_wins for p in parts),
+        num_trump_overkill=sum(p.q_num_trump_overkill for p in parts),
+        num_second_hand_trump_wins_low_lead_points=sum(p.q_num_trump_wins_low for p in parts),
+        num_trump_overkill_low_lead_points=sum(p.q_num_trump_overkill_low for p in parts),
+    )
+    return SeatFairStatsWithQuality(match=match, quality=quality)
+
+
 def evaluate_seat_fair_match_2p_with_quality(
     agent_a: Agent,
     agent_b: Agent,
@@ -416,3 +599,55 @@ def evaluate_seat_fair_match_2p_with_quality(
         num_trump_overkill_low_lead_points=q_num_trump_overkill_low,
     )
     return SeatFairStatsWithQuality(match=match, quality=quality)
+
+
+def evaluate_seat_fair_match_2p_with_quality_parallel(
+    agent_a: Agent,
+    agent_b: Agent,
+    *,
+    num_games: int,
+    seed: int,
+    workers: int,
+    game_seeds: Optional[Sequence[int]] = None,
+) -> SeatFairStatsWithQuality:
+    """
+    Valuta A vs B con quality metrics usando piu' processi.
+
+    Regola:
+    - `workers <= 1` delega alla funzione seriale storica.
+    - `workers > 1` divide le coppie seat-fair in chunk indipendenti.
+
+    Nota RNG:
+    la versione parallela usa un RNG azioni indipendente per coppia seat-fair. Questo rende
+    il risultato stabile al variare del chunking; per agenti stocastici puo' differire dalla
+    funzione seriale storica, che usa un unico stream RNG condiviso.
+    """
+    if workers <= 1:
+        return evaluate_seat_fair_match_2p_with_quality(
+            agent_a,
+            agent_b,
+            num_games=num_games,
+            seed=seed,
+            game_seeds=game_seeds,
+        )
+    if num_games % 2 != 0:
+        raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari (giochiamo a coppie).")
+
+    rng_game = random.Random(seed)
+    num_pairs = num_games // 2
+    seeds = list(game_seeds) if game_seeds is not None else [rng_game.randrange(0, 2**32) for _ in range(num_pairs)]
+    if len(seeds) < num_pairs:
+        raise ValueError(f"game_seeds insufficiente: attesi >= {num_pairs}, ottenuti {len(seeds)}")
+    seeds = seeds[:num_pairs]
+
+    worker_count = max(1, min(int(workers), num_pairs))
+    chunk_size = (num_pairs + worker_count - 1) // worker_count
+    chunks: list[tuple[Agent, Agent, list[int], int, int]] = []
+    for start in range(0, num_pairs, chunk_size):
+        chunk = seeds[start : start + chunk_size]
+        if chunk:
+            chunks.append((agent_a, agent_b, chunk, int(seed), start))
+
+    with ProcessPoolExecutor(max_workers=worker_count) as executor:
+        parts = list(executor.map(_evaluate_quality_chunk, chunks))
+    return _merge_quality_totals(parts)

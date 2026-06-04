@@ -13,7 +13,13 @@ from briscola_ai.ai.training.card_action_space import (
     action_mask_from_hand,
     suit_number_from_action_id,
 )
-from briscola_ai.ai.training.observation_encoder import encode_observation_2p
+from briscola_ai.ai.training.observation_encoder import (
+    encode_observation_2p,
+    encode_observation_2p_with_version,
+    encode_player_observation_2p,
+)
+from briscola_ai.domain.models import Card, Rank, Suit
+from briscola_ai.domain.observation import PlayerObservation
 
 
 def test_action_id_mapping_is_bijective() -> None:
@@ -76,3 +82,60 @@ def test_encode_observation_2p_shapes_and_mask() -> None:
     assert len(encoded.action_mask) == 40
     assert sum(encoded.action_mask) == 2
     assert len(encoded.features) == (40 * 6 + 4 + 4)
+
+
+def test_encode_player_observation_matches_dto_encoder() -> None:
+    """
+    Il path veloce `PlayerObservation -> feature` deve restare equivalente al path DTO.
+
+    Questo protegge il refactor performance: training/evaluation usano il path diretto,
+    mentre dataset/API possono ancora passare dal dict JSON.
+    """
+    seen = [0] * 40
+    seen[action_id_from_suit_number(suit="coins", number=10)] = 1
+    seen[action_id_from_suit_number(suit="swords", number=3)] = 1
+
+    obs = PlayerObservation(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        player_index=0,
+        player_name="A",
+        hand=(Card(Suit.CUPS, Rank.ACE), Card(Suit.CLUBS, Rank.TWO)),
+        trump_card=Card(Suit.COINS, Rank.KING),
+        deck_size=20,
+        table_cards=((Card(Suit.SWORDS, Rank.THREE), 1),),
+        current_turn=0,
+        first_player=1,
+        game_over=False,
+        winner_index=None,
+        winning_team=None,
+        players_points=(7, 12),
+        players_hand_sizes=(2, 2),
+        seen_cards_onehot=tuple(seen),
+    )
+    dto_like = {
+        "num_players": 2,
+        "my_index": 0,
+        "my_hand": [
+            {"suit": "cups", "rank": "ACE", "number": 1, "points": 11},
+            {"suit": "clubs", "rank": "TWO", "number": 2, "points": 0},
+        ],
+        "my_points": 7,
+        "my_turn": True,
+        "trump_suit": "coins",
+        "table_cards": [{"card": {"suit": "swords", "rank": "THREE", "number": 3, "points": 10}, "player_index": 1}],
+        "cards_remaining_in_deck": 20,
+        "players": [
+            {"index": 0, "name": "A", "points": 7, "hand_size": 2},
+            {"index": 1, "name": "B", "points": 12, "hand_size": 2},
+        ],
+        "seen_cards_onehot": seen,
+    }
+
+    for version in ("v1", "v2"):
+        direct = encode_player_observation_2p(obs, version=version)
+        generic = encode_observation_2p_with_version(dto_like, version=version)
+
+        assert direct.action_mask == generic.action_mask
+        assert direct.features == generic.features

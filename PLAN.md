@@ -680,6 +680,45 @@ Decisione provvisoria:
 - il modello migliore per forza resta il baseline senza anchor, mentre `beta=0.005` è il compromesso più sensato se si vuole ridurre overkill senza guard;
 - nessuno di questi modelli va promosso a `best_a2c` per ora: il best 1M ufficiale resta molto più forte e ha già il guard anti-overkill attivo.
 
+### Fase 6 — Performance simulazioni/training
+
+Obiettivo: aumentare il throughput delle simulazioni senza rompere il dominio didattico/canonico.
+
+Baseline diagnostica (Mac locale, `decision_quality small`, 2000 game, best A2C vs `heuristic_v1`):
+- profilo iniziale indicativo: ~4.8s sotto `cProfile`
+- hotspot principali:
+  - `BCModelAgent.choose_card_index` + encoder osservazioni
+  - `make_player_observation`
+  - `domain.step` con dataclass/tuple/`replace`
+
+Interventi completati:
+- [x] Aggiunto `scripts/benchmark_perf.py` per misurare `games/sec` in modo ripetibile
+  - benchmark puro seat-fair 2000 game: circa `990-1000 games/sec` sul Mac locale
+- [x] Encoder veloce `PlayerObservation -> feature/mask`
+  - evita la conversione intermedia `PlayerObservation -> dict DTO -> feature`
+  - test di equivalenza v1/v2 contro il path DTO
+- [x] `make_player_observation`: conversione carta->id ottimizzata nel path caldo
+  - riduce chiamate/overhead su enum/dict durante costruzione `seen_cards_onehot`
+
+Prossimi step performance (ordine consigliato):
+- [x] Parallelizzare `evaluate_decision_quality.py` per seed chunk
+  - CLI: `--workers N` (default seriale `1`)
+  - benchmark `small` (2000 game): `2.20s` seriale vs `0.80s` con 4 worker (`~2.75x`)
+  - benchmark `medium` (10000 game): `10.92s` seriale vs `3.32s` con 4 worker (`~3.3x`)
+  - nota RNG: in parallelo usiamo RNG azioni indipendente per coppia seat-fair; per agenti deterministici
+    coincide col seriale, per agenti stocastici resta riproducibile ma non byte-identico al vecchio stream seriale
+- [x] Estendere la parallelizzazione a `evaluate_matrix.py`
+  - CLI: `--workers N` (default seriale `1`)
+  - pipeline: `scripts/run_experiment.py --eval-workers N`
+  - benchmark `small` matrix completa (6 righe × 2000 game): `11.93s` seriale vs `4.51s` con 4 worker (`~2.65x`)
+  - benchmark `medium` matrix completa con 4 worker: `20.47s` (seriale non rilanciato per risparmiare tempo)
+- [ ] Creare un motore `fast_2p` mutabile/array-based per training/evaluation
+  - mantenere `domain.step` come fonte canonica per API/test didattici
+  - aggiungere test di equivalenza: stesso seed -> stesso punteggio finale e stessa sequenza di eventi essenziali
+- [ ] Valutare Numba solo sul `fast_2p`
+  - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
+  - target minimo per giustificare complessita': `>=3x` sui benchmark lunghi
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.

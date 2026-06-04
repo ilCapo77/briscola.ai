@@ -23,14 +23,34 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Optional
 
-from .card_id import card_to_id
-from .models import Card
+from .models import Card, Suit
 from .state import GameState
 
 
 def _empty_seen_cards_onehot() -> tuple[int, ...]:
     """Default (backward-compatible): nessuna carta “vista” (lunghezza 40)."""
     return (0,) * 40
+
+
+def _card_to_id_fast(card: Card) -> int:
+    """
+    Converte una carta in id canonico nel path caldo di osservazione.
+
+    Evitiamo il lookup su dict/Enum usato dall'helper pubblico `card_to_id`, perche'
+    `make_player_observation` viene chiamata decine di migliaia di volte durante training
+    ed evaluation. La convenzione resta identica: `suit_index * 10 + (number - 1)`.
+    """
+    if card.suit is Suit.CLUBS:
+        suit_index = 0
+    elif card.suit is Suit.CUPS:
+        suit_index = 1
+    elif card.suit is Suit.COINS:
+        suit_index = 2
+    elif card.suit is Suit.SWORDS:
+        suit_index = 3
+    else:
+        raise ValueError(f"Seme non supportato: {card.suit!r}")
+    return suit_index * 10 + (int(card.rank.number) - 1)
 
 
 @dataclass(frozen=True, slots=True)
@@ -105,12 +125,12 @@ def make_player_observation(state: GameState, player_index: int) -> PlayerObserv
     # - briscola scoperta (pubblica)
     seen = [0] * 40
     if state.trump_card is not None:
-        seen[card_to_id(state.trump_card)] = 1
+        seen[_card_to_id_fast(state.trump_card)] = 1
     for card, _ in state.table_cards:
-        seen[card_to_id(card)] = 1
+        seen[_card_to_id_fast(card)] = 1
     for p in state.players:
         for card in p.captured_cards:
-            seen[card_to_id(card)] = 1
+            seen[_card_to_id_fast(card)] = 1
 
     return PlayerObservation(
         num_players=state.num_players,

@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import argparse
 import sys
+import time
 from pathlib import Path
 
 from briscola_ai.ai.evaluation_matrix import default_opponents, evaluate_model_matrix, format_matrix_table
@@ -110,6 +111,12 @@ def main() -> int:
         help="Se valorizzato, salva la matrice in JSON oltre alla stampa a schermo.",
     )
     parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help="Numero processi per parallelizzare le righe della matrix. Default: 1 (seriale).",
+    )
+    parser.add_argument(
         "--format",
         choices=["auto", "csv", "rich"],
         default="auto",
@@ -120,6 +127,8 @@ def main() -> int:
         ),
     )
     args = parser.parse_args()
+    if int(args.workers) <= 0:
+        raise ValueError("--workers deve essere > 0")
 
     opponents = default_opponents()
     if args.opponents.strip():
@@ -127,6 +136,7 @@ def main() -> int:
         if not opponents:
             raise ValueError("`--opponents` non contiene elementi validi.")
 
+    t0 = time.perf_counter()
     matrix = evaluate_model_matrix(
         model_path=Path(args.model),
         opponents=opponents,
@@ -135,7 +145,9 @@ def main() -> int:
         standard_start=args.standard_start,
         holdout_start=args.holdout_start,
         range_step=args.range_step,
+        workers=int(args.workers),
     )
+    elapsed = time.perf_counter() - t0
 
     should_try_rich = args.format in {"auto", "rich"}
     printed_rich = False
@@ -146,6 +158,7 @@ def main() -> int:
 
     if not printed_rich:
         print(format_matrix_table(matrix), end="")
+    print(f"elapsed_seconds={elapsed:.3f} workers={int(args.workers)}", file=sys.stderr)
 
     if args.out_json.strip():
         out_path = Path(args.out_json)

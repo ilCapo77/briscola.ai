@@ -19,12 +19,13 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import time
 from dataclasses import asdict
 from pathlib import Path
 
 from briscola_ai.ai.agents import build_agent, list_agent_specs
 from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.decision_quality import evaluate_seat_fair_match_2p_with_quality
+from briscola_ai.ai.decision_quality import evaluate_seat_fair_match_2p_with_quality_parallel
 
 
 def main() -> int:
@@ -46,11 +47,22 @@ def main() -> int:
     parser.add_argument("--agent-a-model", default="", help="Path modello `.npz` se A=bc_model.")
     parser.add_argument("--agent-b-model", default="", help="Path modello `.npz` se B=bc_model.")
     parser.add_argument("--out-json", default="", help="Se valorizzato, salva risultato JSON.")
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        help=(
+            "Numero processi per parallelizzare le coppie seat-fair. "
+            "Default: 1 (seriale storico). Valori utili: 2..numero core."
+        ),
+    )
     args = parser.parse_args()
 
     num_games = {"small": 2000, "medium": 10000, "big": 100000}[args.benchmark]
     if num_games % 2 != 0:
         raise ValueError("Benchmark interno invalido (num_games deve essere pari).")
+    if int(args.workers) <= 0:
+        raise ValueError("--workers deve essere > 0")
 
     if bool(args.force_overkill_guard):
         os.environ["BRISCOLA_BC_OVERKILL_GUARD"] = "1"
@@ -67,10 +79,19 @@ def main() -> int:
     agent_a = _build(agent_name=args.agent_a, model_path=args.agent_a_model, flag="agent-a")
     agent_b = _build(agent_name=args.agent_b, model_path=args.agent_b_model, flag="agent-b")
 
-    out = evaluate_seat_fair_match_2p_with_quality(agent_a, agent_b, num_games=num_games, seed=int(args.seed))
+    t0 = time.perf_counter()
+    out = evaluate_seat_fair_match_2p_with_quality_parallel(
+        agent_a,
+        agent_b,
+        num_games=num_games,
+        seed=int(args.seed),
+        workers=int(args.workers),
+    )
+    elapsed = time.perf_counter() - t0
 
     print(f"Match 2-player (seat-fair): {out.match.agent_a_name} (A) vs {out.match.agent_b_name} (B)")
-    print(f"- games: {out.match.num_games} (seed={int(args.seed)})")
+    print(f"- games: {out.match.num_games} (seed={int(args.seed)}, workers={int(args.workers)})")
+    print(f"- elapsed: {elapsed:.3f}s ({out.match.num_games / elapsed:.1f} games/sec)")
     print(f"- wins A: {out.match.wins_agent_a} | wins B: {out.match.wins_agent_b} | draws: {out.match.draws}")
     print(f"- avg diff punti (A-B): {out.match.avg_point_diff_agent_a_minus_agent_b:+.2f}")
     print("Decision quality (A, secondo di mano):")
@@ -89,6 +110,8 @@ def main() -> int:
             "benchmark": args.benchmark,
             "num_games": num_games,
             "seed": int(args.seed),
+            "workers": int(args.workers),
+            "elapsed_seconds": elapsed,
             "agents": {"a": agent_a.name, "b": agent_b.name},
             "match": asdict(out.match),
             "quality": {

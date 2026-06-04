@@ -20,7 +20,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from ...domain.models import Card
+from ...domain.models import Card, Suit
 from ...domain.observation import PlayerObservation
 from .card_action_space import build_card_features, card_dto_to_action_id
 
@@ -62,6 +62,42 @@ def _one_hot_suit(suit: str | None) -> list[float]:
     if idx is None:
         return out
     out[idx] = 1.0
+    return out
+
+
+def _card_to_action_id_fast(card: Card) -> int:
+    """
+    Converte una `Card` dominio in action id senza passare da DTO/dict.
+
+    Questo helper è usato nel path caldo training/evaluation. Mantiene la stessa convenzione
+    dello spazio azioni canonico: `suit_index * 10 + (number - 1)`.
+    """
+    if card.suit is Suit.CLUBS:
+        suit_index = 0
+    elif card.suit is Suit.CUPS:
+        suit_index = 1
+    elif card.suit is Suit.COINS:
+        suit_index = 2
+    elif card.suit is Suit.SWORDS:
+        suit_index = 3
+    else:
+        raise ValueError(f"Seme non supportato: {card.suit!r}")
+    return suit_index * 10 + (int(card.rank.number) - 1)
+
+
+def _one_hot_suit_from_card(card: Card | None) -> list[float]:
+    """One-hot sui 4 semi partendo direttamente da una carta dominio."""
+    out = [0.0, 0.0, 0.0, 0.0]
+    if card is None:
+        return out
+    if card.suit is Suit.CLUBS:
+        out[0] = 1.0
+    elif card.suit is Suit.CUPS:
+        out[1] = 1.0
+    elif card.suit is Suit.COINS:
+        out[2] = 1.0
+    elif card.suit is Suit.SWORDS:
+        out[3] = 1.0
     return out
 
 
@@ -242,35 +278,59 @@ def encode_player_observation_2p(
     if observation.num_players != 2:
         raise ValueError("Questo encoder è pensato per 2-player (num_players=2).")
 
-    def _card_to_dto_dict(card: Card) -> dict[str, object]:
-        return {
-            "suit": card.suit.value,
-            "rank": card.rank.name,
-            "number": card.rank.number,
-            "points": card.rank.points,
-        }
+    my_index = int(observation.player_index)
+    if my_index < 0 or my_index >= observation.num_players:
+        raise ValueError(f"player_index fuori range: {my_index} (num_players={observation.num_players})")
 
-    players = []
-    for i in range(observation.num_players):
-        players.append(
-            {
-                "index": i,
-                "name": "player",
-                "points": observation.players_points[i],
-                "hand_size": observation.players_hand_sizes[i],
-            }
-        )
+    # Action mask e feature mano. Questo duplica intenzionalmente la costruzione di
+    # `encode_observation_2p`, evitando però la conversione PlayerObservation -> dict DTO
+    # nel path caldo training/evaluation.
+    mask = [False] * 40
+    hand_onehot = [0.0] * 40
+    for card in observation.hand:
+        action_id = _card_to_action_id_fast(card)
+        mask[action_id] = True
+        hand_onehot[action_id] = 1.0
 
-    dto_like = {
-        "num_players": observation.num_players,
-        "my_index": observation.player_index,
-        "my_hand": [_card_to_dto_dict(c) for c in observation.hand],
-        "my_points": observation.players_points[observation.player_index],
-        "my_turn": (observation.current_turn == observation.player_index) and (not observation.game_over),
-        "trump_suit": observation.trump_card.suit.value if observation.trump_card else None,
-        "table_cards": [{"card": _card_to_dto_dict(c), "player_index": idx} for c, idx in observation.table_cards],
-        "cards_remaining_in_deck": observation.deck_size,
-        "players": players,
-        "seen_cards_onehot": list(observation.seen_cards_onehot),
-    }
-    return encode_observation_2p_with_version(dto_like, version=version)
+    hand_points = [hand_onehot[i] * float(_CARD_FEATURES.points_by_action_id[i]) for i in range(40)]
+    hand_strength = [hand_onehot[i] * float(_CARD_FEATURES.strength_by_action_id[i]) for i in range(40)]
+
+    table_onehot = [0.0] * 40
+    for card, _ in observation.table_cards:
+        table_onehot[_card_to_action_id_fast(card)] = 1.0
+
+    table_points = [table_onehot[i] * float(_CARD_FEATURES.points_by_action_id[i]) for i in range(40)]
+    table_strength = [table_onehot[i] * float(_CARD_FEATURES.strength_by_action_id[i]) for i in range(40)]
+
+    if len(observation.players_points) != observation.num_players:
+        raise ValueError("PlayerObservation invalida: players_points non coerente con num_players")
+
+    opp_index = 1 - my_index
+    is_second_in_trick = (
+        1.0
+        if (observation.current_turn == my_index and (not observation.game_over) and len(observation.table_cards) == 1)
+        else 0.0
+    )
+
+    features: list[float] = (
+        hand_onehot
+        + hand_points
+        + hand_strength
+        + table_onehot
+        + table_points
+        + table_strength
+        + _one_hot_suit_from_card(observation.trump_card)
+        + [
+            float(observation.deck_size) / 40.0,
+            float(observation.players_points[my_index]) / 120.0,
+            float(observation.players_points[opp_index]) / 120.0,
+            is_second_in_trick,
+        ]
+    )
+
+    if version == "v1":
+        return EncodedObservation(features=features, action_mask=mask)
+    if version == "v2":
+        seen = _seen_cards_onehot_to_floats(list(observation.seen_cards_onehot))
+        return EncodedObservation(features=features + seen, action_mask=mask)
+    raise ValueError(f"Encoder version non supportata: {version!r}")

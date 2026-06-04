@@ -7,7 +7,15 @@ Obiettivo:
 
 from __future__ import annotations
 
-from briscola_ai.ai.decision_quality import _is_trump_overkill_second_hand, _is_trump_waste_second_hand
+from dataclasses import asdict
+
+from briscola_ai.ai.agents import build_agent
+from briscola_ai.ai.decision_quality import (
+    _is_trump_overkill_second_hand,
+    _is_trump_waste_second_hand,
+    evaluate_seat_fair_match_2p_with_quality,
+    evaluate_seat_fair_match_2p_with_quality_parallel,
+)
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.state import GameState, PlayerState
 
@@ -86,3 +94,32 @@ def test_trump_overkill_detected_when_cheaper_trump_wins() -> None:
 
     no_overkill = _is_trump_overkill_second_hand(state=state, player_index=1, chosen_card_index=0)
     assert no_overkill is False
+
+
+def test_parallel_decision_quality_matches_serial_for_deterministic_agents() -> None:
+    """
+    La parallelizzazione divide solo la suite di seed: con agenti deterministici
+    deve produrre gli stessi aggregati della valutazione seriale.
+    """
+    agent_a = build_agent("heuristic_v1")
+    agent_b = build_agent("heuristic_v1")
+    seeds = list(range(10))
+
+    serial = evaluate_seat_fair_match_2p_with_quality(
+        agent_a,
+        agent_b,
+        num_games=20,
+        seed=123,
+        game_seeds=seeds,
+    )
+    parallel = evaluate_seat_fair_match_2p_with_quality_parallel(
+        agent_a,
+        agent_b,
+        num_games=20,
+        seed=123,
+        game_seeds=seeds,
+        workers=2,
+    )
+
+    assert asdict(parallel.match) == asdict(serial.match)
+    assert asdict(parallel.quality) == asdict(serial.quality)
