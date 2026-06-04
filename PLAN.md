@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **151** (pytest).
+- Test attuali: **154** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -787,9 +787,17 @@ Prossimi step performance (ordine consigliato):
   - CLI: `scripts/train_a2c.py --rollout-engine fast --fast-encoder numba`
   - test: equivalenza feature/mask vs `encode_fast_observation_2p` su stati iniziali/intermedi e smoke trainer
   - limite: il wrapper converte ancora `Fast2PState` da liste Python ad array NumPy a ogni decisione, quindi non è ancora lo speedup finale
-- [ ] Integrare Numba full-JIT nel rollout A2C per opponent fast-compatible
-  - tenere stato, encoder, policy opponent e step in array JIT per tutta la partita
-  - decidere se lasciare forward/backprop della policy neurale in NumPy o portare anche forward/action sampling nel JIT
+- [x] Aggiungere rollout inference MLP full-JIT per opponent fast-compatible
+  - modulo: `src/briscola_ai/ai/fast_numba_observation.py`
+  - CLI benchmark: `scripts/benchmark_perf.py --mode numba-mlp`
+  - scope: stato, encoder feature/mask, forward MLP, sampling azione, opponent rule-based e step tutti dentro Numba
+  - test: determinismo per seed, invarianti punti/contatori, validazione shape pesi
+  - benchmark `zero_mlp_numba(hidden=32)` vs `heuristic_v1`, 100k game x 3 run: `~11.2k games/sec` medio
+  - benchmark `zero_mlp_numba(hidden=128)` vs `heuristic_v1`, 20k game x 3 run: `~2.84k games/sec` medio
+  - limite: è inference/evaluation, non raccoglie ancora `StepRecord`/traiettorie per backprop A2C
+- [ ] Integrare Numba full-JIT nel training A2C
+  - fare emettere al rollout JIT array di traiettoria (`x`, `z1`, `h`, `mask`, `probs`, `action_id`, reward/value)
+  - riusare il backprop NumPy esistente su batch di traiettorie, senza ricostruire `PlayerObservation`
   - benchmark da confrontare con `scripts/train_a2c.py --rollout-engine fast --fast-encoder python|numba`
 - [ ] Estendere il rollout fast A2C a opponent `.npz`
   - supportare policy `.npz` direttamente su encoder fast

@@ -16,6 +16,8 @@ import random
 import time
 from pathlib import Path
 
+import numpy as np
+
 from briscola_ai.ai.agents import build_agent, list_agent_specs
 from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
@@ -28,6 +30,8 @@ from briscola_ai.ai.fast_numba import (
     warm_up_numba,
     warm_up_numba_evaluation,
 )
+from briscola_ai.ai.fast_numba_observation import evaluate_mlp_policy_numba_2p, warm_up_numba_mlp_rollout
+from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.state import GameState, new_game_state
 
@@ -229,6 +233,64 @@ def _benchmark_numba_evaluation(
     )
 
 
+def _benchmark_numba_mlp_rollout(
+    *,
+    games: int,
+    repeat: int,
+    seed: int,
+    opponent_name: str,
+    hidden_dim: int,
+) -> None:
+    """Esegue benchmark inference full-JIT: MLP policy mascherata vs opponent fast-compatible."""
+    if opponent_name not in NUMBA_EVALUATION_AGENT_NAMES:
+        supported = ", ".join(sorted(NUMBA_EVALUATION_AGENT_NAMES))
+        raise ValueError(f"`--mode numba-mlp` supporta opponent: {supported}. Ottenuto: {opponent_name!r}")
+    if hidden_dim <= 0:
+        raise ValueError("--hidden-dim deve essere > 0")
+
+    feature_dim = int(FEATURE_DIM_2P_V1)
+    w1 = np.zeros((feature_dim, hidden_dim), dtype=np.float32)
+    b1 = np.zeros((hidden_dim,), dtype=np.float32)
+    w2 = np.zeros((hidden_dim, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    warm_up_numba_mlp_rollout()
+
+    elapsed_values: list[float] = []
+    last_avg_diff = 0.0
+    for i in range(repeat):
+        run_seed = seed + i
+        t0 = time.perf_counter()
+        summary = evaluate_mlp_policy_numba_2p(
+            w1=w1,
+            b1=b1,
+            w2=w2,
+            b2=b2,
+            opponent_name=opponent_name,
+            num_games=games,
+            seed=run_seed,
+            seat_fair=True,
+            policy_name="zero_mlp_numba",
+        )
+        elapsed = time.perf_counter() - t0
+        elapsed_values.append(elapsed)
+        stats = summary.to_match_stats()
+        last_avg_diff = float(stats.avg_point_diff_agent0_minus_agent1)
+        print(
+            f"run {i + 1}/{repeat} | mode=numba-mlp | games={games} | elapsed={elapsed:.3f}s | "
+            f"games/sec={games / elapsed:.1f} | avg_diff={last_avg_diff:+.2f}"
+        )
+
+    best = min(elapsed_values)
+    avg = sum(elapsed_values) / len(elapsed_values)
+    print(
+        "summary | "
+        f"mode=numba-mlp | policy=zero_mlp_numba(hidden={hidden_dim}) | opponent={opponent_name} | "
+        f"best={best:.3f}s ({games / best:.1f} games/sec) | "
+        f"avg={avg:.3f}s ({games / avg:.1f} games/sec) | "
+        f"last_avg_diff={last_avg_diff:+.2f}"
+    )
+
+
 def main() -> int:
     """Esegue il benchmark e stampa metriche sintetiche."""
     agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
@@ -236,7 +298,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark throughput simulazioni 2-player.")
     parser.add_argument(
         "--mode",
-        choices=["eval", "fast-eval", "domain-random", "fast-random", "numba-random", "numba-eval"],
+        choices=["eval", "fast-eval", "domain-random", "fast-random", "numba-random", "numba-eval", "numba-mlp"],
         default="eval",
         help="Tipo di benchmark: evaluation con agenti oppure loop engine-only random.",
     )
@@ -252,6 +314,7 @@ def main() -> int:
     parser.add_argument("--agent-b", choices=agent_names, default="heuristic_v1")
     parser.add_argument("--agent-a-model", default="data/models/best_a2c.npz")
     parser.add_argument("--agent-b-model", default="")
+    parser.add_argument("--hidden-dim", type=int, default=32, help="Hidden dim per benchmark `--mode numba-mlp`.")
     args = parser.parse_args()
 
     games = int(args.games)
@@ -262,7 +325,7 @@ def main() -> int:
         raise ValueError("--games deve essere > 0")
     if repeat <= 0:
         raise ValueError("--repeat deve essere > 0")
-    if args.mode in ("eval", "fast-eval", "numba-eval") and games % 2 != 0:
+    if args.mode in ("eval", "fast-eval", "numba-eval", "numba-mlp") and games % 2 != 0:
         raise ValueError("--games deve essere pari in modalità eval seat-fair")
 
     if args.mode in ("domain-random", "fast-random", "numba-random"):
@@ -282,6 +345,14 @@ def main() -> int:
             seed=seed,
             agent_a_name=args.agent_a,
             agent_b_name=args.agent_b,
+        )
+    elif args.mode == "numba-mlp":
+        _benchmark_numba_mlp_rollout(
+            games=games,
+            repeat=repeat,
+            seed=seed,
+            opponent_name=args.agent_b,
+            hidden_dim=int(args.hidden_dim),
         )
     else:
         _benchmark_evaluation(

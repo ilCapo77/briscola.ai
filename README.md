@@ -353,12 +353,15 @@ python scripts/benchmark_perf.py --mode fast-random --games 100000 --repeat 3 --
 python scripts/benchmark_perf.py --mode numba-random --games 100000 --repeat 3 --seed 0
 python scripts/benchmark_perf.py --mode fast-eval --games 100000 --repeat 3 --seed 0 --agent-a heuristic_v2 --agent-b heuristic_v1
 python scripts/benchmark_perf.py --mode numba-eval --games 100000 --repeat 3 --seed 0 --agent-a heuristic_v2 --agent-b heuristic_v1
+python scripts/benchmark_perf.py --mode numba-mlp --games 20000 --repeat 3 --seed 0 --agent-b heuristic_v1 --hidden-dim 128
 ```
 
 Nota: `numba-random` e `numba-eval` misurano il core JIT in `fast_numba`; non misurano ancora il training
-A2C completo. Risultati locali indicativi dopo warm-up:
+A2C completo. `numba-mlp` misura invece un rollout inference full-JIT con policy MLP zero-inizializzata.
+Risultati locali indicativi dopo warm-up:
 - random-vs-random: `fast-random` ~21.3k games/sec, `numba-random` ~445k games/sec (`~20.9x`);
 - `heuristic_v2` vs `heuristic_v1`: `fast-eval` ~13.3k games/sec, `numba-eval` ~300k games/sec (`~22.6x`).
+- MLP hidden=128 vs `heuristic_v1`: `numba-mlp` ~2.84k games/sec.
 
 ### Valutazione agenti
 
