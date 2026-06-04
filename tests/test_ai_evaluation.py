@@ -10,11 +10,18 @@ Non testiamo che un agente sia "forte": testiamo l'infrastruttura.
 
 from __future__ import annotations
 
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+import numpy as np
 import pytest
 
 from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 from briscola_ai.ai.fast_evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
+from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
 
 
 def test_evaluate_match_is_deterministic_for_fixed_seed() -> None:
@@ -128,3 +135,50 @@ def test_fast_evaluation_rejects_unsupported_agents() -> None:
     """Il path fast deve fallire presto per agenti non ancora tradotti su card id."""
     with pytest.raises(ValueError, match="supporta solo"):
         evaluate_fast_match_2p("bc_model", "random", num_games=1, seed=0)
+
+
+def test_evaluate_agents_cli_numba_engine_supports_mlp_model(tmp_path: Path) -> None:
+    """Lo script diretto deve poter valutare un modello MLP con il core Numba."""
+    d = int(FEATURE_DIM_2P_V1)
+    h = 4
+    model_path = tmp_path / "dummy_numba_eval.npz"
+    out_json = tmp_path / "result.json"
+    np.savez(
+        model_path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h, 40), dtype=np.float32),
+        b2=np.zeros((40,), dtype=np.float32),
+        metadata_json=json.dumps({"format": "mlp_bc_v1", "feature_dim": d}, ensure_ascii=False),
+    )
+
+    script = Path(__file__).resolve().parent.parent / "scripts" / "evaluate_agents.py"
+    subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--engine",
+            "numba",
+            "--num-games",
+            "4",
+            "--seed",
+            "0",
+            "--agent0",
+            "bc_model",
+            "--agent0-model",
+            str(model_path),
+            "--agent1",
+            "heuristic_v1",
+            "--out-json",
+            str(out_json),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    payload = json.loads(out_json.read_text(encoding="utf-8"))
+    stats = payload["stats"]
+    assert payload["engine"] == "numba"
+    assert stats["num_games"] == 4
+    assert stats["wins_agent0"] + stats["wins_agent1"] + stats["draws"] == 4
