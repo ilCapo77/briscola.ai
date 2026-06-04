@@ -1125,6 +1125,7 @@ def _collect_mlp_policy_batch_numba(
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
+    opponent_model_enabled_flags: np.ndarray,
     opponent_codes: np.ndarray,
     game_seeds: np.ndarray,
     policy_seats: np.ndarray,
@@ -1172,7 +1173,7 @@ def _collect_mlp_policy_batch_numba(
             wv,
             bv,
             int(opponent_codes[game_idx]),
-            opponent_model_enabled,
+            bool(opponent_model_enabled_flags[game_idx]),
             opponent_w1,
             opponent_b1,
             opponent_w2,
@@ -1570,6 +1571,7 @@ def collect_a2c_batch_numba_2p(
     opponent_b2: np.ndarray | None = None,
     opponent_overkill_guard: bool = False,
     opponent_codes: np.ndarray | None = None,
+    opponent_model_enabled_flags: np.ndarray | None = None,
     overkill_penalty_beta: float = 0.0,
     overkill_low_lead_points_max: int = 2,
     overkill_penalty_mode: str = "flat",
@@ -1612,8 +1614,6 @@ def collect_a2c_batch_numba_2p(
     if opponent_codes is None:
         codes_arr = np.full(seeds_arr.shape, prepared.opponent_code, dtype=np.int64)
     else:
-        if prepared.opponent_model_enabled:
-            raise ValueError("opponent_codes per-game non è compatibile con opponent model `.npz`.")
         codes_arr = np.asarray(opponent_codes, dtype=np.int64)
         if codes_arr.ndim != 1:
             raise ValueError(f"opponent_codes deve essere 1D, ottenuto shape={codes_arr.shape}")
@@ -1621,6 +1621,18 @@ def collect_a2c_batch_numba_2p(
             raise ValueError(f"Shape mismatch: opponent_codes={codes_arr.shape} game_seeds={seeds_arr.shape}")
         if not np.all((codes_arr >= 0) & (codes_arr <= 3)):
             raise ValueError("opponent_codes contiene codici Numba non supportati")
+    if opponent_model_enabled_flags is None:
+        model_flags_arr = np.full(seeds_arr.shape, bool(prepared.opponent_model_enabled), dtype=np.bool_)
+    else:
+        model_flags_arr = np.asarray(opponent_model_enabled_flags, dtype=np.bool_)
+        if model_flags_arr.ndim != 1:
+            raise ValueError(f"opponent_model_enabled_flags deve essere 1D, ottenuto shape={model_flags_arr.shape}")
+        if model_flags_arr.shape != seeds_arr.shape:
+            raise ValueError(
+                f"Shape mismatch: opponent_model_enabled_flags={model_flags_arr.shape} game_seeds={seeds_arr.shape}"
+            )
+        if bool(np.any(model_flags_arr)) and not prepared.opponent_model_enabled:
+            raise ValueError("opponent_model_enabled_flags richiede un opponent model `.npz` caricato.")
 
     (
         policy_points,
@@ -1653,6 +1665,7 @@ def collect_a2c_batch_numba_2p(
         float(overkill_penalty_beta),
         int(overkill_low_lead_points_max),
         int(mode_code),
+        np.ascontiguousarray(model_flags_arr),
         np.ascontiguousarray(codes_arr),
         np.ascontiguousarray(seeds_arr),
         np.ascontiguousarray(seats_arr),
@@ -1747,6 +1760,7 @@ def warm_up_numba_mlp_rollout() -> None:
         0.0,
         2,
         0,
+        np.asarray([False], dtype=np.bool_),
         np.asarray([numba_agent_code("random")], dtype=np.int64),
         np.asarray([0], dtype=np.int64),
         np.asarray([0], dtype=np.int64),

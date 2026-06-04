@@ -939,12 +939,23 @@ def main() -> int:
     if opponent_mix_raw:
         items = parse_opponent_mix(opponent_mix_raw)
         if rollout_engine == "fast":
-            unsupported = [item.name for item in items if item.name not in FAST_EVALUATION_AGENT_NAMES]
+            unsupported = [
+                item.name
+                for item in items
+                if item.name not in FAST_EVALUATION_AGENT_NAMES
+                and not (fast_rollout == "numba" and item.name == "best_a2c")
+            ]
             if unsupported:
                 supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
                 raise ValueError(
-                    f"`--rollout-engine fast` supporta solo opponent mix con: {supported}. "
+                    f"`--rollout-engine fast` supporta opponent mix con: {supported}; "
+                    "`best_a2c` è supportato solo con `--fast-rollout numba`. "
                     f"Non supportati: {unsupported}"
+                )
+            if fast_rollout == "numba" and any(item.name == "best_a2c" for item in items):
+                fast_numba_model_opponent = _load_fast_numba_model_opponent(
+                    opponent_name="best_a2c",
+                    opponent_model_path=str(args.opponent_model),
                 )
         agents_by_name = {item.name: build_agent(item.name) for item in items}
         opponent_pool = OpponentPool(items=items, agents_by_name=agents_by_name)
@@ -1081,13 +1092,19 @@ def main() -> int:
                             dtype=np.int64,
                         )
                         opponent_codes = None
+                        opponent_model_enabled_flags = None
                         if opponent_pool is not None:
+                            sampled_names = [
+                                sample_opponent_name(opponent_pool.items, rng=rng_opponent_select)
+                                for _ in range(batch_size)
+                            ]
                             opponent_codes = np.asarray(
-                                [
-                                    numba_agent_code(sample_opponent_name(opponent_pool.items, rng=rng_opponent_select))
-                                    for _ in range(batch_size)
-                                ],
+                                [0 if name == "best_a2c" else numba_agent_code(name) for name in sampled_names],
                                 dtype=np.int64,
+                            )
+                            opponent_model_enabled_flags = np.asarray(
+                                [name == "best_a2c" for name in sampled_names],
+                                dtype=np.bool_,
                             )
                         numba_batch = collect_a2c_batch_numba_2p(
                             w1=policy.w1,
@@ -1117,6 +1134,7 @@ def main() -> int:
                             game_seeds=game_seeds,
                             policy_seats=policy_seats,
                             opponent_codes=opponent_codes,
+                            opponent_model_enabled_flags=opponent_model_enabled_flags,
                             overkill_penalty_beta=float(args.overkill_penalty_beta),
                             overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
                             overkill_penalty_mode=str(args.overkill_penalty_mode),

@@ -765,6 +765,7 @@ Rollout fast sperimentale (avversari fast-compatible):
 - `python scripts/train_a2c.py --rollout-engine fast --fast-encoder numba --out ./data/a2c_fast_numba_encoder_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_rollout_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_mix.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 20000 --seat-fair --seed 0`
+- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_best_mix.npz --opponent-mix best_a2c:0.5,random:0.5 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_vs_best.npz --opponent best_a2c --num-games 20000 --seat-fair --seed 0`
 
 Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
@@ -780,7 +781,8 @@ Con opponent mix rule-based (`heuristic_v1:0.7,random:0.2,greedy_points:0.1`), 5
 Con lo stesso mix e shaping overkill gap attivo (`--overkill-penalty-beta 0.01 --overkill-penalty-mode gap`):
 `~0.76s`.
 Con opponent `.npz` MLP locale: `--opponent best_a2c` funziona nel rollout Numba; benchmark locale 5k game,
-hidden=32: `~4.31s -> ~0.82s` (`~5.3x`).
+hidden=32: `~4.31s -> ~0.82s` (`~5.3x`). Anche `best_a2c` dentro `--opponent-mix` è supportato; mix
+`best_a2c:0.5,random:0.5`, 5k game hidden=32: `~0.89s`.
 
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.

@@ -334,6 +334,78 @@ def test_numba_a2c_batch_supports_per_game_opponent_codes() -> None:
         assert np.allclose(batch.rewards[i, :count], single.rewards)
 
 
+def test_numba_a2c_batch_supports_mixed_rule_and_model_opponents() -> None:
+    """Il batch collector deve poter alternare rule-based e MLP `.npz` nello stesso batch."""
+    warm_up_numba_mlp_rollout()
+
+    feature_dim = int(FEATURE_DIM_2P_V1)
+    policy_hidden = 8
+    opponent_hidden = 6
+    w1 = np.zeros((feature_dim, policy_hidden), dtype=np.float32)
+    b1 = np.zeros((policy_hidden,), dtype=np.float32)
+    w2 = np.zeros((policy_hidden, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    wv = np.zeros((policy_hidden,), dtype=np.float32)
+    opponent_w1 = np.zeros((feature_dim, opponent_hidden), dtype=np.float32)
+    opponent_b1 = np.zeros((opponent_hidden,), dtype=np.float32)
+    opponent_w2 = np.zeros((opponent_hidden, 40), dtype=np.float32)
+    opponent_b2 = np.zeros((40,), dtype=np.float32)
+    seeds = np.asarray([222, 333], dtype=np.int64)
+    seats = np.asarray([0, 1], dtype=np.int64)
+
+    batch = collect_a2c_batch_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="random",
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
+        opponent_codes=np.asarray([numba_agent_code("random"), 0], dtype=np.int64),
+        opponent_model_enabled_flags=np.asarray([False, True], dtype=np.bool_),
+        game_seeds=seeds,
+        policy_seats=seats,
+    )
+
+    single_rule = collect_a2c_trajectory_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="random",
+        game_seed=int(seeds[0]),
+        policy_seat=int(seats[0]),
+    )
+    single_model = collect_a2c_trajectory_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="bc_model",
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
+        game_seed=int(seeds[1]),
+        policy_seat=int(seats[1]),
+    )
+
+    assert batch.policy_points[0] == single_rule.policy_points
+    assert batch.opponent_points[0] == single_rule.opponent_points
+    assert np.allclose(batch.rewards[0, : int(batch.step_counts[0])], single_rule.rewards)
+    assert batch.policy_points[1] == single_model.policy_points
+    assert batch.opponent_points[1] == single_model.opponent_points
+    assert np.allclose(batch.rewards[1, : int(batch.step_counts[1])], single_model.rewards)
+
+
 def test_numba_trump_overkill_penalty_matches_expected_flat_and_gap() -> None:
     """La penalità JIT deve replicare i casi base del reward shaping canonico."""
     hands = np.full((2, 3), -1, dtype=np.int64)
