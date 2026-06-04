@@ -664,6 +664,22 @@ Interpretazione:
 - l'anchor aiuta a tenere basso l'overkill (vs A2C non ancorato), ma con questo `beta` sembra “frenare” troppo la policy,
   riducendo la forza vs `heuristic_v1`. Prossimo tuning naturale: provare `beta` più piccoli (es. 0.005–0.01) e confrontare.
 
+Risultati tuning anchor più debole (seed training=8, 200k game, benchmark `medium`, guard OFF)
+- baseline senza anchor (`..._seed8_from_bc_teacher_v2_no_anchor`):
+  - matrix holdout vs `heuristic_v1`: `avg_diff=+9.53`
+  - decision quality vs `heuristic_v1`: `avg_diff=+9.87`, `trump_overkill_rate=4.1%`, low-lead `2.0%`
+- anchor `beta=0.005` (`..._seed8_from_bc_teacher_v2_anchor005`):
+  - matrix holdout vs `heuristic_v1`: `avg_diff=+8.52`
+  - decision quality vs `heuristic_v1`: `avg_diff=+8.38`, `trump_overkill_rate=2.1%`, low-lead `1.7%`
+- anchor `beta=0.01` (`..._seed8_from_bc_teacher_v2_anchor01`):
+  - matrix holdout vs `heuristic_v1`: `avg_diff=+7.24`
+  - decision quality vs `heuristic_v1`: `avg_diff=+7.64`, `trump_overkill_rate=1.4%`, low-lead `1.2%`
+
+Decisione provvisoria:
+- l'anchor funziona come regolarizzatore di stile, ma il costo in forza è netto anche con `beta=0.005`;
+- il modello migliore per forza resta il baseline senza anchor, mentre `beta=0.005` è il compromesso più sensato se si vuole ridurre overkill senza guard;
+- nessuno di questi modelli va promosso a `best_a2c` per ora: il best 1M ufficiale resta molto più forte e ha già il guard anti-overkill attivo.
+
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
 - Fase 0: `pytest` verde con test base; script di simulazione che genera partite senza UI.
