@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **160** (pytest).
+- Test attuali: **161** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -822,10 +822,18 @@ Prossimi step performance (ordine consigliato):
   - test: equivalenza numerica tra nuovo accumulo batch e reference lenta con `np.outer`, incluso BC-anchor
   - benchmark training A2C vs `random`, 5k game, hidden=128: `~4.93s -> ~2.37s`
   - profilo successivo 2k game hidden=128: backprop batch `~0.106s`, collector/wrapper Numba `~0.817s`
-- [ ] Ridurre overhead per-game del collector A2C Numba
-  - prossimo collo misurato: 1 chiamata Python a `collect_a2c_trajectory_numba_2p` per partita + allocazione/copia buffer
-  - direzione: collector batch per `update_every` partite, con buffer 3D/flattened e gradient accumulation per batch
-  - obiettivo: diminuire chiamate wrapper Python, allocazioni ripetute e copie di traiettoria per partita
+- [x] Ridurre overhead per-game del collector A2C Numba
+  - aggiunto `collect_a2c_batch_numba_2p`: una chiamata wrapper per batch/update, buffer 3D e `step_counts`
+  - il trainer usa il batch solo nel caso sicuro `--rollout-engine fast --fast-rollout numba` con opponent singolo;
+    gli opponent mix restano per-game perché l'avversario può cambiare a ogni partita
+  - il backprop Numba-path appiattisce tutte le righe valide del batch e accumula i gradienti una sola volta per update
+  - il loop batch JIT usa `numba.prange`, quindi le partite indipendenti del batch girano in parallelo
+  - test: equivalenza batch-vs-single su seed/seat, più smoke trainer fast-rollout Numba
+  - benchmark training A2C vs `random`, 5k game:
+    - hidden=32: `~2.52s -> ~0.48s`
+    - hidden=128: `~2.37s -> ~0.72s`
+  - benchmark training A2C vs `best_a2c`, 5k game, hidden=32: `~4.31s -> ~0.82s`
+  - profilo 2k game hidden=128: collector batch parallelo `~0.247s`, batch backprop `~0.042s`
 - [x] Estendere il rollout fast A2C a opponent `.npz`
   - supporto: `scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --opponent best_a2c`
   - supporto esplicito: `--opponent bc_model --opponent-model path/to/model.npz`

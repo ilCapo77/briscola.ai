@@ -15,6 +15,7 @@ import pytest
 
 from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_numba_observation import (
+    collect_a2c_batch_numba_2p,
     collect_a2c_trajectory_numba_2p,
     encode_fast_observation_numba_2p,
     evaluate_mlp_policy_numba_2p,
@@ -225,3 +226,59 @@ def test_numba_a2c_trajectory_supports_mlp_opponent() -> None:
     assert traj.policy_points + traj.opponent_points == 120
     assert 1 <= len(traj.rewards) <= 20
     assert float(np.sum(traj.rewards)) == pytest.approx((traj.policy_points - traj.opponent_points) / 120.0)
+
+
+def test_numba_a2c_batch_matches_single_trajectory() -> None:
+    """Il collector batch deve produrre gli stessi buffer validi del wrapper single-game."""
+    warm_up_numba_mlp_rollout()
+
+    feature_dim = int(FEATURE_DIM_2P_V1)
+    hidden_dim = 8
+    w1 = np.zeros((feature_dim, hidden_dim), dtype=np.float32)
+    b1 = np.zeros((hidden_dim,), dtype=np.float32)
+    w2 = np.zeros((hidden_dim, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    wv = np.zeros((hidden_dim,), dtype=np.float32)
+    seeds = np.asarray([123, 456], dtype=np.int64)
+    seats = np.asarray([0, 1], dtype=np.int64)
+
+    batch = collect_a2c_batch_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="heuristic_v1",
+        game_seeds=seeds,
+        policy_seats=seats,
+    )
+
+    assert batch.xs.shape == (2, 20, feature_dim)
+    assert batch.hs.shape == (2, 20, hidden_dim)
+    for i, (seed, seat) in enumerate(zip(seeds, seats, strict=True)):
+        single = collect_a2c_trajectory_numba_2p(
+            w1=w1,
+            b1=b1,
+            w2=w2,
+            b2=b2,
+            wv=wv,
+            bv=0.0,
+            opponent_name="heuristic_v1",
+            game_seed=int(seed),
+            policy_seat=int(seat),
+        )
+        count = int(batch.step_counts[i])
+        assert batch.policy_points[i] == single.policy_points
+        assert batch.opponent_points[i] == single.opponent_points
+        assert batch.winners[i] == single.winner
+        assert count == len(single.rewards)
+        assert batch.avg_entropies[i] == pytest.approx(single.avg_entropy)
+        assert np.allclose(batch.xs[i, :count], single.xs)
+        assert np.allclose(batch.z1s[i, :count], single.z1s)
+        assert np.allclose(batch.hs[i, :count], single.hs)
+        assert np.array_equal(batch.action_masks[i, :count], single.action_masks)
+        assert np.allclose(batch.probs[i, :count], single.probs)
+        assert np.array_equal(batch.action_ids[i, :count], single.action_ids)
+        assert np.allclose(batch.value_preds[i, :count], single.value_preds)
+        assert np.allclose(batch.rewards[i, :count], single.rewards)

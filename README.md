@@ -771,11 +771,11 @@ solo `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2` e non supporta `--ov
 `--fast-encoder numba` valida il wrapper JIT dell’encoder osservazione; non è ancora il rollout A2C full-JIT, perché
 lo stato viene ancora convertito da liste Python durante il training.
 `--fast-rollout numba` usa invece un collector full-JIT per stato, encoder, forward MLP, sampling, opponent e reward;
-il backprop/Adam restano NumPy, ma il ramo Numba accumula i gradienti su array batch invece di usare `np.outer`
-per ogni step. Benchmark locale 5k game vs `random`: hidden=32 `~5.06s -> ~2.52s` (`~2.0x`),
-hidden=128 `~6.83s -> ~2.37s` (`~2.9x`).
+il backprop/Adam restano NumPy, ma il ramo Numba raccoglie batch paralleli con `prange` e accumula i gradienti su
+array batch invece di usare `np.outer` per ogni step. Benchmark locale 5k game vs `random`: hidden=32
+`~5.06s -> ~0.48s` (`~10.5x`), hidden=128 `~6.83s -> ~0.72s` (`~9.5x`).
 Con opponent `.npz` MLP locale: `--opponent best_a2c` funziona nel rollout Numba; benchmark locale 5k game,
-hidden=32: `~4.31s`.
+hidden=32: `~4.31s -> ~0.82s` (`~5.3x`).
 
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.

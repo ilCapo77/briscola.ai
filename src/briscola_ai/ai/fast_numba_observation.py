@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 from .evaluation import MatchStats
 from .fast_2p import Fast2PState
@@ -73,6 +73,25 @@ class NumbaA2CTrajectory:
     opponent_points: int
     winner: int
     avg_entropy: float
+    xs: np.ndarray
+    z1s: np.ndarray
+    hs: np.ndarray
+    action_masks: np.ndarray
+    probs: np.ndarray
+    action_ids: np.ndarray
+    value_preds: np.ndarray
+    rewards: np.ndarray
+
+
+@dataclass(frozen=True, slots=True)
+class NumbaA2CBatch:
+    """Batch di traiettorie A2C raccolte da Numba senza wrapper Python per partita."""
+
+    policy_points: np.ndarray
+    opponent_points: np.ndarray
+    winners: np.ndarray
+    step_counts: np.ndarray
+    avg_entropies: np.ndarray
     xs: np.ndarray
     z1s: np.ndarray
     hs: np.ndarray
@@ -704,7 +723,7 @@ def _apply_numba_card_index(
 
 
 @njit(cache=True)
-def _collect_mlp_policy_game_numba(
+def _collect_mlp_policy_game_into_numba(
     w1: np.ndarray,
     b1: np.ndarray,
     w2: np.ndarray,
@@ -720,21 +739,15 @@ def _collect_mlp_policy_game_numba(
     opponent_overkill_guard: bool,
     seed: int,
     policy_seat: int,
-) -> tuple[
-    int,
-    int,
-    int,
-    int,
-    float,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-    np.ndarray,
-]:
+    xs: np.ndarray,
+    z1s: np.ndarray,
+    hs: np.ndarray,
+    masks: np.ndarray,
+    probs: np.ndarray,
+    action_ids: np.ndarray,
+    value_preds: np.ndarray,
+    rewards: np.ndarray,
+) -> tuple[int, int, int, int, float]:
     """
     Raccoglie una traiettoria A2C full-JIT per una singola partita.
 
@@ -767,18 +780,6 @@ def _collect_mlp_policy_game_numba(
     current_turn = 0
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
-
-    max_steps = 20
-    feature_dim = w1.shape[0]
-    hidden_dim = w1.shape[1]
-    xs = np.zeros((max_steps, feature_dim), dtype=np.float32)
-    z1s = np.zeros((max_steps, hidden_dim), dtype=np.float32)
-    hs = np.zeros((max_steps, hidden_dim), dtype=np.float32)
-    masks = np.zeros((max_steps, ACTION_DIM), dtype=np.bool_)
-    probs = np.zeros((max_steps, ACTION_DIM), dtype=np.float32)
-    action_ids = np.full(max_steps, -1, dtype=np.int64)
-    value_preds = np.zeros(max_steps, dtype=np.float32)
-    rewards = np.zeros(max_steps, dtype=np.float32)
 
     step_count = 0
     entropy_sum = 0.0
@@ -923,6 +924,186 @@ def _collect_mlp_policy_game_numba(
         int(winner_out),
         int(step_count),
         float(avg_entropy),
+    )
+
+
+@njit(cache=True)
+def _collect_mlp_policy_game_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    seed: int,
+    policy_seat: int,
+) -> tuple[
+    int,
+    int,
+    int,
+    int,
+    float,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Wrapper JIT compatibile: alloca i buffer e raccoglie una singola partita."""
+    max_steps = 20
+    feature_dim = w1.shape[0]
+    hidden_dim = w1.shape[1]
+    xs = np.zeros((max_steps, feature_dim), dtype=np.float32)
+    z1s = np.zeros((max_steps, hidden_dim), dtype=np.float32)
+    hs = np.zeros((max_steps, hidden_dim), dtype=np.float32)
+    masks = np.zeros((max_steps, ACTION_DIM), dtype=np.bool_)
+    probs = np.zeros((max_steps, ACTION_DIM), dtype=np.float32)
+    action_ids = np.full(max_steps, -1, dtype=np.int64)
+    value_preds = np.zeros(max_steps, dtype=np.float32)
+    rewards = np.zeros(max_steps, dtype=np.float32)
+
+    policy_points, opponent_points, winner, step_count, avg_entropy = _collect_mlp_policy_game_into_numba(
+        w1,
+        b1,
+        w2,
+        b2,
+        wv,
+        bv,
+        opponent_code,
+        opponent_model_enabled,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        opponent_overkill_guard,
+        seed,
+        policy_seat,
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    )
+    return (
+        int(policy_points),
+        int(opponent_points),
+        int(winner),
+        int(step_count),
+        float(avg_entropy),
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    )
+
+
+@njit(cache=True, parallel=True)
+def _collect_mlp_policy_batch_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    game_seeds: np.ndarray,
+    policy_seats: np.ndarray,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Raccoglie un batch di partite A2C dentro una sola chiamata JIT."""
+    batch_size = game_seeds.shape[0]
+    max_steps = 20
+    feature_dim = w1.shape[0]
+    hidden_dim = w1.shape[1]
+
+    policy_points = np.zeros(batch_size, dtype=np.int64)
+    opponent_points = np.zeros(batch_size, dtype=np.int64)
+    winners = np.zeros(batch_size, dtype=np.int64)
+    step_counts = np.zeros(batch_size, dtype=np.int64)
+    avg_entropies = np.zeros(batch_size, dtype=np.float32)
+    xs = np.zeros((batch_size, max_steps, feature_dim), dtype=np.float32)
+    z1s = np.zeros((batch_size, max_steps, hidden_dim), dtype=np.float32)
+    hs = np.zeros((batch_size, max_steps, hidden_dim), dtype=np.float32)
+    masks = np.zeros((batch_size, max_steps, ACTION_DIM), dtype=np.bool_)
+    probs = np.zeros((batch_size, max_steps, ACTION_DIM), dtype=np.float32)
+    action_ids = np.full((batch_size, max_steps), -1, dtype=np.int64)
+    value_preds = np.zeros((batch_size, max_steps), dtype=np.float32)
+    rewards = np.zeros((batch_size, max_steps), dtype=np.float32)
+
+    for game_idx in prange(batch_size):
+        p_points, o_points, winner, steps, avg_entropy = _collect_mlp_policy_game_into_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            wv,
+            bv,
+            opponent_code,
+            opponent_model_enabled,
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            opponent_overkill_guard,
+            int(game_seeds[game_idx]),
+            int(policy_seats[game_idx]),
+            xs[game_idx],
+            z1s[game_idx],
+            hs[game_idx],
+            masks[game_idx],
+            probs[game_idx],
+            action_ids[game_idx],
+            value_preds[game_idx],
+            rewards[game_idx],
+        )
+        policy_points[game_idx] = p_points
+        opponent_points[game_idx] = o_points
+        winners[game_idx] = winner
+        step_counts[game_idx] = steps
+        avg_entropies[game_idx] = avg_entropy
+
+    return (
+        policy_points,
+        opponent_points,
+        winners,
+        step_counts,
+        avg_entropies,
         xs,
         z1s,
         hs,
@@ -1012,6 +1193,101 @@ def _as_float32_vector(name: str, value: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(arr)
 
 
+@dataclass(frozen=True, slots=True)
+class _PreparedA2CNumbaInputs:
+    """Tensori validati per i wrapper A2C Numba."""
+
+    w1: np.ndarray
+    b1: np.ndarray
+    w2: np.ndarray
+    b2: np.ndarray
+    wv: np.ndarray
+    opponent_code: int
+    opponent_model_enabled: bool
+    opponent_w1: np.ndarray
+    opponent_b1: np.ndarray
+    opponent_w2: np.ndarray
+    opponent_b2: np.ndarray
+
+
+def _prepare_a2c_numba_inputs(
+    *,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    opponent_name: str,
+    opponent_w1: np.ndarray | None,
+    opponent_b1: np.ndarray | None,
+    opponent_w2: np.ndarray | None,
+    opponent_b2: np.ndarray | None,
+) -> _PreparedA2CNumbaInputs:
+    """Valida e normalizza i tensori condivisi dai wrapper A2C Numba."""
+    w1_arr = _as_float32_matrix("w1", w1)
+    b1_arr = _as_float32_vector("b1", b1)
+    w2_arr = _as_float32_matrix("w2", w2)
+    b2_arr = _as_float32_vector("b2", b2)
+    wv_arr = _as_float32_vector("wv", wv)
+
+    feature_dim = int(w1_arr.shape[0])
+    hidden_dim = int(w1_arr.shape[1])
+    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+        raise ValueError(f"w1 feature_dim={feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}")
+    if b1_arr.shape != (hidden_dim,):
+        raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
+    if w2_arr.shape != (hidden_dim, ACTION_DIM):
+        raise ValueError(f"w2 shape={w2_arr.shape}; atteso {(hidden_dim, ACTION_DIM)}")
+    if b2_arr.shape != (ACTION_DIM,):
+        raise ValueError(f"b2 shape={b2_arr.shape}; atteso {(ACTION_DIM,)}")
+    if wv_arr.shape != (hidden_dim,):
+        raise ValueError(f"wv shape={wv_arr.shape}; atteso {(hidden_dim,)}")
+
+    opponent_model_enabled = (
+        opponent_w1 is not None or opponent_b1 is not None or opponent_w2 is not None or opponent_b2 is not None
+    )
+    if opponent_model_enabled:
+        if opponent_w1 is None or opponent_b1 is None or opponent_w2 is None or opponent_b2 is None:
+            raise ValueError("Opponent model incompleto: servono opponent_w1/b1/w2/b2.")
+        opponent_w1_arr = _as_float32_matrix("opponent_w1", opponent_w1)
+        opponent_b1_arr = _as_float32_vector("opponent_b1", opponent_b1)
+        opponent_w2_arr = _as_float32_matrix("opponent_w2", opponent_w2)
+        opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
+        opp_feature_dim = int(opponent_w1_arr.shape[0])
+        opp_hidden_dim = int(opponent_w1_arr.shape[1])
+        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+            raise ValueError(
+                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
+            )
+        if opponent_b1_arr.shape != (opp_hidden_dim,):
+            raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
+        if opponent_w2_arr.shape != (opp_hidden_dim, ACTION_DIM):
+            raise ValueError(f"opponent_w2 shape={opponent_w2_arr.shape}; atteso {(opp_hidden_dim, ACTION_DIM)}")
+        if opponent_b2_arr.shape != (ACTION_DIM,):
+            raise ValueError(f"opponent_b2 shape={opponent_b2_arr.shape}; atteso {(ACTION_DIM,)}")
+        opponent_code = 0
+    else:
+        opponent_w1_arr = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
+        opponent_b1_arr = np.zeros((1,), dtype=np.float32)
+        opponent_w2_arr = np.zeros((1, ACTION_DIM), dtype=np.float32)
+        opponent_b2_arr = np.zeros((ACTION_DIM,), dtype=np.float32)
+        opponent_code = numba_agent_code(opponent_name)
+
+    return _PreparedA2CNumbaInputs(
+        w1=w1_arr,
+        b1=b1_arr,
+        w2=w2_arr,
+        b2=b2_arr,
+        wv=wv_arr,
+        opponent_code=int(opponent_code),
+        opponent_model_enabled=bool(opponent_model_enabled),
+        opponent_w1=opponent_w1_arr,
+        opponent_b1=opponent_b1_arr,
+        opponent_w2=opponent_w2_arr,
+        opponent_b2=opponent_b2_arr,
+    )
+
+
 def evaluate_mlp_policy_numba_2p(
     *,
     w1: np.ndarray,
@@ -1095,54 +1371,18 @@ def collect_a2c_trajectory_numba_2p(
     """
     if policy_seat not in (0, 1):
         raise ValueError(f"policy_seat fuori range: {policy_seat}")
-    w1_arr = _as_float32_matrix("w1", w1)
-    b1_arr = _as_float32_vector("b1", b1)
-    w2_arr = _as_float32_matrix("w2", w2)
-    b2_arr = _as_float32_vector("b2", b2)
-    wv_arr = _as_float32_vector("wv", wv)
-
-    feature_dim = int(w1_arr.shape[0])
-    hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
-        raise ValueError(f"w1 feature_dim={feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}")
-    if b1_arr.shape != (hidden_dim,):
-        raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
-    if w2_arr.shape != (hidden_dim, ACTION_DIM):
-        raise ValueError(f"w2 shape={w2_arr.shape}; atteso {(hidden_dim, ACTION_DIM)}")
-    if b2_arr.shape != (ACTION_DIM,):
-        raise ValueError(f"b2 shape={b2_arr.shape}; atteso {(ACTION_DIM,)}")
-    if wv_arr.shape != (hidden_dim,):
-        raise ValueError(f"wv shape={wv_arr.shape}; atteso {(hidden_dim,)}")
-
-    opponent_model_enabled = (
-        opponent_w1 is not None or opponent_b1 is not None or opponent_w2 is not None or opponent_b2 is not None
+    prepared = _prepare_a2c_numba_inputs(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        opponent_name=opponent_name,
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
     )
-    if opponent_model_enabled:
-        if opponent_w1 is None or opponent_b1 is None or opponent_w2 is None or opponent_b2 is None:
-            raise ValueError("Opponent model incompleto: servono opponent_w1/b1/w2/b2.")
-        opponent_w1_arr = _as_float32_matrix("opponent_w1", opponent_w1)
-        opponent_b1_arr = _as_float32_vector("opponent_b1", opponent_b1)
-        opponent_w2_arr = _as_float32_matrix("opponent_w2", opponent_w2)
-        opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
-        opp_feature_dim = int(opponent_w1_arr.shape[0])
-        opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
-            raise ValueError(
-                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
-            )
-        if opponent_b1_arr.shape != (opp_hidden_dim,):
-            raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
-        if opponent_w2_arr.shape != (opp_hidden_dim, ACTION_DIM):
-            raise ValueError(f"opponent_w2 shape={opponent_w2_arr.shape}; atteso {(opp_hidden_dim, ACTION_DIM)}")
-        if opponent_b2_arr.shape != (ACTION_DIM,):
-            raise ValueError(f"opponent_b2 shape={opponent_b2_arr.shape}; atteso {(ACTION_DIM,)}")
-        opponent_code = 0
-    else:
-        opponent_w1_arr = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
-        opponent_b1_arr = np.zeros((1,), dtype=np.float32)
-        opponent_w2_arr = np.zeros((1, ACTION_DIM), dtype=np.float32)
-        opponent_b2_arr = np.zeros((ACTION_DIM,), dtype=np.float32)
-        opponent_code = numba_agent_code(opponent_name)
 
     (
         policy_points,
@@ -1159,18 +1399,18 @@ def collect_a2c_trajectory_numba_2p(
         value_preds,
         rewards,
     ) = _collect_mlp_policy_game_numba(
-        w1_arr,
-        b1_arr,
-        w2_arr,
-        b2_arr,
-        wv_arr,
+        prepared.w1,
+        prepared.b1,
+        prepared.w2,
+        prepared.b2,
+        prepared.wv,
         float(bv),
-        int(opponent_code),
-        bool(opponent_model_enabled),
-        opponent_w1_arr,
-        opponent_b1_arr,
-        opponent_w2_arr,
-        opponent_b2_arr,
+        prepared.opponent_code,
+        prepared.opponent_model_enabled,
+        prepared.opponent_w1,
+        prepared.opponent_b1,
+        prepared.opponent_w2,
+        prepared.opponent_b2,
         bool(opponent_overkill_guard),
         int(game_seed),
         int(policy_seat),
@@ -1189,6 +1429,102 @@ def collect_a2c_trajectory_numba_2p(
         action_ids=action_ids[:count].copy(),
         value_preds=value_preds[:count].copy(),
         rewards=rewards[:count].copy(),
+    )
+
+
+def collect_a2c_batch_numba_2p(
+    *,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_name: str,
+    game_seeds: np.ndarray,
+    policy_seats: np.ndarray,
+    opponent_w1: np.ndarray | None = None,
+    opponent_b1: np.ndarray | None = None,
+    opponent_w2: np.ndarray | None = None,
+    opponent_b2: np.ndarray | None = None,
+    opponent_overkill_guard: bool = False,
+) -> NumbaA2CBatch:
+    """
+    Raccoglie un batch di traiettorie A2C full-JIT per il trainer.
+
+    A differenza di `collect_a2c_trajectory_numba_2p`, questo wrapper valida i tensori una
+    volta sola e restituisce buffer `(batch, max_steps, ...)`: il trainer usa `step_counts`
+    per considerare solo le righe valide.
+    """
+    seeds_arr = np.asarray(game_seeds, dtype=np.int64)
+    seats_arr = np.asarray(policy_seats, dtype=np.int64)
+    if seeds_arr.ndim != 1:
+        raise ValueError(f"game_seeds deve essere 1D, ottenuto shape={seeds_arr.shape}")
+    if seats_arr.ndim != 1:
+        raise ValueError(f"policy_seats deve essere 1D, ottenuto shape={seats_arr.shape}")
+    if seats_arr.shape != seeds_arr.shape:
+        raise ValueError(f"Shape mismatch: game_seeds={seeds_arr.shape} policy_seats={seats_arr.shape}")
+    if not np.all((seats_arr == 0) | (seats_arr == 1)):
+        raise ValueError("policy_seats deve contenere solo 0/1")
+
+    prepared = _prepare_a2c_numba_inputs(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        opponent_name=opponent_name,
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
+    )
+
+    (
+        policy_points,
+        opponent_points,
+        winners,
+        step_counts,
+        avg_entropies,
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    ) = _collect_mlp_policy_batch_numba(
+        prepared.w1,
+        prepared.b1,
+        prepared.w2,
+        prepared.b2,
+        prepared.wv,
+        float(bv),
+        prepared.opponent_code,
+        prepared.opponent_model_enabled,
+        prepared.opponent_w1,
+        prepared.opponent_b1,
+        prepared.opponent_w2,
+        prepared.opponent_b2,
+        bool(opponent_overkill_guard),
+        np.ascontiguousarray(seeds_arr),
+        np.ascontiguousarray(seats_arr),
+    )
+    return NumbaA2CBatch(
+        policy_points=policy_points,
+        opponent_points=opponent_points,
+        winners=winners,
+        step_counts=step_counts,
+        avg_entropies=avg_entropies,
+        xs=xs,
+        z1s=z1s,
+        hs=hs,
+        action_masks=masks,
+        probs=probs,
+        action_ids=action_ids,
+        value_preds=value_preds,
+        rewards=rewards,
     )
 
 
@@ -1244,4 +1580,21 @@ def warm_up_numba_mlp_rollout() -> None:
         False,
         0,
         0,
+    )
+    _collect_mlp_policy_batch_numba(
+        w1,
+        b1,
+        w2,
+        b2,
+        wv,
+        0.0,
+        numba_agent_code("random"),
+        False,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        False,
+        np.asarray([0], dtype=np.int64),
+        np.asarray([0], dtype=np.int64),
     )

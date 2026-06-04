@@ -50,7 +50,13 @@ from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
-from briscola_ai.ai.fast_numba_observation import collect_a2c_trajectory_numba_2p, encode_fast_observation_numba_2p
+from briscola_ai.ai.fast_numba_observation import (
+    NumbaA2CBatch,
+    NumbaA2CTrajectory,
+    collect_a2c_batch_numba_2p,
+    collect_a2c_trajectory_numba_2p,
+    encode_fast_observation_numba_2p,
+)
 from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.training.observation_encoder import (
@@ -387,6 +393,25 @@ def _load_fast_numba_model_opponent(*, opponent_name: str, opponent_model_path: 
     return FastNumbaModelOpponent(agent=agent, model=agent.model)
 
 
+def _numba_batch_trajectory_at(batch: NumbaA2CBatch, index: int) -> NumbaA2CTrajectory:
+    """Estrae una traiettoria dal batch Numba usando view sulle righe valide."""
+    count = int(batch.step_counts[index])
+    return NumbaA2CTrajectory(
+        policy_points=int(batch.policy_points[index]),
+        opponent_points=int(batch.opponent_points[index]),
+        winner=int(batch.winners[index]),
+        avg_entropy=float(batch.avg_entropies[index]),
+        xs=batch.xs[index, :count],
+        z1s=batch.z1s[index, :count],
+        hs=batch.hs[index, :count],
+        action_masks=batch.action_masks[index, :count],
+        probs=batch.probs[index, :count],
+        action_ids=batch.action_ids[index, :count],
+        value_preds=batch.value_preds[index, :count],
+        rewards=batch.rewards[index, :count],
+    )
+
+
 def _play_one_fast_game_2p_collect(
     *,
     policy: A2CPolicy,
@@ -638,6 +663,81 @@ def _accumulate_numba_trajectory_grads(
         anchor_ce_sum=anchor_ce_sum,
         anchor_ce_count=anchor_ce_count,
         gbv=gbv,
+    )
+
+
+def _accumulate_numba_batch_grads(
+    *,
+    policy: A2CPolicy,
+    batch: NumbaA2CBatch,
+    gamma: float,
+    entropy_beta: float,
+    value_coef: float,
+    bc_anchor: LoadedBCModel | None,
+    bc_anchor_beta: float,
+    gw1: np.ndarray,
+    gb1: np.ndarray,
+    gw2: np.ndarray,
+    gb2: np.ndarray,
+    gwv: np.ndarray,
+) -> GradientStats:
+    """
+    Appiattisce un batch Numba e accumula i gradienti in una sola chiamata batch.
+
+    `NumbaA2CBatch` conserva un rettangolo `(batch, 20, ...)`; `step_counts` indica
+    quante righe sono valide per ogni partita. Qui compattiamo solo quelle righe e
+    riusiamo il backprop vettoriale su matrici 2D.
+    """
+    total_steps = int(np.sum(batch.step_counts, dtype=np.int64))
+    if total_steps == 0:
+        return GradientStats(steps=0, value_loss_sum=0.0, anchor_ce_sum=0.0, anchor_ce_count=0, gbv=0.0)
+
+    feature_dim = int(batch.xs.shape[2])
+    hidden_dim = int(batch.hs.shape[2])
+    xs = np.empty((total_steps, feature_dim), dtype=np.float32)
+    z1s = np.empty((total_steps, hidden_dim), dtype=np.float32)
+    hs = np.empty((total_steps, hidden_dim), dtype=np.float32)
+    action_masks = np.empty((total_steps, 40), dtype=bool)
+    probs = np.empty((total_steps, 40), dtype=np.float32)
+    action_ids = np.empty((total_steps,), dtype=np.int64)
+    value_preds = np.empty((total_steps,), dtype=np.float32)
+    returns_to_go = np.empty((total_steps,), dtype=np.float32)
+
+    offset = 0
+    for game_idx, raw_count in enumerate(batch.step_counts):
+        count = int(raw_count)
+        if count <= 0:
+            continue
+        sl = slice(offset, offset + count)
+        xs[sl] = batch.xs[game_idx, :count]
+        z1s[sl] = batch.z1s[game_idx, :count]
+        hs[sl] = batch.hs[game_idx, :count]
+        action_masks[sl] = batch.action_masks[game_idx, :count]
+        probs[sl] = batch.probs[game_idx, :count]
+        action_ids[sl] = batch.action_ids[game_idx, :count]
+        value_preds[sl] = batch.value_preds[game_idx, :count]
+        returns_to_go[sl] = _compute_returns_array(batch.rewards[game_idx, :count], gamma=gamma)
+        offset += count
+
+    return _accumulate_numba_trajectory_grads(
+        policy=policy,
+        xs=xs,
+        z1s=z1s,
+        hs=hs,
+        action_masks=action_masks,
+        probs=probs,
+        action_ids=action_ids,
+        value_preds=value_preds,
+        returns_to_go=returns_to_go,
+        entropy_beta=entropy_beta,
+        value_coef=value_coef,
+        bc_anchor=bc_anchor,
+        bc_anchor_beta=bc_anchor_beta,
+        gw1=gw1,
+        gb1=gb1,
+        gw2=gw2,
+        gb2=gb2,
+        gwv=gwv,
     )
 
 
@@ -955,35 +1055,109 @@ def main() -> int:
     anchor_ce_count = 0
 
     num_games = int(args.num_games)
+    use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba" and opponent_pool is None
+    numba_batch: NumbaA2CBatch | None = None
+    numba_batch_offset = 0
     for game_idx in range(1, num_games + 1):
-        game_seed = int(rng_game.integers(0, 2**32))
         policy_seat = (game_idx % 2) if args.seat_fair else 0
+        game_seed = 0 if use_numba_batch_rollout else int(rng_game.integers(0, 2**32))
         current_opponent = opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent
         numba_traj_for_backprop = None
 
         if rollout_engine == "fast":
             if fast_rollout == "numba":
-                numba_traj = collect_a2c_trajectory_numba_2p(
-                    w1=policy.w1,
-                    b1=policy.b1,
-                    w2=policy.w2,
-                    b2=policy.b2,
-                    wv=policy.wv,
-                    bv=float(policy.bv),
-                    opponent_name=current_opponent.name,
-                    opponent_w1=(fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None),
-                    opponent_b1=(fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None),
-                    opponent_w2=(fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None),
-                    opponent_b2=(fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None),
-                    opponent_overkill_guard=(
-                        bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
-                        if fast_numba_model_opponent is not None
-                        else False
-                    ),
-                    game_seed=game_seed,
-                    policy_seat=policy_seat,
-                )
-                numba_traj_for_backprop = numba_traj
+                if use_numba_batch_rollout:
+                    if numba_batch is None or numba_batch_offset >= int(numba_batch.step_counts.shape[0]):
+                        games_until_update = update_every - ((game_idx - 1) % update_every)
+                        batch_size = min(games_until_update, num_games - game_idx + 1)
+                        game_seeds = rng_game.integers(0, 2**32, size=batch_size, dtype=np.int64)
+                        policy_seats = np.asarray(
+                            [((game_idx + offset) % 2) if args.seat_fair else 0 for offset in range(batch_size)],
+                            dtype=np.int64,
+                        )
+                        numba_batch = collect_a2c_batch_numba_2p(
+                            w1=policy.w1,
+                            b1=policy.b1,
+                            w2=policy.w2,
+                            b2=policy.b2,
+                            wv=policy.wv,
+                            bv=float(policy.bv),
+                            opponent_name=current_opponent.name,
+                            opponent_w1=(
+                                fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_b1=(
+                                fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_w2=(
+                                fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_b2=(
+                                fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_overkill_guard=(
+                                bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
+                                if fast_numba_model_opponent is not None
+                                else False
+                            ),
+                            game_seeds=game_seeds,
+                            policy_seats=policy_seats,
+                        )
+                        batch_grad_stats = _accumulate_numba_batch_grads(
+                            policy=policy,
+                            batch=numba_batch,
+                            gamma=float(args.gamma),
+                            entropy_beta=float(args.entropy_beta),
+                            value_coef=float(args.value_coef),
+                            bc_anchor=bc_anchor,
+                            bc_anchor_beta=float(args.bc_anchor_beta),
+                            gw1=gw1,
+                            gb1=gb1,
+                            gw2=gw2,
+                            gb2=gb2,
+                            gwv=gwv,
+                        )
+                        gbv += batch_grad_stats.gbv
+                        grad_step_count += batch_grad_stats.steps
+                        value_loss_sum += batch_grad_stats.value_loss_sum
+                        anchor_ce_sum += batch_grad_stats.anchor_ce_sum
+                        anchor_ce_count += batch_grad_stats.anchor_ce_count
+                        numba_batch_offset = 0
+                    assert numba_batch is not None
+                    numba_traj = _numba_batch_trajectory_at(numba_batch, numba_batch_offset)
+                    numba_batch_offset += 1
+                    if numba_batch_offset >= int(numba_batch.step_counts.shape[0]):
+                        numba_batch = None
+                else:
+                    numba_traj = collect_a2c_trajectory_numba_2p(
+                        w1=policy.w1,
+                        b1=policy.b1,
+                        w2=policy.w2,
+                        b2=policy.b2,
+                        wv=policy.wv,
+                        bv=float(policy.bv),
+                        opponent_name=current_opponent.name,
+                        opponent_w1=(
+                            fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None
+                        ),
+                        opponent_b1=(
+                            fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None
+                        ),
+                        opponent_w2=(
+                            fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None
+                        ),
+                        opponent_b2=(
+                            fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None
+                        ),
+                        opponent_overkill_guard=(
+                            bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
+                            if fast_numba_model_opponent is not None
+                            else False
+                        ),
+                        game_seed=game_seed,
+                        policy_seat=policy_seat,
+                    )
+                numba_traj_for_backprop = None if use_numba_batch_rollout else numba_traj
                 traj = []
                 avg_entropy = float(numba_traj.avg_entropy)
                 policy_points = int(numba_traj.policy_points)
