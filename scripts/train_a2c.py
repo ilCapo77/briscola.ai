@@ -920,10 +920,10 @@ def main() -> int:
         raise ValueError("`--fast-encoder numba` richiede `--rollout-engine fast`.")
     if rollout_engine != "fast" and fast_rollout != "python":
         raise ValueError("`--fast-rollout numba` richiede `--rollout-engine fast`.")
-    if rollout_engine == "fast" and float(args.overkill_penalty_beta) > 0.0:
+    if rollout_engine == "fast" and fast_rollout != "numba" and float(args.overkill_penalty_beta) > 0.0:
         raise ValueError(
-            "`--rollout-engine fast` non supporta ancora `--overkill-penalty-beta > 0`, "
-            "perché la penalità usa `PlayerObservation` canonica."
+            "`--rollout-engine fast --fast-rollout python` non supporta `--overkill-penalty-beta > 0`; "
+            "usa `--fast-rollout numba` oppure `--rollout-engine domain`."
         )
 
     out_path = Path(args.out)
@@ -1117,6 +1117,9 @@ def main() -> int:
                             game_seeds=game_seeds,
                             policy_seats=policy_seats,
                             opponent_codes=opponent_codes,
+                            overkill_penalty_beta=float(args.overkill_penalty_beta),
+                            overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                            overkill_penalty_mode=str(args.overkill_penalty_mode),
                         )
                         batch_grad_stats = _accumulate_numba_batch_grads(
                             policy=policy,
@@ -1171,6 +1174,9 @@ def main() -> int:
                         ),
                         game_seed=game_seed,
                         policy_seat=policy_seat,
+                        overkill_penalty_beta=float(args.overkill_penalty_beta),
+                        overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                        overkill_penalty_mode=str(args.overkill_penalty_mode),
                     )
                 numba_traj_for_backprop = None if use_numba_batch_rollout else numba_traj
                 traj = []

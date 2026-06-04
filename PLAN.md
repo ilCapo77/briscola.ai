@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **163** (pytest).
+- Test attuali: **164** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -751,7 +751,8 @@ Prossimi step performance (ordine consigliato):
   - CLI: `scripts/train_a2c.py --rollout-engine fast`
   - supporto: policy A2C neurale vs `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2`
   - encoder: `Fast2PState -> feature/mask` equivalente al path canonico (`v1`/`v2`)
-  - limite attuale: no modelli `.npz` come opponent, no `--overkill-penalty-beta > 0`
+  - limite storico superato nei passi successivi: modelli `.npz` opponent e shaping overkill sono supportati nel
+    fast rollout Numba
   - smoke test: training fast salva modello `.npz` con metadato `rollout_engine=fast`
   - benchmark A2C vs `random`, 5k game, hidden=32:
     - dominio canonico: `7.109s`
@@ -836,6 +837,14 @@ Prossimi step performance (ordine consigliato):
   - benchmark training A2C vs `best_a2c`, 5k game, hidden=32: `~4.31s -> ~0.82s`
   - benchmark training A2C con mix `heuristic_v1:0.7,random:0.2,greedy_points:0.1`, 5k game, hidden=128: `~0.74s`
   - profilo 2k game hidden=128: collector batch parallelo `~0.247s`, batch backprop `~0.042s`
+- [x] Integrare reward shaping anti-overkill nel fast rollout Numba
+  - supporto CLI: `--rollout-engine fast --fast-rollout numba --overkill-penalty-beta > 0`
+  - modalità supportate nel core JIT: `--overkill-penalty-mode flat|gap`
+  - il calcolo usa solo dati leciti già nel `Fast2PState` numerico: mano policy, carta sul tavolo, briscola pubblica
+  - il fast rollout Python resta senza shaping overkill; per fast + shaping usare Numba
+  - test: penalità JIT flat/gap su caso minimale + smoke trainer fast Numba con opponent mix e shaping attivo
+  - benchmark training A2C con mix `heuristic_v1:0.7,random:0.2,greedy_points:0.1`, 5k game, hidden=128,
+    `--overkill-penalty-beta 0.01 --overkill-penalty-mode gap`: `~0.76s`
 - [x] Estendere il rollout fast A2C a opponent `.npz`
   - supporto: `scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --opponent best_a2c`
   - supporto esplicito: `--opponent bc_model --opponent-model path/to/model.npz`

@@ -170,6 +170,10 @@ def test_train_a2c_fast_numba_rollout_supports_opponent_mix(tmp_path: Path) -> N
             "numba",
             "--opponent-mix",
             "random:0.5,greedy_points:0.5",
+            "--overkill-penalty-beta",
+            "0.01",
+            "--overkill-penalty-mode",
+            "gap",
             "--num-games",
             "4",
             "--seed",
@@ -192,6 +196,8 @@ def test_train_a2c_fast_numba_rollout_supports_opponent_mix(tmp_path: Path) -> N
 
     assert metadata["rollout_engine"] == "fast"
     assert metadata["fast_rollout"] == "numba"
+    assert metadata["reward_shaping_overkill_penalty_beta"] == 0.01
+    assert metadata["reward_shaping_overkill_penalty_mode"] == "gap"
     assert metadata["opponent"] is None
     assert sorted(metadata["opponent_mix"], key=lambda item: item["name"]) == [
         {"name": "greedy_points", "prob": 0.5},

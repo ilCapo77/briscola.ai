@@ -169,6 +169,77 @@ def _action_id_to_hand_index_numba(hands: np.ndarray, hand_sizes: np.ndarray, pl
 
 
 @njit(cache=True)
+def _trump_overkill_penalty_numba(
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    table_size: int,
+    trump_card: int,
+    player_index: int,
+    chosen_card_index: int,
+    beta: float,
+    low_lead_points_max: int,
+    mode_code: int,
+) -> float:
+    """Penalità anti-overkill equivalente al reward shaping canonico, ma su card id."""
+    if beta <= 0.0:
+        return 0.0
+    if table_size != 1:
+        return 0.0
+    if chosen_card_index < 0 or chosen_card_index >= hand_sizes[player_index]:
+        return 0.0
+
+    lead_card = table_cards[0]
+    lead_player = table_players[0]
+    if low_lead_points_max >= 0 and CARD_POINTS_NUMBA[lead_card] > low_lead_points_max:
+        return 0.0
+
+    trump_suit = CARD_SUIT_NUMBA[trump_card]
+    chosen = hands[player_index, chosen_card_index]
+    if CARD_SUIT_NUMBA[chosen] != trump_suit:
+        return 0.0
+    if _who_wins_trick_numba(lead_card, lead_player, chosen, player_index, trump_card) != player_index:
+        return 0.0
+
+    min_points = 999
+    min_strength = 999
+    winning_trump_exists = False
+    for hand_idx in range(hand_sizes[player_index]):
+        card = hands[player_index, hand_idx]
+        if CARD_SUIT_NUMBA[card] != trump_suit:
+            continue
+        if _who_wins_trick_numba(lead_card, lead_player, card, player_index, trump_card) != player_index:
+            continue
+        points = CARD_POINTS_NUMBA[card]
+        strength = CARD_STRENGTH_NUMBA[card]
+        if not winning_trump_exists or points < min_points or (points == min_points and strength < min_strength):
+            winning_trump_exists = True
+            min_points = points
+            min_strength = strength
+
+    if not winning_trump_exists:
+        return 0.0
+
+    chosen_points = CARD_POINTS_NUMBA[chosen]
+    chosen_strength = CARD_STRENGTH_NUMBA[chosen]
+    is_overkill = chosen_points > min_points or (chosen_points == min_points and chosen_strength > min_strength)
+    if not is_overkill:
+        return 0.0
+    if mode_code == 0:
+        return -float(beta)
+
+    points_gap = chosen_points - min_points
+    if points_gap < 0:
+        points_gap = 0
+    strength_gap = chosen_strength - min_strength
+    if strength_gap < 0:
+        strength_gap = 0
+    gap = float(points_gap) / 11.0 + float(strength_gap) / 10.0
+    return -float(beta) * gap
+
+
+@njit(cache=True)
 def _sample_mlp_policy_action_numba(
     w1: np.ndarray,
     b1: np.ndarray,
@@ -737,6 +808,9 @@ def _collect_mlp_policy_game_into_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int,
+    overkill_penalty_mode_code: int,
     seed: int,
     policy_seat: int,
     xs: np.ndarray,
@@ -854,6 +928,19 @@ def _collect_mlp_policy_game_into_numba(
         action_ids[step_count] = action_id
         value_preds[step_count] = value_pred
         entropy_sum += entropy
+        extra_penalty = _trump_overkill_penalty_numba(
+            hands,
+            hand_sizes,
+            table_cards,
+            table_players,
+            table_size,
+            trump_card,
+            policy_seat,
+            policy_card_index,
+            overkill_penalty_beta,
+            overkill_low_lead_points_max,
+            overkill_penalty_mode_code,
+        )
 
         deck_size, table_size, current_turn = _apply_numba_card_index(
             hands,
@@ -906,7 +993,7 @@ def _collect_mlp_policy_game_into_numba(
             )
 
         diff_after = points[policy_seat] - points[1 - policy_seat]
-        rewards[step_count] = float(diff_after - diff_before) / 120.0
+        rewards[step_count] = float(diff_after - diff_before) / 120.0 + extra_penalty
         step_count += 1
 
     policy_points = points[policy_seat]
@@ -942,6 +1029,9 @@ def _collect_mlp_policy_game_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int,
+    overkill_penalty_mode_code: int,
     seed: int,
     policy_seat: int,
 ) -> tuple[
@@ -986,6 +1076,9 @@ def _collect_mlp_policy_game_numba(
         opponent_w2,
         opponent_b2,
         opponent_overkill_guard,
+        overkill_penalty_beta,
+        overkill_low_lead_points_max,
+        overkill_penalty_mode_code,
         seed,
         policy_seat,
         xs,
@@ -1029,6 +1122,9 @@ def _collect_mlp_policy_batch_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int,
+    overkill_penalty_mode_code: int,
     opponent_codes: np.ndarray,
     game_seeds: np.ndarray,
     policy_seats: np.ndarray,
@@ -1082,6 +1178,9 @@ def _collect_mlp_policy_batch_numba(
             opponent_w2,
             opponent_b2,
             opponent_overkill_guard,
+            overkill_penalty_beta,
+            overkill_low_lead_points_max,
+            overkill_penalty_mode_code,
             int(game_seeds[game_idx]),
             int(policy_seats[game_idx]),
             xs[game_idx],
@@ -1289,6 +1388,16 @@ def _prepare_a2c_numba_inputs(
     )
 
 
+def _overkill_penalty_mode_code(mode: str) -> int:
+    """Codifica la modalità reward shaping anti-overkill per il core JIT."""
+    normalized = str(mode).strip().lower()
+    if normalized == "flat":
+        return 0
+    if normalized == "gap":
+        return 1
+    raise ValueError(f"overkill_penalty_mode non supportato: {mode!r}")
+
+
 def evaluate_mlp_policy_numba_2p(
     *,
     w1: np.ndarray,
@@ -1364,6 +1473,9 @@ def collect_a2c_trajectory_numba_2p(
     opponent_w2: np.ndarray | None = None,
     opponent_b2: np.ndarray | None = None,
     opponent_overkill_guard: bool = False,
+    overkill_penalty_beta: float = 0.0,
+    overkill_low_lead_points_max: int = 2,
+    overkill_penalty_mode: str = "flat",
 ) -> NumbaA2CTrajectory:
     """
     Raccoglie una traiettoria A2C full-JIT per il trainer.
@@ -1372,6 +1484,11 @@ def collect_a2c_trajectory_numba_2p(
     """
     if policy_seat not in (0, 1):
         raise ValueError(f"policy_seat fuori range: {policy_seat}")
+    if float(overkill_penalty_beta) < 0.0:
+        raise ValueError("overkill_penalty_beta deve essere >= 0")
+    if int(overkill_low_lead_points_max) < 0:
+        raise ValueError("overkill_low_lead_points_max deve essere >= 0")
+    mode_code = _overkill_penalty_mode_code(overkill_penalty_mode)
     prepared = _prepare_a2c_numba_inputs(
         w1=w1,
         b1=b1,
@@ -1413,6 +1530,9 @@ def collect_a2c_trajectory_numba_2p(
         prepared.opponent_w2,
         prepared.opponent_b2,
         bool(opponent_overkill_guard),
+        float(overkill_penalty_beta),
+        int(overkill_low_lead_points_max),
+        int(mode_code),
         int(game_seed),
         int(policy_seat),
     )
@@ -1450,6 +1570,9 @@ def collect_a2c_batch_numba_2p(
     opponent_b2: np.ndarray | None = None,
     opponent_overkill_guard: bool = False,
     opponent_codes: np.ndarray | None = None,
+    overkill_penalty_beta: float = 0.0,
+    overkill_low_lead_points_max: int = 2,
+    overkill_penalty_mode: str = "flat",
 ) -> NumbaA2CBatch:
     """
     Raccoglie un batch di traiettorie A2C full-JIT per il trainer.
@@ -1468,6 +1591,11 @@ def collect_a2c_batch_numba_2p(
         raise ValueError(f"Shape mismatch: game_seeds={seeds_arr.shape} policy_seats={seats_arr.shape}")
     if not np.all((seats_arr == 0) | (seats_arr == 1)):
         raise ValueError("policy_seats deve contenere solo 0/1")
+    if float(overkill_penalty_beta) < 0.0:
+        raise ValueError("overkill_penalty_beta deve essere >= 0")
+    if int(overkill_low_lead_points_max) < 0:
+        raise ValueError("overkill_low_lead_points_max deve essere >= 0")
+    mode_code = _overkill_penalty_mode_code(overkill_penalty_mode)
 
     prepared = _prepare_a2c_numba_inputs(
         w1=w1,
@@ -1522,6 +1650,9 @@ def collect_a2c_batch_numba_2p(
         prepared.opponent_w2,
         prepared.opponent_b2,
         bool(opponent_overkill_guard),
+        float(overkill_penalty_beta),
+        int(overkill_low_lead_points_max),
+        int(mode_code),
         np.ascontiguousarray(codes_arr),
         np.ascontiguousarray(seeds_arr),
         np.ascontiguousarray(seats_arr),
@@ -1593,6 +1724,9 @@ def warm_up_numba_mlp_rollout() -> None:
         opponent_w2,
         opponent_b2,
         False,
+        0.0,
+        2,
+        0,
         0,
         0,
     )
@@ -1610,6 +1744,9 @@ def warm_up_numba_mlp_rollout() -> None:
         opponent_w2,
         opponent_b2,
         False,
+        0.0,
+        2,
+        0,
         np.asarray([numba_agent_code("random")], dtype=np.int64),
         np.asarray([0], dtype=np.int64),
         np.asarray([0], dtype=np.int64),

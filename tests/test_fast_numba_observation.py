@@ -16,6 +16,7 @@ import pytest
 from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_numba import numba_agent_code
 from briscola_ai.ai.fast_numba_observation import (
+    _trump_overkill_penalty_numba,
     collect_a2c_batch_numba_2p,
     collect_a2c_trajectory_numba_2p,
     encode_fast_observation_numba_2p,
@@ -331,3 +332,59 @@ def test_numba_a2c_batch_supports_per_game_opponent_codes() -> None:
         assert batch.opponent_points[i] == single.opponent_points
         assert count == len(single.rewards)
         assert np.allclose(batch.rewards[i, :count], single.rewards)
+
+
+def test_numba_trump_overkill_penalty_matches_expected_flat_and_gap() -> None:
+    """La penalità JIT deve replicare i casi base del reward shaping canonico."""
+    hands = np.full((2, 3), -1, dtype=np.int64)
+    hand_sizes = np.asarray([1, 2], dtype=np.int64)
+    hands[0, 0] = 31  # swords two
+    hands[1, 0] = 11  # cups two, trump winning minima
+    hands[1, 1] = 10  # cups ace, overkill
+    table_cards = np.asarray([31, -1], dtype=np.int64)
+    table_players = np.asarray([0, -1], dtype=np.int64)
+    trump_card = 12  # cups three
+
+    flat = _trump_overkill_penalty_numba(
+        hands,
+        hand_sizes,
+        table_cards,
+        table_players,
+        1,
+        trump_card,
+        1,
+        1,
+        0.005,
+        2,
+        0,
+    )
+    cheap = _trump_overkill_penalty_numba(
+        hands,
+        hand_sizes,
+        table_cards,
+        table_players,
+        1,
+        trump_card,
+        1,
+        0,
+        0.005,
+        2,
+        0,
+    )
+    gap = _trump_overkill_penalty_numba(
+        hands,
+        hand_sizes,
+        table_cards,
+        table_players,
+        1,
+        trump_card,
+        1,
+        1,
+        0.01,
+        2,
+        1,
+    )
+
+    assert flat == pytest.approx(-0.005)
+    assert cheap == 0.0
+    assert gap == pytest.approx(-0.019)
