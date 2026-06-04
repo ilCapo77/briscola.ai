@@ -14,6 +14,7 @@ import numpy as np
 import pytest
 
 from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.fast_numba import numba_agent_code
 from briscola_ai.ai.fast_numba_observation import (
     collect_a2c_batch_numba_2p,
     collect_a2c_trajectory_numba_2p,
@@ -281,4 +282,52 @@ def test_numba_a2c_batch_matches_single_trajectory() -> None:
         assert np.allclose(batch.probs[i, :count], single.probs)
         assert np.array_equal(batch.action_ids[i, :count], single.action_ids)
         assert np.allclose(batch.value_preds[i, :count], single.value_preds)
+        assert np.allclose(batch.rewards[i, :count], single.rewards)
+
+
+def test_numba_a2c_batch_supports_per_game_opponent_codes() -> None:
+    """Il batch collector deve poter variare opponent rule-based a ogni partita."""
+    warm_up_numba_mlp_rollout()
+
+    feature_dim = int(FEATURE_DIM_2P_V1)
+    hidden_dim = 8
+    w1 = np.zeros((feature_dim, hidden_dim), dtype=np.float32)
+    b1 = np.zeros((hidden_dim,), dtype=np.float32)
+    w2 = np.zeros((hidden_dim, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    wv = np.zeros((hidden_dim,), dtype=np.float32)
+    seeds = np.asarray([100, 101, 102], dtype=np.int64)
+    seats = np.asarray([0, 1, 0], dtype=np.int64)
+    opponent_names = ["random", "greedy_points", "heuristic_v1"]
+    opponent_codes = np.asarray([numba_agent_code(name) for name in opponent_names], dtype=np.int64)
+
+    batch = collect_a2c_batch_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="random",
+        opponent_codes=opponent_codes,
+        game_seeds=seeds,
+        policy_seats=seats,
+    )
+
+    for i, opponent_name in enumerate(opponent_names):
+        single = collect_a2c_trajectory_numba_2p(
+            w1=w1,
+            b1=b1,
+            w2=w2,
+            b2=b2,
+            wv=wv,
+            bv=0.0,
+            opponent_name=opponent_name,
+            game_seed=int(seeds[i]),
+            policy_seat=int(seats[i]),
+        )
+        count = int(batch.step_counts[i])
+        assert batch.policy_points[i] == single.policy_points
+        assert batch.opponent_points[i] == single.opponent_points
+        assert count == len(single.rewards)
         assert np.allclose(batch.rewards[i, :count], single.rewards)

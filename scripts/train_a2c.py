@@ -50,6 +50,7 @@ from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
+from briscola_ai.ai.fast_numba import numba_agent_code
 from briscola_ai.ai.fast_numba_observation import (
     NumbaA2CBatch,
     NumbaA2CTrajectory,
@@ -1055,13 +1056,17 @@ def main() -> int:
     anchor_ce_count = 0
 
     num_games = int(args.num_games)
-    use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba" and opponent_pool is None
+    use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba"
     numba_batch: NumbaA2CBatch | None = None
     numba_batch_offset = 0
     for game_idx in range(1, num_games + 1):
         policy_seat = (game_idx % 2) if args.seat_fair else 0
         game_seed = 0 if use_numba_batch_rollout else int(rng_game.integers(0, 2**32))
-        current_opponent = opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent
+        current_opponent = (
+            opponent
+            if use_numba_batch_rollout
+            else (opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent)
+        )
         numba_traj_for_backprop = None
 
         if rollout_engine == "fast":
@@ -1075,6 +1080,15 @@ def main() -> int:
                             [((game_idx + offset) % 2) if args.seat_fair else 0 for offset in range(batch_size)],
                             dtype=np.int64,
                         )
+                        opponent_codes = None
+                        if opponent_pool is not None:
+                            opponent_codes = np.asarray(
+                                [
+                                    numba_agent_code(sample_opponent_name(opponent_pool.items, rng=rng_opponent_select))
+                                    for _ in range(batch_size)
+                                ],
+                                dtype=np.int64,
+                            )
                         numba_batch = collect_a2c_batch_numba_2p(
                             w1=policy.w1,
                             b1=policy.b1,
@@ -1102,6 +1116,7 @@ def main() -> int:
                             ),
                             game_seeds=game_seeds,
                             policy_seats=policy_seats,
+                            opponent_codes=opponent_codes,
                         )
                         batch_grad_stats = _accumulate_numba_batch_grads(
                             policy=policy,

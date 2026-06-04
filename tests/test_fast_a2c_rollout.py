@@ -153,6 +153,52 @@ def test_train_a2c_fast_numba_rollout_supports_bc_model_opponent(tmp_path: Path)
     assert metadata["opponent_model"] == str(opponent_path)
 
 
+def test_train_a2c_fast_numba_rollout_supports_opponent_mix(tmp_path: Path) -> None:
+    """Il rollout Numba batch deve supportare opponent mix rule-based senza tornare al path per-game."""
+    out_path = tmp_path / "a2c_fast_numba_mix_smoke.npz"
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--out",
+            str(out_path),
+            "--rollout-engine",
+            "fast",
+            "--fast-rollout",
+            "numba",
+            "--opponent-mix",
+            "random:0.5,greedy_points:0.5",
+            "--num-games",
+            "4",
+            "--seed",
+            "123",
+            "--hidden-dim",
+            "8",
+            "--update-every",
+            "2",
+            "--log-every",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert out_path.exists()
+    with np.load(out_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+
+    assert metadata["rollout_engine"] == "fast"
+    assert metadata["fast_rollout"] == "numba"
+    assert metadata["opponent"] is None
+    assert sorted(metadata["opponent_mix"], key=lambda item: item["name"]) == [
+        {"name": "greedy_points", "prob": 0.5},
+        {"name": "random", "prob": 0.5},
+    ]
+
+
 class _LinearAnchor:
     """Anchor minimale per testare la regolarizzazione nel batch backprop."""
 

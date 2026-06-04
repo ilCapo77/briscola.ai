@@ -764,6 +764,7 @@ Rollout fast sperimentale (avversari fast-compatible):
 - `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-encoder numba --out ./data/a2c_fast_numba_encoder_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_rollout_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
+- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_mix.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_vs_best.npz --opponent best_a2c --num-games 20000 --seat-fair --seed 0`
 
 Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
@@ -774,6 +775,7 @@ lo stato viene ancora convertito da liste Python durante il training.
 il backprop/Adam restano NumPy, ma il ramo Numba raccoglie batch paralleli con `prange` e accumula i gradienti su
 array batch invece di usare `np.outer` per ogni step. Benchmark locale 5k game vs `random`: hidden=32
 `~5.06s -> ~0.48s` (`~10.5x`), hidden=128 `~6.83s -> ~0.72s` (`~9.5x`).
+Con opponent mix rule-based (`heuristic_v1:0.7,random:0.2,greedy_points:0.1`), 5k game hidden=128: `~0.74s`.
 Con opponent `.npz` MLP locale: `--opponent best_a2c` funziona nel rollout Numba; benchmark locale 5k game,
 hidden=32: `~4.31s -> ~0.82s` (`~5.3x`).
 

@@ -1029,6 +1029,7 @@ def _collect_mlp_policy_batch_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    opponent_codes: np.ndarray,
     game_seeds: np.ndarray,
     policy_seats: np.ndarray,
 ) -> tuple[
@@ -1074,7 +1075,7 @@ def _collect_mlp_policy_batch_numba(
             b2,
             wv,
             bv,
-            opponent_code,
+            int(opponent_codes[game_idx]),
             opponent_model_enabled,
             opponent_w1,
             opponent_b1,
@@ -1448,6 +1449,7 @@ def collect_a2c_batch_numba_2p(
     opponent_w2: np.ndarray | None = None,
     opponent_b2: np.ndarray | None = None,
     opponent_overkill_guard: bool = False,
+    opponent_codes: np.ndarray | None = None,
 ) -> NumbaA2CBatch:
     """
     Raccoglie un batch di traiettorie A2C full-JIT per il trainer.
@@ -1479,6 +1481,18 @@ def collect_a2c_batch_numba_2p(
         opponent_w2=opponent_w2,
         opponent_b2=opponent_b2,
     )
+    if opponent_codes is None:
+        codes_arr = np.full(seeds_arr.shape, prepared.opponent_code, dtype=np.int64)
+    else:
+        if prepared.opponent_model_enabled:
+            raise ValueError("opponent_codes per-game non è compatibile con opponent model `.npz`.")
+        codes_arr = np.asarray(opponent_codes, dtype=np.int64)
+        if codes_arr.ndim != 1:
+            raise ValueError(f"opponent_codes deve essere 1D, ottenuto shape={codes_arr.shape}")
+        if codes_arr.shape != seeds_arr.shape:
+            raise ValueError(f"Shape mismatch: opponent_codes={codes_arr.shape} game_seeds={seeds_arr.shape}")
+        if not np.all((codes_arr >= 0) & (codes_arr <= 3)):
+            raise ValueError("opponent_codes contiene codici Numba non supportati")
 
     (
         policy_points,
@@ -1508,6 +1522,7 @@ def collect_a2c_batch_numba_2p(
         prepared.opponent_w2,
         prepared.opponent_b2,
         bool(opponent_overkill_guard),
+        np.ascontiguousarray(codes_arr),
         np.ascontiguousarray(seeds_arr),
         np.ascontiguousarray(seats_arr),
     )
@@ -1595,6 +1610,7 @@ def warm_up_numba_mlp_rollout() -> None:
         opponent_w2,
         opponent_b2,
         False,
+        np.asarray([numba_agent_code("random")], dtype=np.int64),
         np.asarray([0], dtype=np.int64),
         np.asarray([0], dtype=np.int64),
     )
