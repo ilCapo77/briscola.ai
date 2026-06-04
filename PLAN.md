@@ -712,6 +712,12 @@ Prossimi step performance (ordine consigliato):
   - pipeline: `scripts/run_experiment.py --eval-workers N`
   - benchmark `small` matrix completa (6 righe × 2000 game): `11.93s` seriale vs `4.51s` con 4 worker (`~2.65x`)
   - benchmark `medium` matrix completa con 4 worker: `20.47s` (seriale non rilanciato per risparmiare tempo)
+- [x] Validare end-to-end `run_experiment.py --eval-workers 4`
+  - run: `a2c_mix_best_a2c_0_60_heuristic_v1_0_25_greedy_points_0_10_random_0_05_50kg_seed19_perf_eval_workers4_50k`
+  - training: 50k game, warm-start da `data/models/best_a2c.npz`, `--no-update-best --minimal-data`
+  - matrix `medium` con 4 worker: `20.34s`
+  - risultato holdout vs `heuristic_v1`: `avg_diff=+12.8516`
+  - decisione: solo validazione performance; non candidato a promozione (`best_a2c` ufficiale resta invariato)
 - [ ] Creare un motore `fast_2p` mutabile/array-based per training/evaluation
   - mantenere `domain.step` come fonte canonica per API/test didattici
   - aggiungere test di equivalenza: stesso seed -> stesso punteggio finale e stessa sequenza di eventi essenziali
