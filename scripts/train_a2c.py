@@ -50,6 +50,7 @@ from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
+from briscola_ai.ai.fast_numba_observation import encode_fast_observation_numba_2p
 from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.training.observation_encoder import (
@@ -364,6 +365,7 @@ def _play_one_fast_game_2p_collect(
     game_seed: int,
     policy_seat: int,
     encoder_version: EncoderVersion,
+    fast_encoder: str,
     bc_anchor: LoadedBCModel | None,
     bc_anchor_beta: float,
 ) -> tuple[Fast2PState, list[StepRecord], float]:
@@ -406,12 +408,22 @@ def _play_one_fast_game_2p_collect(
             break
 
         diff_before = _points_diff_fast(state, policy_seat=policy_seat)
-        encoded = encode_fast_observation_2p(
-            state,
-            player_index=policy_seat,
-            seen_cards_onehot=tuple(seen),
-            version=encoder_version,
-        )
+        if fast_encoder == "numba":
+            encoded = encode_fast_observation_numba_2p(
+                state,
+                player_index=policy_seat,
+                seen_cards_onehot=tuple(seen),
+                version=encoder_version,
+            )
+        elif fast_encoder == "python":
+            encoded = encode_fast_observation_2p(
+                state,
+                player_index=policy_seat,
+                seen_cards_onehot=tuple(seen),
+                version=encoder_version,
+            )
+        else:
+            raise ValueError(f"fast_encoder non supportato: {fast_encoder!r}")
         x = np.asarray(encoded.features, dtype=np.float32)
         mask = np.asarray(encoded.action_mask, dtype=bool)
         if x.shape[0] != policy.feature_dim:
@@ -546,6 +558,15 @@ def main() -> int:
             "e supporta solo avversari fast-compatible random/greedy_points/heuristic_v1/heuristic_v2."
         ),
     )
+    parser.add_argument(
+        "--fast-encoder",
+        choices=["python", "numba"],
+        default="python",
+        help=(
+            "Encoder osservazione usato solo con `--rollout-engine fast`. "
+            "`python` è il path stabile; `numba` usa il wrapper JIT sperimentale equivalente."
+        ),
+    )
     parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dim (se non si usa --init).")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate Adam.")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="L2 weight decay (solo pesi).")
@@ -629,6 +650,9 @@ def main() -> int:
     if float(args.bc_anchor_beta) > 0.0 and not str(args.bc_anchor).strip():
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
     rollout_engine = str(args.rollout_engine)
+    fast_encoder = str(args.fast_encoder)
+    if rollout_engine != "fast" and fast_encoder != "python":
+        raise ValueError("`--fast-encoder numba` richiede `--rollout-engine fast`.")
     if rollout_engine == "fast" and float(args.overkill_penalty_beta) > 0.0:
         raise ValueError(
             "`--rollout-engine fast` non supporta ancora `--overkill-penalty-beta > 0`, "
@@ -761,6 +785,7 @@ def main() -> int:
                 game_seed=game_seed,
                 policy_seat=policy_seat,
                 encoder_version=encoder_version,
+                fast_encoder=fast_encoder,
                 bc_anchor=bc_anchor,
                 bc_anchor_beta=float(args.bc_anchor_beta),
             )
@@ -961,6 +986,7 @@ def main() -> int:
         "action_dim": 40,
         "seed": int(args.seed),
         "rollout_engine": rollout_engine,
+        "fast_encoder": fast_encoder if rollout_engine == "fast" else None,
         "opponent": str(args.opponent) if not opponent_mix_raw else None,
         "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
         "init": args.init.strip() or None,

@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **139** (pytest).
+- Test attuali: **151** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -782,10 +782,15 @@ Prossimi step performance (ordine consigliato):
     - Numba evaluation: `~300.3k games/sec` medio
     - speedup indicativo: `~22.6x`
   - limite: RNG Numba separato dal `random.Random` canonico; testiamo determinismo/invarianti, non identità byte-per-byte degli esiti
-- [ ] Integrare Numba nel rollout A2C per opponent fast-compatible
-  - riusare policy rule-based JIT per l'avversario
-  - valutare se tenere forward/backprop NumPy fuori dal JIT o portare almeno la scelta azione/mask in funzioni numeriche
-  - benchmark da confrontare con `scripts/train_a2c.py --rollout-engine fast`
+- [x] Integrare il wrapper encoder Numba nel rollout A2C fast
+  - modulo: `src/briscola_ai/ai/fast_numba_observation.py`
+  - CLI: `scripts/train_a2c.py --rollout-engine fast --fast-encoder numba`
+  - test: equivalenza feature/mask vs `encode_fast_observation_2p` su stati iniziali/intermedi e smoke trainer
+  - limite: il wrapper converte ancora `Fast2PState` da liste Python ad array NumPy a ogni decisione, quindi non è ancora lo speedup finale
+- [ ] Integrare Numba full-JIT nel rollout A2C per opponent fast-compatible
+  - tenere stato, encoder, policy opponent e step in array JIT per tutta la partita
+  - decidere se lasciare forward/backprop della policy neurale in NumPy o portare anche forward/action sampling nel JIT
+  - benchmark da confrontare con `scripts/train_a2c.py --rollout-engine fast --fast-encoder python|numba`
 - [ ] Estendere il rollout fast A2C a opponent `.npz`
   - supportare policy `.npz` direttamente su encoder fast
   - poi agganciare `best_a2c` senza passare da `PlayerObservation`

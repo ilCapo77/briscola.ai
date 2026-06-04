@@ -759,9 +759,12 @@ Esempio (warm-start + opponent mix):
 
 Rollout fast sperimentale (avversari fast-compatible):
 - `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
+- `python scripts/train_a2c.py --rollout-engine fast --fast-encoder numba --out ./data/a2c_fast_numba_encoder_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 
 Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
 solo `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2` e non supporta `--overkill-penalty-beta > 0`.
+`--fast-encoder numba` valida il wrapper JIT dell’encoder osservazione; non è ancora il rollout A2C full-JIT, perché
+lo stato viene ancora convertito da liste Python durante il training.
 
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.
