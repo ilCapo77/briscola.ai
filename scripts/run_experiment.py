@@ -174,6 +174,33 @@ def main() -> int:
         help="Numero processi per parallelizzare le righe di `evaluate_matrix.py` (default: 1).",
     )
     parser.add_argument(
+        "--rollout-engine",
+        choices=["domain", "fast"],
+        default="domain",
+        help=(
+            "Engine rollout training per A2C. `domain` usa il motore canonico; `fast` abilita il path "
+            "ottimizzato 2-player (default: domain)."
+        ),
+    )
+    parser.add_argument(
+        "--fast-encoder",
+        choices=["python", "numba"],
+        default="python",
+        help=(
+            "Encoder osservazione usato da A2C con `--rollout-engine fast`. "
+            "`numba` valida il wrapper JIT dell'encoder (default: python)."
+        ),
+    )
+    parser.add_argument(
+        "--fast-rollout",
+        choices=["python", "numba"],
+        default="python",
+        help=(
+            "Collector rollout usato da A2C con `--rollout-engine fast`. "
+            "`numba` usa il batch collector full-JIT parallelo (default: python)."
+        ),
+    )
+    parser.add_argument(
         "--name",
         default="",
         help="Nome esperimento (se vuoto, viene costruito in modo deterministico dai parametri).",
@@ -234,6 +261,12 @@ def main() -> int:
         raise ValueError("--num-games deve essere > 0")
     if int(args.eval_workers) <= 0:
         raise ValueError("--eval-workers deve essere > 0")
+    if algo != "a2c" and (
+        args.rollout_engine != "domain" or args.fast_encoder != "python" or args.fast_rollout != "python"
+    ):
+        raise ValueError("I flag rollout veloci/Numba sono supportati solo con --algo a2c.")
+    if args.rollout_engine != "fast" and (args.fast_encoder != "python" or args.fast_rollout != "python"):
+        raise ValueError("--fast-encoder e --fast-rollout richiedono --rollout-engine fast.")
 
     curriculum_raw = str(args.curriculum).strip()
     curriculum: CurriculumPreset | None = None
@@ -310,6 +343,15 @@ def main() -> int:
         cmd += ["--num-games", str(int(num)), "--seed", str(int(args.train_seed))]
         if bool(args.seat_fair):
             cmd.append("--seat-fair")
+        if algo == "a2c":
+            cmd += [
+                "--rollout-engine",
+                str(args.rollout_engine),
+                "--fast-encoder",
+                str(args.fast_encoder),
+                "--fast-rollout",
+                str(args.fast_rollout),
+            ]
         cmd += list(train_extra)
         return cmd
 
@@ -434,7 +476,14 @@ def main() -> int:
         "model_path": str(experiment_model_path or model_path),
         "curriculum": str(curriculum) if curriculum is not None else None,
         "train_stages": stage_records,
-        "train": {"cmd": primary_train_cmd},
+        "train": {
+            "cmd": primary_train_cmd,
+            "rollout": {
+                "engine": str(args.rollout_engine) if algo == "a2c" else None,
+                "fast_encoder": str(args.fast_encoder) if algo == "a2c" else None,
+                "fast_rollout": str(args.fast_rollout) if algo == "a2c" else None,
+            },
+        },
         "eval": [
             {
                 "benchmark": b,

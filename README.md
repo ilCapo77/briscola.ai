@@ -601,6 +601,21 @@ python scripts/run_experiment.py \
   --seat-fair
 ```
 
+Per usare il rollout A2C full-JIT con Numba anche dalla pipeline (consigliato per run lunghi):
+
+```
+python scripts/run_experiment.py \
+  --algo a2c \
+  --opponent-mix best_a2c:0.5,heuristic_v1:0.3,random:0.2 \
+  --num-games 1000000 \
+  --train-seed 17 \
+  --seat-fair \
+  --rollout-engine fast \
+  --fast-rollout numba \
+  --eval-workers 4 \
+  --minimal-data
+```
+
 Warm-start (opzionale):
 - se hai già un best locale, puoi ripartire da `--init ./data/models/best_a2c.npz` (stesso schema pesi/encoder).
 
@@ -768,9 +783,10 @@ Rollout fast sperimentale (avversari fast-compatible):
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_best_mix.npz --opponent-mix best_a2c:0.5,random:0.5 --num-games 20000 --seat-fair --seed 0`
 - `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_vs_best.npz --opponent best_a2c --num-games 20000 --seat-fair --seed 0`
 
-Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
-solo `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2`; `--overkill-penalty-beta > 0` è supportato nel fast
-rollout Numba, non nel fast rollout Python.
+Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico. Il fast rollout
+Python supporta gli avversari rule-based (`random`/`greedy_points`/`heuristic_v1`/`heuristic_v2`); il fast rollout
+Numba supporta anche opponent `.npz` MLP come `best_a2c` e mix ibridi rule-based + `best_a2c`.
+`--overkill-penalty-beta > 0` è supportato nel fast rollout Numba, non nel fast rollout Python.
 `--fast-encoder numba` valida il wrapper JIT dell’encoder osservazione; non è ancora il rollout A2C full-JIT, perché
 lo stato viene ancora convertito da liste Python durante il training.
 `--fast-rollout numba` usa invece un collector full-JIT per stato, encoder, forward MLP, sampling, opponent e reward;
