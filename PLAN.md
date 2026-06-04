@@ -694,6 +694,7 @@ Baseline diagnostica (Mac locale, `decision_quality small`, 2000 game, best A2C 
 Interventi completati:
 - [x] Aggiunto `scripts/benchmark_perf.py` per misurare `games/sec` in modo ripetibile
   - benchmark puro seat-fair 2000 game: circa `990-1000 games/sec` sul Mac locale
+  - modalità engine-only aggiunte: `--mode domain-random` e `--mode fast-random`
 - [x] Encoder veloce `PlayerObservation -> feature/mask`
   - evita la conversione intermedia `PlayerObservation -> dict DTO -> feature`
   - test di equivalenza v1/v2 contro il path DTO
@@ -718,9 +719,17 @@ Prossimi step performance (ordine consigliato):
   - matrix `medium` con 4 worker: `20.34s`
   - risultato holdout vs `heuristic_v1`: `avg_diff=+12.8516`
   - decisione: solo validazione performance; non candidato a promozione (`best_a2c` ufficiale resta invariato)
-- [ ] Creare un motore `fast_2p` mutabile/array-based per training/evaluation
+- [x] Spike iniziale `fast_2p` mutabile/array-based
   - mantenere `domain.step` come fonte canonica per API/test didattici
-  - aggiungere test di equivalenza: stesso seed -> stesso punteggio finale e stessa sequenza di eventi essenziali
+  - modulo: `src/briscola_ai/ai/fast_2p.py` (carte come `0..39`, stato mutabile, niente `Card/Enum/replace`)
+  - test di equivalenza: stesso seed + stesse azioni -> stesso deck, mani, tavolo, turni, punti e vincitore
+  - benchmark engine-only random, 20k game × 3 run:
+    - dominio canonico: `~4.94k games/sec` medio
+    - `fast_2p`: `~22.0k games/sec` medio
+    - speedup indicativo: `~4.45x` sul solo motore random
+- [ ] Integrare `fast_2p` in training/evaluation dietro flag sperimentale
+  - prima target: self-play/eval 2-player con agenti semplici
+  - poi eventuale path per A2C, riusando encoder/policy senza cambiare il dominio pubblico
 - [ ] Valutare Numba solo sul `fast_2p`
   - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
   - target minimo per giustificare complessita': `>=3x` sui benchmark lunghi
