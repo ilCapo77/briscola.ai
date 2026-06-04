@@ -15,6 +15,7 @@ import pytest
 
 from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_numba_observation import (
+    collect_a2c_trajectory_numba_2p,
     encode_fast_observation_numba_2p,
     evaluate_mlp_policy_numba_2p,
     warm_up_numba_mlp_rollout,
@@ -134,3 +135,55 @@ def test_numba_mlp_rollout_rejects_bad_shapes() -> None:
             num_games=1,
             seed=0,
         )
+
+
+@pytest.mark.parametrize("feature_dim", [int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)])
+def test_numba_a2c_trajectory_shapes_and_rewards_are_valid(feature_dim: int) -> None:
+    """Il collector JIT deve produrre buffer A2C coerenti con una partita completa."""
+    warm_up_numba_mlp_rollout()
+
+    hidden_dim = 8
+    w1 = np.zeros((feature_dim, hidden_dim), dtype=np.float32)
+    b1 = np.zeros((hidden_dim,), dtype=np.float32)
+    w2 = np.zeros((hidden_dim, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+    wv = np.zeros((hidden_dim,), dtype=np.float32)
+
+    traj = collect_a2c_trajectory_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="heuristic_v1",
+        game_seed=123,
+        policy_seat=0,
+    )
+    again = collect_a2c_trajectory_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        bv=0.0,
+        opponent_name="heuristic_v1",
+        game_seed=123,
+        policy_seat=0,
+    )
+
+    assert traj.policy_points + traj.opponent_points == 120
+    assert traj.winner in (-1, 0, 1)
+    assert 1 <= len(traj.rewards) <= 20
+    assert traj.xs.shape == (len(traj.rewards), feature_dim)
+    assert traj.z1s.shape == (len(traj.rewards), hidden_dim)
+    assert traj.hs.shape == (len(traj.rewards), hidden_dim)
+    assert traj.action_masks.shape == (len(traj.rewards), 40)
+    assert traj.probs.shape == (len(traj.rewards), 40)
+    assert traj.action_ids.shape == (len(traj.rewards),)
+    assert traj.value_preds.shape == (len(traj.rewards),)
+    assert float(np.sum(traj.rewards)) == pytest.approx((traj.policy_points - traj.opponent_points) / 120.0)
+    assert np.allclose(traj.xs, again.xs)
+    assert np.allclose(traj.probs, again.probs)
+    assert np.array_equal(traj.action_ids, again.action_ids)
+    assert np.allclose(traj.rewards, again.rewards)

@@ -50,7 +50,7 @@ from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
-from briscola_ai.ai.fast_numba_observation import encode_fast_observation_numba_2p
+from briscola_ai.ai.fast_numba_observation import collect_a2c_trajectory_numba_2p, encode_fast_observation_numba_2p
 from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.training.observation_encoder import (
@@ -484,6 +484,44 @@ def _play_one_fast_game_2p_collect(
     return state, traj, avg_entropy
 
 
+def _step_records_from_numba_trajectory(
+    numba_traj,
+    *,
+    bc_anchor: LoadedBCModel | None,
+    bc_anchor_beta: float,
+) -> list[StepRecord]:
+    """Converte i buffer JIT del rollout A2C in `StepRecord` per il backprop esistente."""
+    records: list[StepRecord] = []
+    for i in range(len(numba_traj.rewards)):
+        x = np.asarray(numba_traj.xs[i], dtype=np.float32)
+        mask = np.asarray(numba_traj.action_masks[i], dtype=bool)
+        probs = np.asarray(numba_traj.probs[i], dtype=np.float32)
+
+        anchor_probs: np.ndarray | None = None
+        anchor_ce = 0.0
+        if bc_anchor is not None and float(bc_anchor_beta) > 0.0:
+            anchor_logits = bc_anchor.logits(x)
+            anchor_masked = _masked_logits_1d(anchor_logits, mask)
+            anchor_probs = _softmax_1d(anchor_masked)
+            anchor_ce = cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs)
+
+        records.append(
+            StepRecord(
+                x=x,
+                z1=np.asarray(numba_traj.z1s[i], dtype=np.float32),
+                h=np.asarray(numba_traj.hs[i], dtype=np.float32),
+                action_mask=mask,
+                probs=probs,
+                anchor_probs=anchor_probs,
+                anchor_ce=float(anchor_ce),
+                action_id=int(numba_traj.action_ids[i]),
+                value_pred=float(numba_traj.value_preds[i]),
+                reward=float(numba_traj.rewards[i]),
+            )
+        )
+    return records
+
+
 def _compute_returns(rewards: list[float], *, gamma: float) -> list[float]:
     """Return-to-go (Monte Carlo) con sconto `gamma` (default tipico: 1.0)."""
     out = [0.0] * len(rewards)
@@ -563,8 +601,17 @@ def main() -> int:
         choices=["python", "numba"],
         default="python",
         help=(
-            "Encoder osservazione usato solo con `--rollout-engine fast`. "
+            "Encoder osservazione usato solo con `--rollout-engine fast --fast-rollout python`. "
             "`python` è il path stabile; `numba` usa il wrapper JIT sperimentale equivalente."
+        ),
+    )
+    parser.add_argument(
+        "--fast-rollout",
+        choices=["python", "numba"],
+        default="python",
+        help=(
+            "Loop rollout usato solo con `--rollout-engine fast`. "
+            "`python` usa Fast2PState/list Python; `numba` raccoglie la traiettoria A2C in un core full-JIT."
         ),
     )
     parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dim (se non si usa --init).")
@@ -651,8 +698,11 @@ def main() -> int:
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
     rollout_engine = str(args.rollout_engine)
     fast_encoder = str(args.fast_encoder)
+    fast_rollout = str(args.fast_rollout)
     if rollout_engine != "fast" and fast_encoder != "python":
         raise ValueError("`--fast-encoder numba` richiede `--rollout-engine fast`.")
+    if rollout_engine != "fast" and fast_rollout != "python":
+        raise ValueError("`--fast-rollout numba` richiede `--rollout-engine fast`.")
     if rollout_engine == "fast" and float(args.overkill_penalty_beta) > 0.0:
         raise ValueError(
             "`--rollout-engine fast` non supporta ancora `--overkill-penalty-beta > 0`, "
@@ -777,21 +827,43 @@ def main() -> int:
         current_opponent = opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent
 
         if rollout_engine == "fast":
-            final_fast_state, traj, avg_entropy = _play_one_fast_game_2p_collect(
-                policy=policy,
-                opponent_name=current_opponent.name,
-                rng_opponent=rng_opponent,
-                rng_action=rng_action,
-                game_seed=game_seed,
-                policy_seat=policy_seat,
-                encoder_version=encoder_version,
-                fast_encoder=fast_encoder,
-                bc_anchor=bc_anchor,
-                bc_anchor_beta=float(args.bc_anchor_beta),
-            )
-            ep_return = float(_points_diff_fast(final_fast_state, policy_seat=policy_seat)) / 120.0
-            policy_points = int(final_fast_state.points[policy_seat])
-            opp_points = int(final_fast_state.points[1 - policy_seat])
+            if fast_rollout == "numba":
+                numba_traj = collect_a2c_trajectory_numba_2p(
+                    w1=policy.w1,
+                    b1=policy.b1,
+                    w2=policy.w2,
+                    b2=policy.b2,
+                    wv=policy.wv,
+                    bv=float(policy.bv),
+                    opponent_name=current_opponent.name,
+                    game_seed=game_seed,
+                    policy_seat=policy_seat,
+                )
+                traj = _step_records_from_numba_trajectory(
+                    numba_traj,
+                    bc_anchor=bc_anchor,
+                    bc_anchor_beta=float(args.bc_anchor_beta),
+                )
+                avg_entropy = float(numba_traj.avg_entropy)
+                policy_points = int(numba_traj.policy_points)
+                opp_points = int(numba_traj.opponent_points)
+                ep_return = float(policy_points - opp_points) / 120.0
+            else:
+                final_fast_state, traj, avg_entropy = _play_one_fast_game_2p_collect(
+                    policy=policy,
+                    opponent_name=current_opponent.name,
+                    rng_opponent=rng_opponent,
+                    rng_action=rng_action,
+                    game_seed=game_seed,
+                    policy_seat=policy_seat,
+                    encoder_version=encoder_version,
+                    fast_encoder=fast_encoder,
+                    bc_anchor=bc_anchor,
+                    bc_anchor_beta=float(args.bc_anchor_beta),
+                )
+                ep_return = float(_points_diff_fast(final_fast_state, policy_seat=policy_seat)) / 120.0
+                policy_points = int(final_fast_state.points[policy_seat])
+                opp_points = int(final_fast_state.points[1 - policy_seat])
         else:
             final_state, traj, avg_entropy = _play_one_game_2p_collect(
                 policy=policy,
@@ -987,6 +1059,7 @@ def main() -> int:
         "seed": int(args.seed),
         "rollout_engine": rollout_engine,
         "fast_encoder": fast_encoder if rollout_engine == "fast" else None,
+        "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
         "opponent": str(args.opponent) if not opponent_mix_raw else None,
         "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
         "init": args.init.strip() or None,
