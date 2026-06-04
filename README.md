@@ -107,6 +107,7 @@ L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
   - `scripts/fast_self_play.py` – self-play veloce 2-player summary-only (no DB/event log completo)
   - `scripts/export_dataset.py` – export SQLite → JSONL
   - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio di default, fast path sperimentale)
+  - `scripts/benchmark_perf.py` – benchmark locale throughput simulazioni/training
 - `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
 
 ## Backend (FastAPI + WebSocket)
@@ -342,6 +343,19 @@ python scripts/fast_self_play.py --num-games 1000 --seed 0 --agents greedy_point
 Nota: questo comando è volutamente “summary-only”: salva seed, agenti, punti finali e vincitore, ma non salva
 osservazioni/azioni step-by-step. Per dataset BC completo usa ancora `scripts/self_play_to_db.py` + export.
 Per ora supporta solo `random` e `greedy_points`.
+
+### Benchmark performance
+
+Per misurare il throughput locale dei loop engine-only:
+
+```
+python scripts/benchmark_perf.py --mode fast-random --games 100000 --repeat 3 --seed 0
+python scripts/benchmark_perf.py --mode numba-random --games 100000 --repeat 3 --seed 0
+```
+
+Nota: `numba-random` misura solo il primo core JIT random-vs-random in `fast_numba`; non misura ancora
+il training A2C completo. Risultato locale indicativo dopo warm-up: `fast-random` ~21.3k games/sec,
+`numba-random` ~445k games/sec (`~20.9x`).
 
 ### Valutazione agenti
 

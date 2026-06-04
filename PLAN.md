@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **105** (pytest).
+- Test attuali: **133** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -694,7 +694,7 @@ Baseline diagnostica (Mac locale, `decision_quality small`, 2000 game, best A2C 
 Interventi completati:
 - [x] Aggiunto `scripts/benchmark_perf.py` per misurare `games/sec` in modo ripetibile
   - benchmark puro seat-fair 2000 game: circa `990-1000 games/sec` sul Mac locale
-  - modalità engine-only aggiunte: `--mode domain-random` e `--mode fast-random`
+  - modalità engine-only aggiunte: `--mode domain-random`, `--mode fast-random` e `--mode numba-random`
 - [x] Encoder veloce `PlayerObservation -> feature/mask`
   - evita la conversione intermedia `PlayerObservation -> dict DTO -> feature`
   - test di equivalenza v1/v2 contro il path DTO
@@ -757,12 +757,24 @@ Prossimi step performance (ordine consigliato):
     - dominio canonico: `7.109s`
     - fast rollout: `5.138s`
     - speedup indicativo: `~1.38x` (il resto del tempo è forward/backprop NumPy)
+- [x] Valutare Numba solo sul `fast_2p`
+  - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
+  - dipendenze aggiunte: `numba>=0.65.1` + `llvmlite`
+  - modulo iniziale: `src/briscola_ai/ai/fast_numba.py`
+  - scope iniziale: core random-vs-random 2-player compilato JIT, con seed deterministico e invarianti punti/vincitore
+  - test: determinismo per seed, somma punti = 120, conteggi aggregati coerenti
+  - benchmark engine-only random, 100k game x 3 run:
+    - `fast_2p` Python: `~21.3k games/sec` medio
+    - `fast_numba`: `~445.4k games/sec` medio dopo warm-up
+    - speedup indicativo: `~20.9x` sul solo core random-vs-random
+  - limite: non misura ancora policy neurali/A2C, backprop o opponent `.npz`
+- [ ] Estendere Numba alle policy fast-compatible
+  - portare nel core JIT almeno `greedy_points`, `heuristic_v1` e `heuristic_v2`
+  - aggiungere benchmark `numba-eval`/policy-vs-policy confrontabile con `scripts/evaluate_agents.py --engine fast`
+  - mantenere test di equivalenza aggregata/invarianti contro il fast path Python
 - [ ] Estendere il rollout fast A2C a opponent `.npz`
   - supportare policy `.npz` direttamente su encoder fast
   - poi agganciare `best_a2c` senza passare da `PlayerObservation`
-- [ ] Valutare Numba solo sul `fast_2p`
-  - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
-  - target minimo per giustificare complessita': `>=3x` sui benchmark lunghi
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

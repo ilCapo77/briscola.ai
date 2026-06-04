@@ -20,6 +20,7 @@ from briscola_ai.ai.agents import build_agent, list_agent_specs
 from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
 from briscola_ai.ai.fast_2p import Fast2PState, play_random_fast_2p
+from briscola_ai.ai.fast_numba import evaluate_random_numba_2p, warm_up_numba
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.state import GameState, new_game_state
 
@@ -60,24 +61,32 @@ def _benchmark_random_games(*, mode: str, games: int, repeat: int, seed: int) ->
     """
     Esegue benchmark engine-only con policy random.
 
-    `domain-random` misura il motore canonico immutabile; `fast-random` misura il nuovo core mutabile.
+    `domain-random` misura il motore canonico immutabile; `fast-random` misura il core mutabile Python;
+    `numba-random` misura il primo core compilato JIT.
     """
+    if mode == "numba-random":
+        warm_up_numba()
+
     elapsed_values: list[float] = []
     for i in range(repeat):
         run_seed = seed + i
         t0 = time.perf_counter()
-        point_sum = 0
-        for game_index in range(games):
-            game_seed = run_seed + game_index
-            action_seed = (run_seed * 1_000_003) + game_index
-            if mode == "domain-random":
-                domain_state = _play_random_domain_2p(seed=game_seed, action_seed=action_seed)
-                point_sum += sum(player.points for player in domain_state.players)
-            elif mode == "fast-random":
-                fast_state: Fast2PState = play_random_fast_2p(seed=game_seed, action_seed=action_seed)
-                point_sum += sum(fast_state.points)
-            else:
-                raise ValueError(f"Modalità non supportata: {mode}")
+        if mode == "numba-random":
+            summary = evaluate_random_numba_2p(num_games=games, seed=run_seed)
+            point_sum = summary.sum0 + summary.sum1
+        else:
+            point_sum = 0
+            for game_index in range(games):
+                game_seed = run_seed + game_index
+                action_seed = (run_seed * 1_000_003) + game_index
+                if mode == "domain-random":
+                    domain_state = _play_random_domain_2p(seed=game_seed, action_seed=action_seed)
+                    point_sum += sum(player.points for player in domain_state.players)
+                elif mode == "fast-random":
+                    fast_state: Fast2PState = play_random_fast_2p(seed=game_seed, action_seed=action_seed)
+                    point_sum += sum(fast_state.points)
+                else:
+                    raise ValueError(f"Modalità non supportata: {mode}")
         elapsed = time.perf_counter() - t0
         elapsed_values.append(elapsed)
         print(
@@ -140,7 +149,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark throughput simulazioni 2-player.")
     parser.add_argument(
         "--mode",
-        choices=["eval", "domain-random", "fast-random"],
+        choices=["eval", "domain-random", "fast-random", "numba-random"],
         default="eval",
         help="Tipo di benchmark: evaluation con agenti oppure loop engine-only random.",
     )
@@ -169,7 +178,7 @@ def main() -> int:
     if args.mode == "eval" and games % 2 != 0:
         raise ValueError("--games deve essere pari in modalità eval seat-fair")
 
-    if args.mode in ("domain-random", "fast-random"):
+    if args.mode in ("domain-random", "fast-random", "numba-random"):
         _benchmark_random_games(mode=args.mode, games=games, repeat=repeat, seed=seed)
     else:
         _benchmark_evaluation(
