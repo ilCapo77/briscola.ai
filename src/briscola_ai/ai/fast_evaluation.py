@@ -27,7 +27,7 @@ def _validate_fast_agent_name(agent_name: str) -> None:
         raise ValueError(f"`--engine fast` supporta solo agenti semplici: {supported}. Ottenuto: {agent_name!r}")
 
 
-def _choose_fast_card_index(
+def choose_fast_card_index(
     agent_name: str,
     state: Fast2PState,
     player_index: int,
@@ -86,7 +86,7 @@ def play_one_fast_game_2p(
         safety -= 1
         current = state.current_turn
         agent_name = agent0_name if current == 0 else agent1_name
-        card_index = _choose_fast_card_index(agent_name, state, current, rng=rng)
+        card_index = choose_fast_card_index(agent_name, state, current, rng=rng)
         step_fast_2p(state, player_index=current, card_index=card_index)
 
     if safety <= 0:

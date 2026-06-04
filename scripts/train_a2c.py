@@ -48,6 +48,9 @@ import numpy as np
 
 from briscola_ai.ai.agents import Agent, build_agent
 from briscola_ai.ai.bc_model_agent import LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
+from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.training.observation_encoder import (
     FEATURE_DIM_2P_V1,
@@ -337,6 +340,126 @@ def _play_one_game_2p_collect(
     return state, traj, avg_entropy
 
 
+def _action_id_to_fast_card_index(*, action_id: int, hand: list[int]) -> int:
+    """Converte action_id (che nel fast path coincide col card_id) in indice nella mano."""
+    for i, card_id in enumerate(hand):
+        if int(card_id) == int(action_id):
+            return i
+    raise ValueError(f"action_id {action_id} non corrisponde a nessuna carta fast nella mano (hand_size={len(hand)})")
+
+
+def _points_diff_fast(state: Fast2PState, *, policy_seat: int) -> int:
+    """Ritorna (punti_policy - punti_opp) dallo stato fast."""
+    p0 = int(state.points[0])
+    p1 = int(state.points[1])
+    return p0 - p1 if policy_seat == 0 else p1 - p0
+
+
+def _play_one_fast_game_2p_collect(
+    *,
+    policy: A2CPolicy,
+    opponent_name: str,
+    rng_opponent: random.Random,
+    rng_action: np.random.Generator,
+    game_seed: int,
+    policy_seat: int,
+    encoder_version: EncoderVersion,
+    bc_anchor: LoadedBCModel | None,
+    bc_anchor_beta: float,
+) -> tuple[Fast2PState, list[StepRecord], float]:
+    """
+    Simula una partita A2C usando `fast_2p`.
+
+    Limitazioni intenzionali:
+    - supporta solo avversari semplici tradotti su card id (`random`, `greedy_points`);
+    - non applica ancora reward shaping anti-overkill, perché quello oggi dipende da `PlayerObservation`.
+    """
+    if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
+        supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+        raise ValueError(f"`--rollout-engine fast` supporta solo avversari: {supported}. Ottenuto: {opponent_name!r}")
+
+    state = new_fast_2p_state(seed=game_seed)
+    traj: list[StepRecord] = []
+    entropies: list[float] = []
+
+    # Storia pubblica per encoder v2: briscola scoperta + ogni carta giocata.
+    seen = [0] * 40
+    seen[state.trump_card] = 1
+
+    safety = 5000
+    while not state.game_over and safety > 0:
+        safety -= 1
+
+        while not state.game_over and state.current_turn != policy_seat:
+            current = state.current_turn
+            card_index = choose_fast_card_index(opponent_name, state, current, rng=rng_opponent)
+            result = step_fast_2p(state, player_index=current, card_index=card_index)
+            seen[result.played_card] = 1
+
+        if state.game_over:
+            break
+
+        diff_before = _points_diff_fast(state, policy_seat=policy_seat)
+        encoded = encode_fast_observation_2p(
+            state,
+            player_index=policy_seat,
+            seen_cards_onehot=tuple(seen),
+            version=encoder_version,
+        )
+        x = np.asarray(encoded.features, dtype=np.float32)
+        mask = np.asarray(encoded.action_mask, dtype=bool)
+        if x.shape[0] != policy.feature_dim:
+            raise ValueError(f"Feature dim mismatch: got={x.shape[0]} expected={policy.feature_dim}")
+
+        z1, h, logits, value_pred = policy.forward(x)
+        masked = _masked_logits_1d(logits, mask)
+        probs = _softmax_1d(masked)
+        entropies.append(_entropy(probs))
+        action_id = int(rng_action.choice(40, p=probs))
+        card_index = _action_id_to_fast_card_index(action_id=action_id, hand=state.hands[policy_seat])
+
+        anchor_probs: np.ndarray | None = None
+        anchor_ce = 0.0
+        if bc_anchor is not None and float(bc_anchor_beta) > 0.0:
+            anchor_logits = bc_anchor.logits(x)
+            anchor_masked = _masked_logits_1d(anchor_logits, mask)
+            anchor_probs = _softmax_1d(anchor_masked)
+            anchor_ce = cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs)
+
+        result = step_fast_2p(state, player_index=policy_seat, card_index=card_index)
+        seen[result.played_card] = 1
+
+        while not state.game_over and state.current_turn != policy_seat:
+            current = state.current_turn
+            opp_card_index = choose_fast_card_index(opponent_name, state, current, rng=rng_opponent)
+            result = step_fast_2p(state, player_index=current, card_index=opp_card_index)
+            seen[result.played_card] = 1
+
+        diff_after = _points_diff_fast(state, policy_seat=policy_seat)
+        reward = float(diff_after - diff_before) / 120.0
+
+        traj.append(
+            StepRecord(
+                x=x,
+                z1=z1,
+                h=h,
+                action_mask=mask,
+                probs=probs,
+                anchor_probs=anchor_probs,
+                anchor_ce=float(anchor_ce),
+                action_id=action_id,
+                value_pred=float(value_pred),
+                reward=reward,
+            )
+        )
+
+    if safety <= 0:
+        raise RuntimeError("Loop di sicurezza: la partita fast non termina")
+
+    avg_entropy = float(np.mean(entropies)) if entropies else 0.0
+    return state, traj, avg_entropy
+
+
 def _compute_returns(rewards: list[float], *, gamma: float) -> list[float]:
     """Return-to-go (Monte Carlo) con sconto `gamma` (default tipico: 1.0)."""
     out = [0.0] * len(rewards)
@@ -402,6 +525,15 @@ def main() -> int:
     )
     parser.add_argument("--num-games", type=int, default=20000, help="Numero partite di training (2-player).")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità).")
+    parser.add_argument(
+        "--rollout-engine",
+        choices=["domain", "fast"],
+        default="domain",
+        help=(
+            "Motore rollout training. `domain` è canonico e supporta tutti gli agenti; `fast` è sperimentale "
+            "e supporta solo avversari semplici random/greedy_points."
+        ),
+    )
     parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dim (se non si usa --init).")
     parser.add_argument("--lr", type=float, default=3e-4, help="Learning rate Adam.")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="L2 weight decay (solo pesi).")
@@ -484,6 +616,12 @@ def main() -> int:
         raise ValueError("--bc-anchor-beta deve essere >= 0")
     if float(args.bc_anchor_beta) > 0.0 and not str(args.bc_anchor).strip():
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
+    rollout_engine = str(args.rollout_engine)
+    if rollout_engine == "fast" and float(args.overkill_penalty_beta) > 0.0:
+        raise ValueError(
+            "`--rollout-engine fast` non supporta ancora `--overkill-penalty-beta > 0`, "
+            "perché la penalità usa `PlayerObservation` canonica."
+        )
 
     out_path = Path(args.out)
     encoder_version: EncoderVersion = str(args.encoder_version)
@@ -496,10 +634,23 @@ def main() -> int:
     opponent_mix_raw = args.opponent_mix.strip()
     if opponent_mix_raw:
         items = parse_opponent_mix(opponent_mix_raw)
+        if rollout_engine == "fast":
+            unsupported = [item.name for item in items if item.name not in FAST_EVALUATION_AGENT_NAMES]
+            if unsupported:
+                supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+                raise ValueError(
+                    f"`--rollout-engine fast` supporta solo opponent mix con: {supported}. "
+                    f"Non supportati: {unsupported}"
+                )
         agents_by_name = {item.name: build_agent(item.name) for item in items}
         opponent_pool = OpponentPool(items=items, agents_by_name=agents_by_name)
         opponent = build_agent(items[0].name)
     else:
+        if rollout_engine == "fast" and str(args.opponent) not in FAST_EVALUATION_AGENT_NAMES:
+            supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+            raise ValueError(
+                f"`--rollout-engine fast` supporta solo avversari semplici: {supported}. Ottenuto: {args.opponent!r}"
+            )
         opponent = build_agent(args.opponent)
 
     # Inizializzazione policy/critic.
@@ -588,32 +739,48 @@ def main() -> int:
         policy_seat = (game_idx % 2) if args.seat_fair else 0
         current_opponent = opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent
 
-        final_state, traj, avg_entropy = _play_one_game_2p_collect(
-            policy=policy,
-            opponent=current_opponent,
-            rng_opponent=rng_opponent,
-            rng_action=rng_action,
-            game_seed=game_seed,
-            policy_seat=policy_seat,
-            entropy_beta=float(args.entropy_beta),
-            encoder_version=encoder_version,
-            overkill_penalty_beta=float(args.overkill_penalty_beta),
-            overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
-            overkill_penalty_mode=str(args.overkill_penalty_mode),
-            bc_anchor=bc_anchor,
-            bc_anchor_beta=float(args.bc_anchor_beta),
-        )
+        if rollout_engine == "fast":
+            final_fast_state, traj, avg_entropy = _play_one_fast_game_2p_collect(
+                policy=policy,
+                opponent_name=current_opponent.name,
+                rng_opponent=rng_opponent,
+                rng_action=rng_action,
+                game_seed=game_seed,
+                policy_seat=policy_seat,
+                encoder_version=encoder_version,
+                bc_anchor=bc_anchor,
+                bc_anchor_beta=float(args.bc_anchor_beta),
+            )
+            ep_return = float(_points_diff_fast(final_fast_state, policy_seat=policy_seat)) / 120.0
+            policy_points = int(final_fast_state.points[policy_seat])
+            opp_points = int(final_fast_state.points[1 - policy_seat])
+        else:
+            final_state, traj, avg_entropy = _play_one_game_2p_collect(
+                policy=policy,
+                opponent=current_opponent,
+                rng_opponent=rng_opponent,
+                rng_action=rng_action,
+                game_seed=game_seed,
+                policy_seat=policy_seat,
+                entropy_beta=float(args.entropy_beta),
+                encoder_version=encoder_version,
+                overkill_penalty_beta=float(args.overkill_penalty_beta),
+                overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                overkill_penalty_mode=str(args.overkill_penalty_mode),
+                bc_anchor=bc_anchor,
+                bc_anchor_beta=float(args.bc_anchor_beta),
+            )
+            ep_return = float(_points_diff(final_state, policy_seat=policy_seat)) / 120.0
+            p0 = final_state.players[0].points
+            p1 = final_state.players[1].points
+            policy_points = p0 if policy_seat == 0 else p1
+            opp_points = p1 if policy_seat == 0 else p0
         entropies.append(avg_entropy)
 
         # Episodic return (consistente con shaped reward): diff punti finale / 120.
-        ep_return = float(_points_diff(final_state, policy_seat=policy_seat)) / 120.0
         returns_buf.append(ep_return)
 
         # Win/draw tracking (in termini di punti).
-        p0 = final_state.players[0].points
-        p1 = final_state.players[1].points
-        policy_points = p0 if policy_seat == 0 else p1
-        opp_points = p1 if policy_seat == 0 else p0
         if policy_points > opp_points:
             wins += 1
         elif policy_points == opp_points:
@@ -762,10 +929,15 @@ def main() -> int:
         return str(args.opponent).strip()
 
     ui_label = f"A2C shaped {_format_num_games(int(args.num_games))} game"
+    observation_note = (
+        "Osservazione anti-cheat: Fast2PState numerico con feature equivalenti a PlayerObservation."
+        if rollout_engine == "fast"
+        else "Osservazione anti-cheat: PlayerObservation (vista parziale lecita)."
+    )
     ui_description_it = (
         "Policy addestrata con A2C (actor-critic) con reward shaping (delta punti per mano), "
         f"contro {_format_opponent_label()}. "
-        "Osservazione anti-cheat: PlayerObservation (vista parziale lecita)."
+        f"{observation_note}"
     )
     payload = {
         "format": "mlp_a2c_shaped_v1",
@@ -775,6 +947,7 @@ def main() -> int:
         "hidden_dim": int(policy.hidden_dim),
         "action_dim": 40,
         "seed": int(args.seed),
+        "rollout_engine": rollout_engine,
         "opponent": str(args.opponent) if not opponent_mix_raw else None,
         "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
         "init": args.init.strip() or None,

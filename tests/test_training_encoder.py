@@ -8,6 +8,10 @@ Obiettivo:
 
 from __future__ import annotations
 
+import random
+
+from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.training.card_action_space import (
     action_id_from_suit_number,
     action_mask_from_hand,
@@ -18,8 +22,10 @@ from briscola_ai.ai.training.observation_encoder import (
     encode_observation_2p_with_version,
     encode_player_observation_2p,
 )
+from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit
-from briscola_ai.domain.observation import PlayerObservation
+from briscola_ai.domain.observation import PlayerObservation, make_player_observation
+from briscola_ai.domain.state import new_game_state
 
 
 def test_action_id_mapping_is_bijective() -> None:
@@ -139,3 +145,35 @@ def test_encode_player_observation_matches_dto_encoder() -> None:
 
         assert direct.action_mask == generic.action_mask
         assert direct.features == generic.features
+
+
+def test_encode_fast_observation_matches_player_observation_encoder() -> None:
+    """
+    L'encoder `Fast2PState -> feature` deve restare equivalente al path canonico.
+
+    Questo protegge il rollout A2C fast: la policy neurale deve vedere le stesse feature
+    che vedrebbe usando `make_player_observation` + encoder canonico.
+    """
+    canonical = new_game_state(num_players=2, seed=17)
+    fast = new_fast_2p_state(seed=17)
+    rng = random.Random(99)
+
+    while not canonical.game_over:
+        current = canonical.current_turn
+        obs = make_player_observation(canonical, current)
+
+        for version in ("v1", "v2"):
+            direct = encode_player_observation_2p(obs, version=version)
+            fast_encoded = encode_fast_observation_2p(
+                fast,
+                player_index=current,
+                seen_cards_onehot=obs.seen_cards_onehot,
+                version=version,
+            )
+            assert fast_encoded.action_mask == direct.action_mask
+            assert fast_encoded.features == direct.features
+
+        card_index = rng.randrange(len(canonical.players[current].hand))
+        canonical, result = step(canonical, PlayCardAction(player_index=current, card_index=card_index))
+        assert result.error is None
+        step_fast_2p(fast, player_index=current, card_index=card_index)

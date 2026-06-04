@@ -743,9 +743,19 @@ Prossimi step performance (ordine consigliato):
   - output opzionale JSONL minimale per partita (seed, agenti, punti finali, vincitore), senza osservazioni/azioni step-by-step
   - test di equivalenza per-game contro dominio usando gli stessi `game_seed/action_seed`
   - benchmark `greedy_points` vs `random`, 100k game senza JSONL: `5.478s` (`~18.3k games/sec`)
-- [ ] Integrare `fast_2p` in training A2C dietro flag sperimentale
-  - prima target: rollout 2-player con policy neurale + avversari semplici
-  - poi riuso encoder/policy senza cambiare il dominio pubblico
+- [x] Integrare `fast_2p` in training A2C dietro flag sperimentale
+  - CLI: `scripts/train_a2c.py --rollout-engine fast`
+  - supporto iniziale: policy A2C neurale vs avversari semplici `random`/`greedy_points`
+  - encoder: `Fast2PState -> feature/mask` equivalente al path canonico (`v1`/`v2`)
+  - limite attuale: no `heuristic_v1/v2`, no modelli `.npz` come opponent, no `--overkill-penalty-beta > 0`
+  - smoke test: training fast salva modello `.npz` con metadato `rollout_engine=fast`
+  - benchmark A2C vs `random`, 5k game, hidden=32:
+    - dominio canonico: `7.109s`
+    - fast rollout: `5.138s`
+    - speedup indicativo: `~1.38x` (il resto del tempo è forward/backprop NumPy)
+- [ ] Estendere il rollout fast A2C ad avversari più forti
+  - opzione A: tradurre `heuristic_v1/v2` su card id numerici
+  - opzione B: supportare policy `.npz` direttamente su encoder fast
 - [ ] Valutare Numba solo sul `fast_2p`
   - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
   - target minimo per giustificare complessita': `>=3x` sui benchmark lunghi

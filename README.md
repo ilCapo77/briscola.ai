@@ -740,6 +740,12 @@ Script:
 Esempio (warm-start + opponent mix):
 - `python scripts/train_a2c.py --init ./data/bc_model_teacher_mlp.npz --out ./data/a2c_shaped.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 200000 --seat-fair --seed 0`
 
+Rollout fast sperimentale (solo avversari semplici):
+- `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_random.npz --opponent random --num-games 20000 --seat-fair --seed 0`
+
+Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
+solo `random`/`greedy_points` e non supporta `--overkill-penalty-beta > 0`.
+
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.
 
