@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """
-Valuta agenti offline (dominio-only).
+Valuta agenti offline.
 
 Esempi:
   python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 random --agent1 random
   python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
+  python scripts/evaluate_agents.py --engine fast --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
   python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small \\
     --agent0 heuristic_v1 --agent1 random
   python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small \\
@@ -24,6 +25,11 @@ from pathlib import Path
 from briscola_ai.ai.agents import Agent, build_agent, list_agent_specs
 from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
+from briscola_ai.ai.fast_evaluation import (
+    FAST_EVALUATION_AGENT_NAMES,
+    evaluate_fast_match_2p,
+    evaluate_fast_seat_fair_match_2p,
+)
 
 
 def _repo_root() -> Path:
@@ -83,7 +89,7 @@ def _make_range_seed_suite(*, start: int, step: int, count: int) -> list[int]:
 
 def main() -> int:
     """Entry point CLI."""
-    parser = argparse.ArgumentParser(description="Valuta agenti Briscola (dominio-only)")
+    parser = argparse.ArgumentParser(description="Valuta agenti Briscola offline")
     benchmark_group = parser.add_mutually_exclusive_group()
     benchmark_group.add_argument(
         "--benchmark",
@@ -96,6 +102,15 @@ def main() -> int:
     )
     benchmark_group.add_argument("--num-games", type=int, default=1000, help="Numero partite da simulare")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità)")
+    parser.add_argument(
+        "--engine",
+        choices=["domain", "fast"],
+        default="domain",
+        help=(
+            "Motore di valutazione. `domain` supporta tutti gli agenti; `fast` è sperimentale "
+            "e supporta solo random/greedy_points."
+        ),
+    )
     agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
     parser.add_argument(
         "--agent0",
@@ -194,9 +209,6 @@ def main() -> int:
             raise ValueError(f"`--{agent_flag}-model` è valido solo quando `--{agent_flag} bc_model`.")
         return build_agent(agent_name)
 
-    agent0 = _build(agent_name=args.agent0, model_path=args.agent0_model, agent_flag="agent0")
-    agent1 = _build(agent_name=args.agent1, model_path=args.agent1_model, agent_flag="agent1")
-
     if args.seed_suite_range_start is None and args.seed_suite_range_step != 1:
         raise ValueError("`--seed-suite-range-step` richiede anche `--seed-suite-range-start`.")
 
@@ -212,6 +224,78 @@ def main() -> int:
             step=args.seed_suite_range_step,
             count=needed,
         )
+
+    if args.engine == "fast":
+        if args.agent0_model.strip() or args.agent1_model.strip():
+            raise ValueError("`--engine fast` non supporta modelli `.npz`; usa agenti semplici senza path modello.")
+        unsupported = [name for name in (args.agent0, args.agent1) if name not in FAST_EVALUATION_AGENT_NAMES]
+        if unsupported:
+            supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+            raise ValueError(f"`--engine fast` supporta solo: {supported}. Non supportati: {unsupported}")
+
+        if args.seat_fair:
+            stats = evaluate_fast_seat_fair_match_2p(
+                args.agent0,
+                args.agent1,
+                num_games=args.num_games,
+                seed=args.seed,
+                game_seeds=game_seeds,
+            )
+            print(f"Match 2-player (fast, seat-fair): {stats.agent_a_name} (A) vs {stats.agent_b_name} (B)")
+            print(f"- games: {stats.num_games} (seed={args.seed})")
+            print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
+            print(f"- avg points A: {stats.avg_points_agent_a:.2f} | avg points B: {stats.avg_points_agent_b:.2f}")
+            print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
+            if args.out_json.strip():
+                payload = {
+                    "mode": "seat_fair",
+                    "engine": "fast",
+                    "benchmark": args.benchmark,
+                    "num_games": args.num_games,
+                    "seed": args.seed,
+                    "seed_suite": {
+                        "name": args.seed_suite,
+                        "file": args.seed_suite_file.strip() or None,
+                        "range_start": args.seed_suite_range_start,
+                        "range_step": args.seed_suite_range_step if args.seed_suite_range_start is not None else None,
+                        "num_seeds_used": len(game_seeds) if game_seeds is not None else None,
+                    },
+                    "agents": {"agent0": args.agent0, "agent1": args.agent1},
+                    "stats": asdict(stats),
+                }
+                Path(args.out_json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            return 0
+
+        stats = evaluate_fast_match_2p(
+            args.agent0, args.agent1, num_games=args.num_games, seed=args.seed, game_seeds=game_seeds
+        )
+        print(f"Match 2-player (fast): {stats.agent0_name} (P0) vs {stats.agent1_name} (P1)")
+        print(f"- games: {stats.num_games} (seed={args.seed})")
+        print(f"- wins P0: {stats.wins_agent0} | wins P1: {stats.wins_agent1} | draws: {stats.draws}")
+        print(f"- avg points P0: {stats.avg_points_agent0:.2f} | avg points P1: {stats.avg_points_agent1:.2f}")
+        print(f"- avg point diff (P0-P1): {stats.avg_point_diff_agent0_minus_agent1:.2f}")
+        if args.out_json.strip():
+            payload = {
+                "mode": "plain",
+                "engine": "fast",
+                "benchmark": args.benchmark,
+                "num_games": args.num_games,
+                "seed": args.seed,
+                "seed_suite": {
+                    "name": args.seed_suite,
+                    "file": args.seed_suite_file.strip() or None,
+                    "range_start": args.seed_suite_range_start,
+                    "range_step": args.seed_suite_range_step if args.seed_suite_range_start is not None else None,
+                    "num_seeds_used": len(game_seeds) if game_seeds is not None else None,
+                },
+                "agents": {"agent0": args.agent0, "agent1": args.agent1},
+                "stats": asdict(stats),
+            }
+            Path(args.out_json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return 0
+
+    agent0 = _build(agent_name=args.agent0, model_path=args.agent0_model, agent_flag="agent0")
+    agent1 = _build(agent_name=args.agent1, model_path=args.agent1_model, agent_flag="agent1")
 
     if args.seat_fair:
         stats = evaluate_seat_fair_match_2p(
@@ -229,6 +313,7 @@ def main() -> int:
         if args.out_json.strip():
             payload = {
                 "mode": "seat_fair",
+                "engine": "domain",
                 "benchmark": args.benchmark,
                 "num_games": args.num_games,
                 "seed": args.seed,
@@ -254,6 +339,7 @@ def main() -> int:
     if args.out_json.strip():
         payload = {
             "mode": "plain",
+            "engine": "domain",
             "benchmark": args.benchmark,
             "num_games": args.num_games,
             "seed": args.seed,

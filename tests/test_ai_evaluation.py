@@ -12,8 +12,9 @@ from __future__ import annotations
 
 import pytest
 
-from briscola_ai.ai.agents import HeuristicAgentV1, RandomAgent
+from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, RandomAgent
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
+from briscola_ai.ai.fast_evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
 
 
 def test_evaluate_match_is_deterministic_for_fixed_seed() -> None:
@@ -87,3 +88,30 @@ def test_evaluate_raises_if_game_seeds_is_insufficient() -> None:
     # In seat-fair serve una seed per coppia: num_pairs = num_games // 2.
     with pytest.raises(ValueError, match="game_seeds insufficiente"):
         evaluate_seat_fair_match_2p(a0, a1, num_games=10, seed=0, game_seeds=[1, 2])
+
+
+def test_fast_evaluate_match_matches_domain_for_supported_simple_agents() -> None:
+    """
+    Il path fast deve essere semanticamente equivalente al dominio per gli agenti supportati.
+
+    Usiamo `greedy_points` vs `random` perché copre sia una policy deterministica con tie-break RNG,
+    sia una policy completamente random.
+    """
+    domain_stats = evaluate_match_2p(GreedyPointsAgent(), RandomAgent(), num_games=100, seed=123)
+    fast_stats = evaluate_fast_match_2p("greedy_points", "random", num_games=100, seed=123)
+
+    assert fast_stats == domain_stats
+
+
+def test_fast_seat_fair_matches_domain_for_supported_simple_agents() -> None:
+    """Anche la modalità seat-fair fast deve coincidere col path canonico."""
+    domain_stats = evaluate_seat_fair_match_2p(GreedyPointsAgent(), RandomAgent(), num_games=100, seed=456)
+    fast_stats = evaluate_fast_seat_fair_match_2p("greedy_points", "random", num_games=100, seed=456)
+
+    assert fast_stats == domain_stats
+
+
+def test_fast_evaluation_rejects_unsupported_agents() -> None:
+    """Il path fast deve fallire presto per agenti non ancora tradotti su card id."""
+    with pytest.raises(ValueError, match="supporta solo"):
+        evaluate_fast_match_2p("heuristic_v1", "random", num_games=1, seed=0)

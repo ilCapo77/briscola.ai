@@ -105,7 +105,7 @@ L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
   - `scripts/simulate_games.py` – simulazioni senza UI
   - `scripts/self_play_to_db.py` – self-play dal dominio verso SQLite (no HTTP)
   - `scripts/export_dataset.py` – export SQLite → JSONL
-  - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio-only)
+  - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio di default, fast path sperimentale)
 - `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
 
 ## Backend (FastAPI + WebSocket)
@@ -324,7 +324,7 @@ python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-game
 
 Nota: se `--agents` è omesso, usa `random` per tutti i player.
 
-### Valutazione agenti (dominio-only)
+### Valutazione agenti
 
 Per confrontare agenti in modo riproducibile (senza UI/server):
 
@@ -333,6 +333,16 @@ python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 random --a
 python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
 python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random
 ```
+
+Per default la valutazione usa il dominio canonico (`--engine domain`), che supporta tutti gli agenti
+e costruisce `PlayerObservation` anti-cheat. Esiste anche un path sperimentale più veloce:
+
+```
+python scripts/evaluate_agents.py --engine fast --seat-fair --num-games 10000 --seed 42 --agent0 greedy_points --agent1 random
+```
+
+Nota: `--engine fast` per ora supporta solo agenti semplici (`random`, `greedy_points`) e serve per benchmark
+del motore `fast_2p`; non supporta ancora modelli `.npz`, `heuristic_v1` o `heuristic_v2`.
 
 Agenti disponibili (baseline):
 - `random`: sceglie una carta casuale tra quelle in mano (baseline “zero”).

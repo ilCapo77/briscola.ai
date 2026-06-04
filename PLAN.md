@@ -727,8 +727,17 @@ Prossimi step performance (ordine consigliato):
     - dominio canonico: `~4.94k games/sec` medio
     - `fast_2p`: `~22.0k games/sec` medio
     - speedup indicativo: `~4.45x` sul solo motore random
-- [ ] Integrare `fast_2p` in training/evaluation dietro flag sperimentale
-  - prima target: self-play/eval 2-player con agenti semplici
+- [x] Integrare `fast_2p` in evaluation dietro flag sperimentale per agenti semplici
+  - modulo: `src/briscola_ai/ai/fast_evaluation.py`
+  - CLI: `scripts/evaluate_agents.py --engine fast`
+  - supporto iniziale: `random`, `greedy_points` (no modelli `.npz`, no euristiche v1/v2)
+  - test di equivalenza aggregata: fast e dominio producono gli stessi `MatchStats`/`SeatFairStats`
+  - benchmark `greedy_points` vs `random`, seat-fair 10k game:
+    - dominio canonico: `~3.52s`
+    - fast evaluation: `~0.496s`
+    - speedup indicativo: `~7.1x`
+- [ ] Integrare `fast_2p` in self-play/training dietro flag sperimentale
+  - prima target: self-play/eval 2-player senza logging completo di osservazioni
   - poi eventuale path per A2C, riusando encoder/policy senza cambiare il dominio pubblico
 - [ ] Valutare Numba solo sul `fast_2p`
   - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
