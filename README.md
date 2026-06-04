@@ -771,7 +771,7 @@ solo `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2` e non supporta `--ov
 lo stato viene ancora convertito da liste Python durante il training.
 `--fast-rollout numba` usa invece un collector full-JIT per stato, encoder, forward MLP, sampling, opponent e reward;
 il backprop/Adam restano NumPy. Benchmark locale 5k game vs `random`: hidden=32 `~5.06s -> ~2.52s` (`~2.0x`),
-hidden=128 `~6.83s -> ~5.04s` (`~1.36x`).
+hidden=128 `~6.83s -> ~4.93s` (`~1.39x`).
 
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.

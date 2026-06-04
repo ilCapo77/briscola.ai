@@ -809,9 +809,14 @@ Prossimi step performance (ordine consigliato):
     - rollout Numba: `~5.04s`
     - speedup indicativo: `~1.36x`
   - limite: il rollout è JIT, ma backprop/Adam e conversione buffer -> `StepRecord` restano Python/NumPy
+- [x] Ridurre conversione `NumbaA2CTrajectory -> StepRecord`
+  - il path `--fast-rollout numba` ora fa backprop direttamente sui buffer array del rollout JIT
+  - benchmark training A2C vs `random`, 5k game:
+    - hidden=32: resta `~2.52s` (conversione StepRecord non era il collo principale)
+    - hidden=128: `~5.04s -> ~4.93s` (miglioramento piccolo)
 - [ ] Ottimizzare training A2C oltre il rollout
-  - ridurre conversione `NumbaA2CTrajectory -> StepRecord`
-  - valutare backprop batch-oriented su array NumPy invece del loop per `StepRecord`
+  - profilare il path `--fast-rollout numba` con hidden=128/200k game
+  - valutare backprop batch-oriented su array NumPy invece del loop Python per step
   - valutare JIT solo del calcolo return/grad se resta un hotspot misurato
 - [ ] Estendere il rollout fast A2C a opponent `.npz`
   - supportare policy `.npz` direttamente su encoder fast

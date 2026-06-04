@@ -484,50 +484,22 @@ def _play_one_fast_game_2p_collect(
     return state, traj, avg_entropy
 
 
-def _step_records_from_numba_trajectory(
-    numba_traj,
-    *,
-    bc_anchor: LoadedBCModel | None,
-    bc_anchor_beta: float,
-) -> list[StepRecord]:
-    """Converte i buffer JIT del rollout A2C in `StepRecord` per il backprop esistente."""
-    records: list[StepRecord] = []
-    for i in range(len(numba_traj.rewards)):
-        x = np.asarray(numba_traj.xs[i], dtype=np.float32)
-        mask = np.asarray(numba_traj.action_masks[i], dtype=bool)
-        probs = np.asarray(numba_traj.probs[i], dtype=np.float32)
-
-        anchor_probs: np.ndarray | None = None
-        anchor_ce = 0.0
-        if bc_anchor is not None and float(bc_anchor_beta) > 0.0:
-            anchor_logits = bc_anchor.logits(x)
-            anchor_masked = _masked_logits_1d(anchor_logits, mask)
-            anchor_probs = _softmax_1d(anchor_masked)
-            anchor_ce = cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs)
-
-        records.append(
-            StepRecord(
-                x=x,
-                z1=np.asarray(numba_traj.z1s[i], dtype=np.float32),
-                h=np.asarray(numba_traj.hs[i], dtype=np.float32),
-                action_mask=mask,
-                probs=probs,
-                anchor_probs=anchor_probs,
-                anchor_ce=float(anchor_ce),
-                action_id=int(numba_traj.action_ids[i]),
-                value_pred=float(numba_traj.value_preds[i]),
-                reward=float(numba_traj.rewards[i]),
-            )
-        )
-    return records
-
-
 def _compute_returns(rewards: list[float], *, gamma: float) -> list[float]:
     """Return-to-go (Monte Carlo) con sconto `gamma` (default tipico: 1.0)."""
     out = [0.0] * len(rewards)
     g = 0.0
     for i in range(len(rewards) - 1, -1, -1):
         g = rewards[i] + gamma * g
+        out[i] = g
+    return out
+
+
+def _compute_returns_array(rewards: np.ndarray, *, gamma: float) -> np.ndarray:
+    """Return-to-go su array NumPy, usato dal rollout Numba senza passare da `StepRecord`."""
+    out = np.zeros_like(rewards, dtype=np.float32)
+    g = 0.0
+    for i in range(len(rewards) - 1, -1, -1):
+        g = float(rewards[i]) + gamma * g
         out[i] = g
     return out
 
@@ -825,6 +797,7 @@ def main() -> int:
         game_seed = int(rng_game.integers(0, 2**32))
         policy_seat = (game_idx % 2) if args.seat_fair else 0
         current_opponent = opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent
+        numba_traj_for_backprop = None
 
         if rollout_engine == "fast":
             if fast_rollout == "numba":
@@ -839,11 +812,8 @@ def main() -> int:
                     game_seed=game_seed,
                     policy_seat=policy_seat,
                 )
-                traj = _step_records_from_numba_trajectory(
-                    numba_traj,
-                    bc_anchor=bc_anchor,
-                    bc_anchor_beta=float(args.bc_anchor_beta),
-                )
+                numba_traj_for_backprop = numba_traj
+                traj = []
                 avg_entropy = float(numba_traj.avg_entropy)
                 policy_points = int(numba_traj.policy_points)
                 opp_points = int(numba_traj.opponent_points)
@@ -896,57 +866,110 @@ def main() -> int:
         elif policy_points == opp_points:
             draws += 1
 
-        rewards = [step_rec.reward for step_rec in traj]
-        returns_to_go = _compute_returns(rewards, gamma=float(args.gamma))
+        if numba_traj_for_backprop is not None:
+            returns_to_go_arr = _compute_returns_array(numba_traj_for_backprop.rewards, gamma=float(args.gamma))
+            for i, g in enumerate(returns_to_go_arr):
+                x = numba_traj_for_backprop.xs[i]
+                z1 = numba_traj_for_backprop.z1s[i]
+                h = numba_traj_for_backprop.hs[i]
+                mask = numba_traj_for_backprop.action_masks[i]
+                probs = numba_traj_for_backprop.probs[i]
+                action_id = int(numba_traj_for_backprop.action_ids[i])
+                v = float(numba_traj_for_backprop.value_preds[i])
+                adv = float(g - v)
 
-        # Backprop per ogni step della traiettoria (Monte Carlo A2C).
-        for step_rec, g in zip(traj, returns_to_go, strict=True):
-            v = float(step_rec.value_pred)
-            adv = float(g - v)
+                dlogits = probs.copy()
+                dlogits[action_id] -= 1.0
+                dlogits *= float(adv)
 
-            # Policy gradient (loss = -adv * log pi(a|s)).
-            dlogits = step_rec.probs.copy()
-            dlogits[step_rec.action_id] -= 1.0
-            dlogits *= float(adv)
+                beta = float(args.entropy_beta)
+                if beta > 0.0:
+                    logp = np.log(probs + 1e-12)
+                    s = float(np.sum(probs * (logp + 1.0)))
+                    dent = probs * (logp + 1.0 - s)
+                    dlogits += beta * dent
 
-            beta = float(args.entropy_beta)
-            if beta > 0.0:
-                # Loss include `-beta * H(pi)` per incoraggiare esplorazione.
-                logp = np.log(step_rec.probs + 1e-12)
-                s = float(np.sum(step_rec.probs * (logp + 1.0)))
-                dent = step_rec.probs * (logp + 1.0 - s)
-                dlogits += beta * dent
+                anchor_beta = float(args.bc_anchor_beta)
+                if anchor_beta > 0.0 and bc_anchor is not None:
+                    anchor_logits = bc_anchor.logits(x)
+                    anchor_masked = _masked_logits_1d(anchor_logits, mask)
+                    anchor_probs = _softmax_1d(anchor_masked)
+                    anchor_ce = cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs)
+                    grad_anchor = grad_ce_wrt_logits_from_probs(
+                        pred_probs=probs,
+                        target_probs=anchor_probs,
+                        action_mask=mask,
+                    )
+                    dlogits += anchor_beta * grad_anchor
+                    anchor_ces.append(float(anchor_ce))
 
-            # Regularization: stay-close-to-BC anchor (se attivo).
-            #
-            # Questo termine NON è pesato dall'advantage: è un vincolo "stile" separato dal reward.
-            anchor_beta = float(args.bc_anchor_beta)
-            if anchor_beta > 0.0 and step_rec.anchor_probs is not None:
-                grad_anchor = grad_ce_wrt_logits_from_probs(
-                    pred_probs=step_rec.probs,
-                    target_probs=step_rec.anchor_probs,
-                    action_mask=step_rec.action_mask,
-                )
-                dlogits += anchor_beta * grad_anchor
-                anchor_ces.append(float(step_rec.anchor_ce))
+                gw2 += np.outer(h, dlogits).astype(np.float32)
+                gb2 += dlogits.astype(np.float32)
+                dh_policy = policy.w2 @ dlogits
 
-            # Actor head grads.
-            gw2 += np.outer(step_rec.h, dlogits).astype(np.float32)
-            gb2 += dlogits.astype(np.float32)
-            dh_policy = policy.w2 @ dlogits  # (H,)
+                dv = float(args.value_coef) * (v - float(g))
+                value_losses.append(0.5 * float(args.value_coef) * (v - float(g)) ** 2)
 
-            # Critic loss: 0.5 * value_coef * (V - G)^2
-            dv = float(args.value_coef) * (v - float(g))
-            value_losses.append(0.5 * float(args.value_coef) * (v - float(g)) ** 2)
+                gwv += (h * dv).astype(np.float32)
+                gbv += dv
+                dh_value = policy.wv * dv
 
-            gwv += (step_rec.h * dv).astype(np.float32)
-            gbv += dv
-            dh_value = policy.wv * dv  # (H,)
+                dh = dh_policy + dh_value
+                dz1 = dh * (z1 > 0.0)
+                gw1 += np.outer(x, dz1).astype(np.float32)
+                gb1 += dz1.astype(np.float32)
+        else:
+            rewards = [step_rec.reward for step_rec in traj]
+            returns_to_go = _compute_returns(rewards, gamma=float(args.gamma))
 
-            dh = dh_policy + dh_value
-            dz1 = dh * (step_rec.z1 > 0.0)
-            gw1 += np.outer(step_rec.x, dz1).astype(np.float32)
-            gb1 += dz1.astype(np.float32)
+            # Backprop per ogni step della traiettoria (Monte Carlo A2C).
+            for step_rec, g in zip(traj, returns_to_go, strict=True):
+                v = float(step_rec.value_pred)
+                adv = float(g - v)
+
+                # Policy gradient (loss = -adv * log pi(a|s)).
+                dlogits = step_rec.probs.copy()
+                dlogits[step_rec.action_id] -= 1.0
+                dlogits *= float(adv)
+
+                beta = float(args.entropy_beta)
+                if beta > 0.0:
+                    # Loss include `-beta * H(pi)` per incoraggiare esplorazione.
+                    logp = np.log(step_rec.probs + 1e-12)
+                    s = float(np.sum(step_rec.probs * (logp + 1.0)))
+                    dent = step_rec.probs * (logp + 1.0 - s)
+                    dlogits += beta * dent
+
+                # Regularization: stay-close-to-BC anchor (se attivo).
+                #
+                # Questo termine NON è pesato dall'advantage: è un vincolo "stile" separato dal reward.
+                anchor_beta = float(args.bc_anchor_beta)
+                if anchor_beta > 0.0 and step_rec.anchor_probs is not None:
+                    grad_anchor = grad_ce_wrt_logits_from_probs(
+                        pred_probs=step_rec.probs,
+                        target_probs=step_rec.anchor_probs,
+                        action_mask=step_rec.action_mask,
+                    )
+                    dlogits += anchor_beta * grad_anchor
+                    anchor_ces.append(float(step_rec.anchor_ce))
+
+                # Actor head grads.
+                gw2 += np.outer(step_rec.h, dlogits).astype(np.float32)
+                gb2 += dlogits.astype(np.float32)
+                dh_policy = policy.w2 @ dlogits  # (H,)
+
+                # Critic loss: 0.5 * value_coef * (V - G)^2
+                dv = float(args.value_coef) * (v - float(g))
+                value_losses.append(0.5 * float(args.value_coef) * (v - float(g)) ** 2)
+
+                gwv += (step_rec.h * dv).astype(np.float32)
+                gbv += dv
+                dh_value = policy.wv * dv  # (H,)
+
+                dh = dh_policy + dh_value
+                dz1 = dh * (step_rec.z1 > 0.0)
+                gw1 += np.outer(step_rec.x, dz1).astype(np.float32)
+                gb1 += dz1.astype(np.float32)
 
         # Update ogni `update_every` partite.
         if game_idx % update_every == 0:
