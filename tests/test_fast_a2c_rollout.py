@@ -7,6 +7,7 @@ Il test non valuta la qualità del modello: verifica solo che il trainer possa u
 
 from __future__ import annotations
 
+import importlib.util
 import json
 import subprocess
 import sys
@@ -14,6 +15,24 @@ from pathlib import Path
 
 import numpy as np
 import pytest
+
+from briscola_ai.ai.training.policy_regularization import (
+    cross_entropy_from_probs,
+    grad_ce_wrt_logits_from_probs,
+)
+
+_SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
+_SPEC = importlib.util.spec_from_file_location("train_a2c_for_tests", _SCRIPT_PATH)
+if _SPEC is None or _SPEC.loader is None:
+    raise RuntimeError(f"Impossibile caricare {_SCRIPT_PATH}")
+_TRAIN_A2C = importlib.util.module_from_spec(_SPEC)
+sys.modules[_SPEC.name] = _TRAIN_A2C
+_SPEC.loader.exec_module(_TRAIN_A2C)
+
+A2CPolicy = _TRAIN_A2C.A2CPolicy
+_accumulate_numba_trajectory_grads = _TRAIN_A2C._accumulate_numba_trajectory_grads
+_masked_logits_1d = _TRAIN_A2C._masked_logits_1d
+_softmax_1d = _TRAIN_A2C._softmax_1d
 
 
 def _write_dummy_mlp_model(path: Path, *, feature_dim: int = 248, hidden_dim: int = 4) -> None:
@@ -132,3 +151,144 @@ def test_train_a2c_fast_numba_rollout_supports_bc_model_opponent(tmp_path: Path)
     assert metadata["fast_rollout"] == "numba"
     assert metadata["opponent"] == "bc_model"
     assert metadata["opponent_model"] == str(opponent_path)
+
+
+class _LinearAnchor:
+    """Anchor minimale per testare la regolarizzazione nel batch backprop."""
+
+    def __init__(self, w: np.ndarray, b: np.ndarray) -> None:
+        self.w = w
+        self.b = b
+
+    @property
+    def metadata(self) -> dict[str, str]:
+        """Metadati fittizi, necessari per rispettare il protocollo del modello."""
+        return {}
+
+    @property
+    def feature_dim(self) -> int:
+        """Dimensione feature accettata dall'anchor."""
+        return int(self.w.shape[0])
+
+    def logits(self, x: np.ndarray) -> np.ndarray:
+        """Forward lineare usato solo dal test."""
+        return x @ self.w + self.b
+
+
+def test_numba_trajectory_vectorized_backprop_matches_step_loop() -> None:
+    """Il nuovo accumulo batch deve restare equivalente al loop `np.outer` originale."""
+    rng = np.random.default_rng(7)
+    steps = 6
+    feature_dim = 9
+    hidden_dim = 5
+
+    policy = A2CPolicy(
+        w1=rng.normal(0.0, 0.05, size=(feature_dim, hidden_dim)).astype(np.float32),
+        b1=rng.normal(0.0, 0.05, size=(hidden_dim,)).astype(np.float32),
+        w2=rng.normal(0.0, 0.05, size=(hidden_dim, 40)).astype(np.float32),
+        b2=rng.normal(0.0, 0.05, size=(40,)).astype(np.float32),
+        wv=rng.normal(0.0, 0.05, size=(hidden_dim,)).astype(np.float32),
+        bv=0.0,
+    )
+    xs = rng.normal(0.0, 1.0, size=(steps, feature_dim)).astype(np.float32)
+    z1s = xs @ policy.w1 + policy.b1
+    hs = np.maximum(z1s, 0.0).astype(np.float32)
+    action_masks = rng.random((steps, 40)) > 0.25
+    action_ids = np.zeros((steps,), dtype=np.int64)
+    probs = np.zeros((steps, 40), dtype=np.float32)
+    for i in range(steps):
+        valid_ids = np.flatnonzero(action_masks[i])
+        action_ids[i] = int(valid_ids[i % len(valid_ids)])
+        raw = rng.random(len(valid_ids)).astype(np.float32)
+        raw /= np.sum(raw, dtype=np.float32)
+        probs[i, valid_ids] = raw
+    value_preds = rng.normal(0.0, 0.2, size=(steps,)).astype(np.float32)
+    returns_to_go = rng.normal(0.0, 0.2, size=(steps,)).astype(np.float32)
+    anchor = _LinearAnchor(
+        rng.normal(0.0, 0.05, size=(feature_dim, 40)).astype(np.float32),
+        rng.normal(0.0, 0.05, size=(40,)).astype(np.float32),
+    )
+
+    ref_gw1 = np.zeros_like(policy.w1)
+    ref_gb1 = np.zeros_like(policy.b1)
+    ref_gw2 = np.zeros_like(policy.w2)
+    ref_gb2 = np.zeros_like(policy.b2)
+    ref_gwv = np.zeros_like(policy.wv)
+    ref_gbv = 0.0
+    ref_value_loss_sum = 0.0
+    ref_anchor_ce_sum = 0.0
+    for i, g in enumerate(returns_to_go):
+        x = xs[i]
+        z1 = z1s[i]
+        h = hs[i]
+        mask = action_masks[i]
+        p = probs[i]
+        v = float(value_preds[i])
+        dlogits = p.copy()
+        dlogits[int(action_ids[i])] -= 1.0
+        dlogits *= float(g - v)
+
+        logp = np.log(p + 1e-12)
+        s = float(np.sum(p * (logp + 1.0)))
+        dlogits += np.float32(0.0005) * (p * (logp + 1.0 - s)).astype(np.float32)
+
+        anchor_logits = anchor.logits(x)
+        anchor_probs = _softmax_1d(_masked_logits_1d(anchor_logits, mask))
+        ref_anchor_ce_sum += cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=p)
+        grad_anchor = grad_ce_wrt_logits_from_probs(
+            pred_probs=p,
+            target_probs=anchor_probs,
+            action_mask=mask,
+        )
+        dlogits += np.float32(0.03) * grad_anchor.astype(np.float32)
+
+        ref_gw2 += np.outer(h, dlogits).astype(np.float32)
+        ref_gb2 += dlogits.astype(np.float32)
+        dh_policy = policy.w2 @ dlogits
+
+        dv = 0.5 * (v - float(g))
+        ref_value_loss_sum += 0.5 * 0.5 * (v - float(g)) ** 2
+        ref_gwv += (h * dv).astype(np.float32)
+        ref_gbv += dv
+        dh_value = policy.wv * dv
+
+        dz1 = (dh_policy + dh_value) * (z1 > 0.0)
+        ref_gw1 += np.outer(x, dz1).astype(np.float32)
+        ref_gb1 += dz1.astype(np.float32)
+
+    gw1 = np.zeros_like(policy.w1)
+    gb1 = np.zeros_like(policy.b1)
+    gw2 = np.zeros_like(policy.w2)
+    gb2 = np.zeros_like(policy.b2)
+    gwv = np.zeros_like(policy.wv)
+    stats = _accumulate_numba_trajectory_grads(
+        policy=policy,
+        xs=xs,
+        z1s=z1s,
+        hs=hs,
+        action_masks=action_masks,
+        probs=probs,
+        action_ids=action_ids,
+        value_preds=value_preds,
+        returns_to_go=returns_to_go,
+        entropy_beta=0.0005,
+        value_coef=0.5,
+        bc_anchor=anchor,
+        bc_anchor_beta=0.03,
+        gw1=gw1,
+        gb1=gb1,
+        gw2=gw2,
+        gb2=gb2,
+        gwv=gwv,
+    )
+
+    assert stats.steps == steps
+    assert stats.gbv == pytest.approx(ref_gbv)
+    assert stats.value_loss_sum == pytest.approx(ref_value_loss_sum)
+    assert stats.anchor_ce_sum == pytest.approx(ref_anchor_ce_sum)
+    assert stats.anchor_ce_count == steps
+    assert gw1 == pytest.approx(ref_gw1, abs=1e-6)
+    assert gb1 == pytest.approx(ref_gb1, abs=1e-6)
+    assert gw2 == pytest.approx(ref_gw2, abs=1e-6)
+    assert gb2 == pytest.approx(ref_gb2, abs=1e-6)
+    assert gwv == pytest.approx(ref_gwv, abs=1e-6)

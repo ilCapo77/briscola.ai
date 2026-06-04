@@ -535,6 +535,112 @@ def _compute_returns_array(rewards: np.ndarray, *, gamma: float) -> np.ndarray:
     return out
 
 
+@dataclass(frozen=True, slots=True)
+class GradientStats:
+    """Contatori prodotti dall'accumulo gradienti per il logging e la normalizzazione."""
+
+    steps: int
+    value_loss_sum: float
+    anchor_ce_sum: float
+    anchor_ce_count: int
+    gbv: float
+
+
+def _accumulate_numba_trajectory_grads(
+    *,
+    policy: A2CPolicy,
+    xs: np.ndarray,
+    z1s: np.ndarray,
+    hs: np.ndarray,
+    action_masks: np.ndarray,
+    probs: np.ndarray,
+    action_ids: np.ndarray,
+    value_preds: np.ndarray,
+    returns_to_go: np.ndarray,
+    entropy_beta: float,
+    value_coef: float,
+    bc_anchor: LoadedBCModel | None,
+    bc_anchor_beta: float,
+    gw1: np.ndarray,
+    gb1: np.ndarray,
+    gw2: np.ndarray,
+    gb2: np.ndarray,
+    gwv: np.ndarray,
+) -> GradientStats:
+    """
+    Accumula i gradienti di una traiettoria Numba usando batch matrix multiply.
+
+    Il vecchio path faceva due `np.outer` per ogni decisione della policy. Qui costruiamo
+    prima `dlogits` per tutti gli step della partita e poi accumuliamo:
+    - `gw2 = H.T @ dlogits`
+    - `gw1 = X.T @ dz1`
+
+    La matematica resta la stessa del loop didattico per-step; cambia solo la forma
+    computazionale, che riduce overhead Python e allocazioni temporanee nel path caldo.
+    """
+    steps = int(returns_to_go.shape[0])
+    if steps == 0:
+        return GradientStats(steps=0, value_loss_sum=0.0, anchor_ce_sum=0.0, anchor_ce_count=0, gbv=0.0)
+
+    adv = returns_to_go.astype(np.float32, copy=False) - value_preds.astype(np.float32, copy=False)
+    dlogits = probs.astype(np.float32, copy=True)
+    row_idx = np.arange(steps)
+    dlogits[row_idx, action_ids.astype(np.int64, copy=False)] -= np.float32(1.0)
+    dlogits *= adv[:, None]
+
+    beta = float(entropy_beta)
+    if beta > 0.0:
+        logp = np.log(probs.astype(np.float32, copy=False) + np.float32(1e-12))
+        entropy_center = np.sum(probs * (logp + np.float32(1.0)), axis=1, keepdims=True)
+        dent = probs * (logp + np.float32(1.0) - entropy_center)
+        dlogits += np.float32(beta) * dent.astype(np.float32, copy=False)
+
+    anchor_ce_sum = 0.0
+    anchor_ce_count = 0
+    anchor_beta = float(bc_anchor_beta)
+    if anchor_beta > 0.0 and bc_anchor is not None:
+        for i in range(steps):
+            mask = action_masks[i]
+            anchor_logits = bc_anchor.logits(xs[i])
+            anchor_masked = _masked_logits_1d(anchor_logits, mask)
+            anchor_probs = _softmax_1d(anchor_masked)
+            anchor_ce_sum += cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs[i])
+            grad_anchor = grad_ce_wrt_logits_from_probs(
+                pred_probs=probs[i],
+                target_probs=anchor_probs,
+                action_mask=mask,
+            )
+            dlogits[i] += np.float32(anchor_beta) * grad_anchor.astype(np.float32, copy=False)
+            anchor_ce_count += 1
+
+    # Actor head: somma degli outer product h x dlogits in una GEMM.
+    gw2 += (hs.T @ dlogits).astype(np.float32, copy=False)
+    gb2 += np.sum(dlogits, axis=0, dtype=np.float32)
+    dh_policy = dlogits @ policy.w2.T
+
+    # Critic head.
+    value_error = value_preds.astype(np.float32, copy=False) - returns_to_go.astype(np.float32, copy=False)
+    dv = (np.float32(value_coef) * value_error).astype(np.float32, copy=False)
+    value_loss_sum = float(np.sum(0.5 * float(value_coef) * (value_error.astype(np.float64) ** 2)))
+
+    gwv += (hs.T @ dv).astype(np.float32, copy=False)
+    gbv = float(np.sum(dv, dtype=np.float64))
+    dh_value = dv[:, None] * policy.wv[None, :]
+
+    # Backprop sul trunk condiviso: somma degli outer product x x dz1 in una GEMM.
+    dz1 = (dh_policy + dh_value) * (z1s > 0.0)
+    gw1 += (xs.T @ dz1).astype(np.float32, copy=False)
+    gb1 += np.sum(dz1, axis=0, dtype=np.float32)
+
+    return GradientStats(
+        steps=steps,
+        value_loss_sum=value_loss_sum,
+        anchor_ce_sum=anchor_ce_sum,
+        anchor_ce_count=anchor_ce_count,
+        gbv=gbv,
+    )
+
+
 @dataclass
 class TrainMetrics:
     """Metriche aggregate (logging)."""
@@ -843,8 +949,10 @@ def main() -> int:
     wins = 0
     draws = 0
     entropies: list[float] = []
-    value_losses: list[float] = []
-    anchor_ces: list[float] = []
+    grad_step_count = 0
+    value_loss_sum = 0.0
+    anchor_ce_sum = 0.0
+    anchor_ce_count = 0
 
     num_games = int(args.num_games)
     for game_idx in range(1, num_games + 1):
@@ -931,62 +1039,38 @@ def main() -> int:
 
         if numba_traj_for_backprop is not None:
             returns_to_go_arr = _compute_returns_array(numba_traj_for_backprop.rewards, gamma=float(args.gamma))
-            for i, g in enumerate(returns_to_go_arr):
-                x = numba_traj_for_backprop.xs[i]
-                z1 = numba_traj_for_backprop.z1s[i]
-                h = numba_traj_for_backprop.hs[i]
-                mask = numba_traj_for_backprop.action_masks[i]
-                probs = numba_traj_for_backprop.probs[i]
-                action_id = int(numba_traj_for_backprop.action_ids[i])
-                v = float(numba_traj_for_backprop.value_preds[i])
-                adv = float(g - v)
-
-                dlogits = probs.copy()
-                dlogits[action_id] -= 1.0
-                dlogits *= float(adv)
-
-                beta = float(args.entropy_beta)
-                if beta > 0.0:
-                    logp = np.log(probs + 1e-12)
-                    s = float(np.sum(probs * (logp + 1.0)))
-                    dent = probs * (logp + 1.0 - s)
-                    dlogits += beta * dent
-
-                anchor_beta = float(args.bc_anchor_beta)
-                if anchor_beta > 0.0 and bc_anchor is not None:
-                    anchor_logits = bc_anchor.logits(x)
-                    anchor_masked = _masked_logits_1d(anchor_logits, mask)
-                    anchor_probs = _softmax_1d(anchor_masked)
-                    anchor_ce = cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs)
-                    grad_anchor = grad_ce_wrt_logits_from_probs(
-                        pred_probs=probs,
-                        target_probs=anchor_probs,
-                        action_mask=mask,
-                    )
-                    dlogits += anchor_beta * grad_anchor
-                    anchor_ces.append(float(anchor_ce))
-
-                gw2 += np.outer(h, dlogits).astype(np.float32)
-                gb2 += dlogits.astype(np.float32)
-                dh_policy = policy.w2 @ dlogits
-
-                dv = float(args.value_coef) * (v - float(g))
-                value_losses.append(0.5 * float(args.value_coef) * (v - float(g)) ** 2)
-
-                gwv += (h * dv).astype(np.float32)
-                gbv += dv
-                dh_value = policy.wv * dv
-
-                dh = dh_policy + dh_value
-                dz1 = dh * (z1 > 0.0)
-                gw1 += np.outer(x, dz1).astype(np.float32)
-                gb1 += dz1.astype(np.float32)
+            grad_stats = _accumulate_numba_trajectory_grads(
+                policy=policy,
+                xs=numba_traj_for_backprop.xs,
+                z1s=numba_traj_for_backprop.z1s,
+                hs=numba_traj_for_backprop.hs,
+                action_masks=numba_traj_for_backprop.action_masks,
+                probs=numba_traj_for_backprop.probs,
+                action_ids=numba_traj_for_backprop.action_ids,
+                value_preds=numba_traj_for_backprop.value_preds,
+                returns_to_go=returns_to_go_arr,
+                entropy_beta=float(args.entropy_beta),
+                value_coef=float(args.value_coef),
+                bc_anchor=bc_anchor,
+                bc_anchor_beta=float(args.bc_anchor_beta),
+                gw1=gw1,
+                gb1=gb1,
+                gw2=gw2,
+                gb2=gb2,
+                gwv=gwv,
+            )
+            gbv += grad_stats.gbv
+            grad_step_count += grad_stats.steps
+            value_loss_sum += grad_stats.value_loss_sum
+            anchor_ce_sum += grad_stats.anchor_ce_sum
+            anchor_ce_count += grad_stats.anchor_ce_count
         else:
             rewards = [step_rec.reward for step_rec in traj]
             returns_to_go = _compute_returns(rewards, gamma=float(args.gamma))
 
             # Backprop per ogni step della traiettoria (Monte Carlo A2C).
             for step_rec, g in zip(traj, returns_to_go, strict=True):
+                grad_step_count += 1
                 v = float(step_rec.value_pred)
                 adv = float(g - v)
 
@@ -1014,7 +1098,8 @@ def main() -> int:
                         action_mask=step_rec.action_mask,
                     )
                     dlogits += anchor_beta * grad_anchor
-                    anchor_ces.append(float(step_rec.anchor_ce))
+                    anchor_ce_sum += float(step_rec.anchor_ce)
+                    anchor_ce_count += 1
 
                 # Actor head grads.
                 gw2 += np.outer(step_rec.h, dlogits).astype(np.float32)
@@ -1023,7 +1108,7 @@ def main() -> int:
 
                 # Critic loss: 0.5 * value_coef * (V - G)^2
                 dv = float(args.value_coef) * (v - float(g))
-                value_losses.append(0.5 * float(args.value_coef) * (v - float(g)) ** 2)
+                value_loss_sum += 0.5 * float(args.value_coef) * (v - float(g)) ** 2
 
                 gwv += (step_rec.h * dv).astype(np.float32)
                 gbv += dv
@@ -1040,7 +1125,7 @@ def main() -> int:
 
             # Normalizziamo per numero di step policy osservati (più robusto di /update_every).
             # In 2-player i step per game sono ~20, ma può variare per seat-fair/fine partita.
-            total_steps = max(1, len(value_losses))
+            total_steps = max(1, grad_step_count)
             scale = 1.0 / float(total_steps)
             gw1 *= scale
             gb1 *= scale
@@ -1077,8 +1162,8 @@ def main() -> int:
             win_rate = float(wins) / float(update_every)
             draw_rate = float(draws) / float(update_every)
             avg_ent = float(np.mean(entropies)) if entropies else 0.0
-            vloss = float(np.mean(value_losses)) if value_losses else 0.0
-            avg_anchor_ce = float(np.mean(anchor_ces)) if anchor_ces else 0.0
+            vloss = float(value_loss_sum) / float(grad_step_count) if grad_step_count > 0 else 0.0
+            avg_anchor_ce = float(anchor_ce_sum) / float(anchor_ce_count) if anchor_ce_count > 0 else 0.0
 
             row = TrainMetrics(
                 iter=t,
@@ -1105,8 +1190,10 @@ def main() -> int:
             wins = 0
             draws = 0
             entropies.clear()
-            value_losses.clear()
-            anchor_ces.clear()
+            grad_step_count = 0
+            value_loss_sum = 0.0
+            anchor_ce_sum = 0.0
+            anchor_ce_count = 0
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
 

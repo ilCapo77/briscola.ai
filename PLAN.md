@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **159** (pytest).
+- Test attuali: **160** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -814,10 +814,18 @@ Prossimi step performance (ordine consigliato):
   - benchmark training A2C vs `random`, 5k game:
     - hidden=32: resta `~2.52s` (conversione StepRecord non era il collo principale)
     - hidden=128: `~5.04s -> ~4.93s` (miglioramento piccolo)
-- [ ] Ottimizzare training A2C oltre il rollout
-  - profilare il path `--fast-rollout numba` con hidden=128/200k game
-  - valutare backprop batch-oriented su array NumPy invece del loop Python per step
-  - valutare JIT solo del calcolo return/grad se resta un hotspot misurato
+- [x] Ottimizzare training A2C oltre il rollout
+  - profilo hidden=128 dopo buffer diretti: hotspot principale nel backprop Python con `np.outer` per step
+  - il path `--fast-rollout numba` ora accumula i gradienti di ogni traiettoria con moltiplicazioni batch:
+    `H.T @ dlogits`, `X.T @ dz1`, `H.T @ dv`
+  - logging aggiornato con contatori aggregati (`value_loss_sum`, `grad_step_count`) invece di liste per step
+  - test: equivalenza numerica tra nuovo accumulo batch e reference lenta con `np.outer`, incluso BC-anchor
+  - benchmark training A2C vs `random`, 5k game, hidden=128: `~4.93s -> ~2.37s`
+  - profilo successivo 2k game hidden=128: backprop batch `~0.106s`, collector/wrapper Numba `~0.817s`
+- [ ] Ridurre overhead per-game del collector A2C Numba
+  - prossimo collo misurato: 1 chiamata Python a `collect_a2c_trajectory_numba_2p` per partita + allocazione/copia buffer
+  - direzione: collector batch per `update_every` partite, con buffer 3D/flattened e gradient accumulation per batch
+  - obiettivo: diminuire chiamate wrapper Python, allocazioni ripetute e copie di traiettoria per partita
 - [x] Estendere il rollout fast A2C a opponent `.npz`
   - supporto: `scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --opponent best_a2c`
   - supporto esplicito: `--opponent bc_model --opponent-model path/to/model.npz`
