@@ -20,7 +20,14 @@ from briscola_ai.ai.agents import build_agent, list_agent_specs
 from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
 from briscola_ai.ai.fast_2p import Fast2PState, play_random_fast_2p
-from briscola_ai.ai.fast_numba import evaluate_random_numba_2p, warm_up_numba
+from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, evaluate_fast_seat_fair_match_2p
+from briscola_ai.ai.fast_numba import (
+    NUMBA_EVALUATION_AGENT_NAMES,
+    evaluate_numba_seat_fair_match_2p,
+    evaluate_random_numba_2p,
+    warm_up_numba,
+    warm_up_numba_evaluation,
+)
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.state import GameState, new_game_state
 
@@ -142,6 +149,86 @@ def _benchmark_evaluation(
     )
 
 
+def _benchmark_fast_evaluation(
+    *,
+    games: int,
+    repeat: int,
+    seed: int,
+    agent_a_name: str,
+    agent_b_name: str,
+) -> None:
+    """Esegue benchmark seat-fair tra agenti fast-compatible usando il path fast Python."""
+    unsupported = [name for name in (agent_a_name, agent_b_name) if name not in FAST_EVALUATION_AGENT_NAMES]
+    if unsupported:
+        supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+        raise ValueError(f"`--mode fast-eval` supporta solo: {supported}. Non supportati: {unsupported}")
+
+    elapsed_values: list[float] = []
+    last_avg_diff = 0.0
+    for i in range(repeat):
+        run_seed = seed + i
+        t0 = time.perf_counter()
+        stats = evaluate_fast_seat_fair_match_2p(agent_a_name, agent_b_name, num_games=games, seed=run_seed)
+        elapsed = time.perf_counter() - t0
+        elapsed_values.append(elapsed)
+        last_avg_diff = float(stats.avg_point_diff_agent_a_minus_agent_b)
+        print(
+            f"run {i + 1}/{repeat} | mode=fast-eval | games={games} | elapsed={elapsed:.3f}s | "
+            f"games/sec={games / elapsed:.1f} | avg_diff={last_avg_diff:+.2f}"
+        )
+
+    best = min(elapsed_values)
+    avg = sum(elapsed_values) / len(elapsed_values)
+    print(
+        "summary | "
+        f"mode=fast-eval | agent_a={agent_a_name} | agent_b={agent_b_name} | "
+        f"best={best:.3f}s ({games / best:.1f} games/sec) | "
+        f"avg={avg:.3f}s ({games / avg:.1f} games/sec) | "
+        f"last_avg_diff={last_avg_diff:+.2f}"
+    )
+
+
+def _benchmark_numba_evaluation(
+    *,
+    games: int,
+    repeat: int,
+    seed: int,
+    agent_a_name: str,
+    agent_b_name: str,
+) -> None:
+    """Esegue benchmark seat-fair tra agenti fast-compatible usando il core Numba."""
+    unsupported = [name for name in (agent_a_name, agent_b_name) if name not in NUMBA_EVALUATION_AGENT_NAMES]
+    if unsupported:
+        supported = ", ".join(sorted(NUMBA_EVALUATION_AGENT_NAMES))
+        raise ValueError(f"`--mode numba-eval` supporta solo: {supported}. Non supportati: {unsupported}")
+
+    warm_up_numba_evaluation()
+
+    elapsed_values: list[float] = []
+    last_avg_diff = 0.0
+    for i in range(repeat):
+        run_seed = seed + i
+        t0 = time.perf_counter()
+        stats = evaluate_numba_seat_fair_match_2p(agent_a_name, agent_b_name, num_games=games, seed=run_seed)
+        elapsed = time.perf_counter() - t0
+        elapsed_values.append(elapsed)
+        last_avg_diff = float(stats.avg_point_diff_agent_a_minus_agent_b)
+        print(
+            f"run {i + 1}/{repeat} | mode=numba-eval | games={games} | elapsed={elapsed:.3f}s | "
+            f"games/sec={games / elapsed:.1f} | avg_diff={last_avg_diff:+.2f}"
+        )
+
+    best = min(elapsed_values)
+    avg = sum(elapsed_values) / len(elapsed_values)
+    print(
+        "summary | "
+        f"mode=numba-eval | agent_a={agent_a_name} | agent_b={agent_b_name} | "
+        f"best={best:.3f}s ({games / best:.1f} games/sec) | "
+        f"avg={avg:.3f}s ({games / avg:.1f} games/sec) | "
+        f"last_avg_diff={last_avg_diff:+.2f}"
+    )
+
+
 def main() -> int:
     """Esegue il benchmark e stampa metriche sintetiche."""
     agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
@@ -149,7 +236,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Benchmark throughput simulazioni 2-player.")
     parser.add_argument(
         "--mode",
-        choices=["eval", "domain-random", "fast-random", "numba-random"],
+        choices=["eval", "fast-eval", "domain-random", "fast-random", "numba-random", "numba-eval"],
         default="eval",
         help="Tipo di benchmark: evaluation con agenti oppure loop engine-only random.",
     )
@@ -175,11 +262,27 @@ def main() -> int:
         raise ValueError("--games deve essere > 0")
     if repeat <= 0:
         raise ValueError("--repeat deve essere > 0")
-    if args.mode == "eval" and games % 2 != 0:
+    if args.mode in ("eval", "fast-eval", "numba-eval") and games % 2 != 0:
         raise ValueError("--games deve essere pari in modalità eval seat-fair")
 
     if args.mode in ("domain-random", "fast-random", "numba-random"):
         _benchmark_random_games(mode=args.mode, games=games, repeat=repeat, seed=seed)
+    elif args.mode == "fast-eval":
+        _benchmark_fast_evaluation(
+            games=games,
+            repeat=repeat,
+            seed=seed,
+            agent_a_name=args.agent_a,
+            agent_b_name=args.agent_b,
+        )
+    elif args.mode == "numba-eval":
+        _benchmark_numba_evaluation(
+            games=games,
+            repeat=repeat,
+            seed=seed,
+            agent_a_name=args.agent_a,
+            agent_b_name=args.agent_b,
+        )
     else:
         _benchmark_evaluation(
             games=games,

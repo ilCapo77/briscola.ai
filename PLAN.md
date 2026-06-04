@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **133** (pytest).
+- Test attuali: **139** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -768,10 +768,24 @@ Prossimi step performance (ordine consigliato):
     - `fast_numba`: `~445.4k games/sec` medio dopo warm-up
     - speedup indicativo: `~20.9x` sul solo core random-vs-random
   - limite: non misura ancora policy neurali/A2C, backprop o opponent `.npz`
-- [ ] Estendere Numba alle policy fast-compatible
-  - portare nel core JIT almeno `greedy_points`, `heuristic_v1` e `heuristic_v2`
-  - aggiungere benchmark `numba-eval`/policy-vs-policy confrontabile con `scripts/evaluate_agents.py --engine fast`
-  - mantenere test di equivalenza aggregata/invarianti contro il fast path Python
+- [x] Estendere Numba alle policy fast-compatible
+  - agenti tradotti nel core JIT: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`
+  - modulo: `src/briscola_ai/ai/fast_numba.py`
+  - benchmark CLI: `scripts/benchmark_perf.py --mode fast-eval|numba-eval`
+  - test: determinismo per seed, invarianti punti/contatori, rifiuto agenti non supportati
+  - benchmark seat-fair `heuristic_v2` vs `random`, 100k game x 3 run:
+    - fast evaluation Python: `~17.1k games/sec` medio
+    - Numba evaluation: `~364.2k games/sec` medio
+    - speedup indicativo: `~21.3x`
+  - benchmark seat-fair `heuristic_v2` vs `heuristic_v1`, 100k game x 3 run:
+    - fast evaluation Python: `~13.3k games/sec` medio
+    - Numba evaluation: `~300.3k games/sec` medio
+    - speedup indicativo: `~22.6x`
+  - limite: RNG Numba separato dal `random.Random` canonico; testiamo determinismo/invarianti, non identità byte-per-byte degli esiti
+- [ ] Integrare Numba nel rollout A2C per opponent fast-compatible
+  - riusare policy rule-based JIT per l'avversario
+  - valutare se tenere forward/backprop NumPy fuori dal JIT o portare almeno la scelta azione/mask in funzioni numeriche
+  - benchmark da confrontare con `scripts/train_a2c.py --rollout-engine fast`
 - [ ] Estendere il rollout fast A2C a opponent `.npz`
   - supportare policy `.npz` direttamente su encoder fast
   - poi agganciare `best_a2c` senza passare da `PlayerObservation`

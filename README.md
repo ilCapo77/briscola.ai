@@ -342,20 +342,23 @@ python scripts/fast_self_play.py --num-games 1000 --seed 0 --agents greedy_point
 
 Nota: questo comando è volutamente “summary-only”: salva seed, agenti, punti finali e vincitore, ma non salva
 osservazioni/azioni step-by-step. Per dataset BC completo usa ancora `scripts/self_play_to_db.py` + export.
-Per ora supporta solo `random` e `greedy_points`.
+Per ora supporta `random`, `greedy_points`, `heuristic_v1` e `heuristic_v2`.
 
 ### Benchmark performance
 
-Per misurare il throughput locale dei loop engine-only:
+Per misurare il throughput locale dei loop engine-only e delle policy fast-compatible:
 
 ```
 python scripts/benchmark_perf.py --mode fast-random --games 100000 --repeat 3 --seed 0
 python scripts/benchmark_perf.py --mode numba-random --games 100000 --repeat 3 --seed 0
+python scripts/benchmark_perf.py --mode fast-eval --games 100000 --repeat 3 --seed 0 --agent-a heuristic_v2 --agent-b heuristic_v1
+python scripts/benchmark_perf.py --mode numba-eval --games 100000 --repeat 3 --seed 0 --agent-a heuristic_v2 --agent-b heuristic_v1
 ```
 
-Nota: `numba-random` misura solo il primo core JIT random-vs-random in `fast_numba`; non misura ancora
-il training A2C completo. Risultato locale indicativo dopo warm-up: `fast-random` ~21.3k games/sec,
-`numba-random` ~445k games/sec (`~20.9x`).
+Nota: `numba-random` e `numba-eval` misurano il core JIT in `fast_numba`; non misurano ancora il training
+A2C completo. Risultati locali indicativi dopo warm-up:
+- random-vs-random: `fast-random` ~21.3k games/sec, `numba-random` ~445k games/sec (`~20.9x`);
+- `heuristic_v2` vs `heuristic_v1`: `fast-eval` ~13.3k games/sec, `numba-eval` ~300k games/sec (`~22.6x`).
 
 ### Valutazione agenti
 
