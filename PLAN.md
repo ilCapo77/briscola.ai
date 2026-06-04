@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **169** (pytest).
+- Test attuali: **170** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -861,6 +861,14 @@ Prossimi step performance (ordine consigliato):
   - validazione: i flag fast/Numba sono accettati solo con `--algo a2c` e richiedono `--rollout-engine fast`
   - manifest: `train.rollout` registra engine, encoder e collector usati
   - test: help CLI, validazione PG e comando/manifest con `_run` mockato
+- [x] Integrare Numba nella evaluation matrix ufficiale
+  - CLI: `scripts/evaluate_matrix.py --engine numba --model <model.npz> ...`
+  - pipeline: `scripts/run_experiment.py --eval-engine numba` passa il flag alla matrix e lo registra nel manifest
+  - semantica: valutazione deterministica argmax come `BCModelAgent`, con seed suite standard/holdout e guard anti-overkill
+    letto dai metadati del modello
+  - supporto: modelli `.npz` MLP (`w1/b1/w2/b2`) contro opponent fast-compatible (`random`, `greedy_points`,
+    `heuristic_v1`, `heuristic_v2`)
+  - limite: model-vs-model nella matrix resta sul dominio canonico; il path Numba ufficiale copre model-vs-baseline
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 

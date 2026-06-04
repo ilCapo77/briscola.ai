@@ -174,6 +174,15 @@ def main() -> int:
         help="Numero processi per parallelizzare le righe di `evaluate_matrix.py` (default: 1).",
     )
     parser.add_argument(
+        "--eval-engine",
+        choices=["domain", "numba"],
+        default="domain",
+        help=(
+            "Engine per `evaluate_matrix.py`. `numba` accelera la valutazione di modelli MLP contro opponent "
+            "fast-compatible (default: domain)."
+        ),
+    )
+    parser.add_argument(
         "--rollout-engine",
         choices=["domain", "fast"],
         default="domain",
@@ -449,6 +458,8 @@ def main() -> int:
             "scripts/evaluate_matrix.py",
             "--model",
             str(model_path),
+            "--engine",
+            str(args.eval_engine),
             "--benchmark",
             b,
             "--seed",
@@ -488,6 +499,7 @@ def main() -> int:
             {
                 "benchmark": b,
                 "matrix_json": str(p),
+                "engine": str(args.eval_engine),
                 "workers": int(args.eval_workers),
             }
             for b, p in matrix_paths.items()

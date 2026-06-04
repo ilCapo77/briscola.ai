@@ -9,7 +9,8 @@ o dimenticare un confronto (es. holdout). Una *evaluation matrix* standard:
 - rende confronti ripetibili nel tempo;
 - fornisce una fotografia di robustezza (vs avversari diversi + holdout seed).
 
-Questa implementazione è dominio-only (no HTTP/WS) e riusa `evaluate_seat_fair_match_2p`.
+Questa implementazione è offline (no HTTP/WS). Il path di default riusa il dominio canonico;
+quando `engine="numba"` usa il rollout MLP full-JIT per modelli `.npz` MLP e avversari fast-compatible.
 """
 
 from __future__ import annotations
@@ -21,10 +22,13 @@ from pathlib import Path
 from typing import Literal
 
 from .agents import build_agent
-from .bc_model_agent import BCModelAgent
+from .bc_model_agent import BCModelAgent, MLPBCModel
 from .evaluation import SeatFairStats, evaluate_seat_fair_match_2p
+from .fast_evaluation import FAST_EVALUATION_AGENT_NAMES
+from .fast_numba_observation import evaluate_mlp_policy_numba_2p
 
 BenchmarkName = Literal["small", "medium", "big"]
+EvaluationEngine = Literal["domain", "numba"]
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,11 +59,13 @@ class EvaluationMatrix:
     num_games: int
     seed: int
     rows: list[MatrixRow]
+    engine: EvaluationEngine = "domain"
 
     def to_json_dict(self) -> dict:
         """Ritorna una struttura JSON-serializzabile (stabile) per persistere i risultati."""
         return {
             "model_path": self.model_path,
+            "engine": self.engine,
             "benchmark": self.benchmark,
             "num_games": self.num_games,
             "seed": self.seed,
@@ -123,18 +129,67 @@ def build_suites_for_benchmark(
     ]
 
 
-def _evaluate_matrix_row_job(args: tuple[str, str, int, SuiteSpec, list[int]]) -> MatrixRow:
-    """Valuta una singola riga della matrix. Funzione top-level per multiprocessing."""
-    model_path, opponent_name, seed, suite, seeds = args
-    model = BCModelAgent.from_npz(model_path)
-    opponent = build_agent(opponent_name)
-    stats = evaluate_seat_fair_match_2p(
-        model,
-        opponent,
-        num_games=len(seeds) * 2,
+def _evaluate_numba_model_vs_opponent(
+    *,
+    model_agent: BCModelAgent,
+    opponent_name: str,
+    num_games: int,
+    seed: int,
+    game_seeds: list[int],
+) -> SeatFairStats:
+    """
+    Valuta un modello MLP `.npz` con il core Numba e ritorna lo stesso DTO del path dominio.
+
+    Limite intenzionale:
+    il path Numba ufficiale valuta la policy modello come Agent A contro avversari rule-based
+    fast-compatible. Per confronti model-vs-model resta disponibile il dominio canonico.
+    """
+    if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
+        supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+        raise ValueError(f"`engine=numba` supporta opponent: {supported}. Ottenuto: {opponent_name!r}")
+
+    model = model_agent.model
+    if not isinstance(model, MLPBCModel):
+        raise ValueError("`engine=numba` supporta solo modelli `.npz` MLP con chiavi w1/b1/w2/b2.")
+
+    summary = evaluate_mlp_policy_numba_2p(
+        w1=model.w1,
+        b1=model.b1,
+        w2=model.w2,
+        b2=model.b2,
+        opponent_name=opponent_name,
+        num_games=int(num_games),
         seed=int(seed),
-        game_seeds=seeds,
+        seat_fair=True,
+        game_seeds=game_seeds,
+        deterministic=True,
+        policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+        policy_name=model_agent.name,
     )
+    return summary.to_seat_fair_stats()
+
+
+def _evaluate_matrix_row_job(args: tuple[str, str, int, SuiteSpec, list[int], EvaluationEngine]) -> MatrixRow:
+    """Valuta una singola riga della matrix. Funzione top-level per multiprocessing."""
+    model_path, opponent_name, seed, suite, seeds, engine = args
+    model = BCModelAgent.from_npz(model_path)
+    if engine == "numba":
+        stats = _evaluate_numba_model_vs_opponent(
+            model_agent=model,
+            opponent_name=opponent_name,
+            num_games=len(seeds) * 2,
+            seed=int(seed),
+            game_seeds=seeds,
+        )
+    else:
+        opponent = build_agent(opponent_name)
+        stats = evaluate_seat_fair_match_2p(
+            model,
+            opponent,
+            num_games=len(seeds) * 2,
+            seed=int(seed),
+            game_seeds=seeds,
+        )
     return MatrixRow(suite=suite, opponent=opponent_name, stats=stats)
 
 
@@ -148,6 +203,7 @@ def evaluate_model_matrix(
     holdout_start: int = 1_000_000,
     range_step: int = 1,
     workers: int = 1,
+    engine: EvaluationEngine = "domain",
 ) -> EvaluationMatrix:
     """
     Valuta un modello `.npz` contro una lista di avversari su 2 suite (standard + holdout).
@@ -165,24 +221,36 @@ def evaluate_model_matrix(
         step=range_step,
     )
 
-    jobs: list[tuple[str, str, int, SuiteSpec, list[int]]] = []
+    if engine not in ("domain", "numba"):
+        raise ValueError(f"engine non supportato: {engine!r}")
+
+    jobs: list[tuple[str, str, int, SuiteSpec, list[int], EvaluationEngine]] = []
     for suite in suites:
         seeds = make_range_seed_suite(start=suite.range_start, step=suite.range_step, count=suite.num_seeds)
         for opp_name in opponents:
-            jobs.append((str(Path(model_path)), opp_name, int(seed), suite, seeds))
+            jobs.append((str(Path(model_path)), opp_name, int(seed), suite, seeds, engine))
 
     if int(workers) <= 1:
         model = BCModelAgent.from_npz(model_path)
         rows = []
-        for _, opp_name, _, suite, seeds in jobs:
-            opponent = build_agent(opp_name)
-            stats = evaluate_seat_fair_match_2p(
-                model,
-                opponent,
-                num_games=num_games,
-                seed=seed,
-                game_seeds=seeds,
-            )
+        for _, opp_name, _, suite, seeds, _ in jobs:
+            if engine == "numba":
+                stats = _evaluate_numba_model_vs_opponent(
+                    model_agent=model,
+                    opponent_name=opp_name,
+                    num_games=num_games,
+                    seed=seed,
+                    game_seeds=seeds,
+                )
+            else:
+                opponent = build_agent(opp_name)
+                stats = evaluate_seat_fair_match_2p(
+                    model,
+                    opponent,
+                    num_games=num_games,
+                    seed=seed,
+                    game_seeds=seeds,
+                )
             rows.append(MatrixRow(suite=suite, opponent=opp_name, stats=stats))
     else:
         worker_count = max(1, min(int(workers), len(jobs)))
@@ -195,6 +263,7 @@ def evaluate_model_matrix(
         num_games=num_games,
         seed=int(seed),
         rows=rows,
+        engine=engine,
     )
 
 
@@ -217,6 +286,7 @@ def format_matrix_table(matrix: EvaluationMatrix) -> str:
     lines.append(
         "Evaluation matrix | "
         f"model={Path(matrix.model_path).name} | "
+        f"engine={matrix.engine} | "
         f"benchmark={matrix.benchmark} games={matrix.num_games}"
     )
     lines.append("opponent,suite,avg_diff,wins_model,wins_opp,draws")

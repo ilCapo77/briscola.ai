@@ -189,6 +189,8 @@ def test_run_experiment_forwards_fast_rollout_flags_and_manifest(
             "3",
             "--benchmarks",
             "small",
+            "--eval-engine",
+            "numba",
             "--no-update-best",
             "--seat-fair",
             "--rollout-engine",
@@ -205,6 +207,8 @@ def test_run_experiment_forwards_fast_rollout_flags_and_manifest(
     assert train_cmd[train_cmd.index("--rollout-engine") + 1] == "fast"
     assert train_cmd[train_cmd.index("--fast-encoder") + 1] == "numba"
     assert train_cmd[train_cmd.index("--fast-rollout") + 1] == "numba"
+    eval_cmd = commands[1]
+    assert eval_cmd[eval_cmd.index("--engine") + 1] == "numba"
 
     manifest_path = tmp_path / "experiments" / "numba_pipeline_test" / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
@@ -214,3 +218,4 @@ def test_run_experiment_forwards_fast_rollout_flags_and_manifest(
         "fast_rollout": "numba",
     }
     assert manifest["train"]["cmd"] == train_cmd
+    assert manifest["eval"][0]["engine"] == "numba"

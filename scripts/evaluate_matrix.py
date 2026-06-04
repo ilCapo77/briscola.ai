@@ -35,6 +35,7 @@ def _print_rich_table_if_available(*, matrix) -> bool:
     title = (
         "Evaluation matrix | "
         f"model={Path(matrix.model_path).name} | "
+        f"engine={matrix.engine} | "
         f"benchmark={matrix.benchmark} games={matrix.num_games}"
     )
     table = Table(title=title, box=box.SIMPLE_HEAVY)
@@ -73,8 +74,17 @@ def _print_rich_table_if_available(*, matrix) -> bool:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Valuta un modello `.npz` su una evaluation matrix (dominio-only)")
+    parser = argparse.ArgumentParser(description="Valuta un modello `.npz` su una evaluation matrix offline.")
     parser.add_argument("--model", required=True, help="Path al modello `.npz` (BC/RL) da valutare.")
+    parser.add_argument(
+        "--engine",
+        choices=["domain", "numba"],
+        default="domain",
+        help=(
+            "Engine evaluation. `domain` usa il motore canonico; `numba` usa rollout MLP full-JIT "
+            "per modelli MLP e opponent fast-compatible (default: domain)."
+        ),
+    )
     parser.add_argument(
         "--benchmark",
         choices=["small", "medium", "big"],
@@ -146,6 +156,7 @@ def main() -> int:
         holdout_start=args.holdout_start,
         range_step=args.range_step,
         workers=int(args.workers),
+        engine=args.engine,
     )
     elapsed = time.perf_counter() - t0
 

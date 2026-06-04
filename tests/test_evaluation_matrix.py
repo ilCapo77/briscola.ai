@@ -48,6 +48,7 @@ def test_evaluation_matrix_json_serialization_is_stable(tmp_path: Path) -> None:
     text = matrix.to_json_text()
     parsed = json.loads(text)
     assert parsed["model_path"] == "data/model.npz"
+    assert parsed["engine"] == "domain"
     assert parsed["benchmark"] == "small"
 
 
@@ -86,3 +87,39 @@ def test_evaluation_matrix_parallel_matches_serial(
     )
 
     assert parallel.to_json_dict() == serial.to_json_dict()
+
+
+def test_evaluation_matrix_numba_engine_returns_consistent_rows(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Il path matrix Numba deve produrre righe seat-fair standard per modelli MLP."""
+    monkeypatch.setattr(evaluation_matrix, "benchmark_num_games", lambda benchmark: 20)
+
+    d = int(FEATURE_DIM_2P_V1)
+    h = 4
+    model_path = tmp_path / "dummy_numba.npz"
+    np.savez(
+        model_path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h, 40), dtype=np.float32),
+        b2=np.zeros((40,), dtype=np.float32),
+        metadata_json=json.dumps({"format": "mlp_bc_v1", "feature_dim": d}, ensure_ascii=False),
+    )
+
+    matrix = evaluate_model_matrix(
+        model_path=model_path,
+        opponents=["heuristic_v1"],
+        benchmark="small",
+        seed=7,
+        workers=1,
+        engine="numba",
+    )
+
+    assert matrix.engine == "numba"
+    assert len(matrix.rows) == 2
+    for row in matrix.rows:
+        assert row.stats.num_games == 20
+        assert row.stats.wins_agent_a + row.stats.wins_agent_b + row.stats.draws == 20
+        assert row.stats.agent_b_name == "heuristic_v1"

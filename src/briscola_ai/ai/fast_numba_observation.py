@@ -11,11 +11,12 @@ rollout Numba senza riconvertire da liste Python a ogni step.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Sequence
 
 import numpy as np
 from numba import njit, prange
 
-from .evaluation import MatchStats
+from .evaluation import MatchStats, SeatFairStats
 from .fast_2p import Fast2PState
 from .fast_numba import (
     ACTION_DIM,
@@ -60,6 +61,27 @@ class NumbaMLPRolloutSummary:
             avg_points_agent0=self.sum_policy / self.num_games if self.num_games else 0.0,
             avg_points_agent1=self.sum_opponent / self.num_games if self.num_games else 0.0,
             avg_point_diff_agent0_minus_agent1=(
+                (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
+            ),
+        )
+
+    def to_seat_fair_stats(self) -> SeatFairStats:
+        """
+        Converte il summary nel DTO seat-fair standard.
+
+        Il core Numba aggrega sempre i risultati dal punto di vista della policy, indipendentemente dal seat
+        con cui gioca. Per questo `policy` corrisponde ad Agent A e `opponent` ad Agent B.
+        """
+        return SeatFairStats(
+            num_games=self.num_games,
+            agent_a_name=self.policy_name,
+            agent_b_name=self.opponent_name,
+            wins_agent_a=self.wins_policy,
+            wins_agent_b=self.wins_opponent,
+            draws=self.draws,
+            avg_points_agent_a=self.sum_policy / self.num_games if self.num_games else 0.0,
+            avg_points_agent_b=self.sum_opponent / self.num_games if self.num_games else 0.0,
+            avg_point_diff_agent_a_minus_agent_b=(
                 (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
             ),
         )
@@ -590,6 +612,8 @@ def _play_mlp_policy_game_numba(
     opponent_code: int,
     seed: int,
     policy_seat: int,
+    policy_argmax: bool,
+    policy_overkill_guard: bool,
 ) -> tuple[int, int, int]:
     """
     Gioca una partita full-JIT: MLP policy vs opponent fast-compatible.
@@ -632,21 +656,50 @@ def _play_mlp_policy_game_numba(
             break
 
         if current_turn == policy_seat:
-            action_id = _sample_mlp_policy_action_numba(
-                w1,
-                b1,
-                w2,
-                b2,
+            if policy_argmax:
+                action_id = _argmax_mlp_policy_action_numba(
+                    w1,
+                    b1,
+                    w2,
+                    b2,
+                    hands,
+                    hand_sizes,
+                    points,
+                    table_cards,
+                    table_size,
+                    deck_size,
+                    current_turn,
+                    trump_card,
+                    policy_seat,
+                    seen_cards,
+                )
+            else:
+                action_id = _sample_mlp_policy_action_numba(
+                    w1,
+                    b1,
+                    w2,
+                    b2,
+                    hands,
+                    hand_sizes,
+                    points,
+                    table_cards,
+                    table_size,
+                    deck_size,
+                    current_turn,
+                    trump_card,
+                    policy_seat,
+                    seen_cards,
+                )
+            action_id = _apply_overkill_guard_numba(
+                action_id,
                 hands,
                 hand_sizes,
-                points,
-                table_cards,
-                table_size,
-                deck_size,
                 current_turn,
+                table_cards,
+                table_players,
+                table_size,
                 trump_card,
-                policy_seat,
-                seen_cards,
+                policy_overkill_guard,
             )
             card_index = _action_id_to_hand_index_numba(hands, hand_sizes, current_turn, action_id)
         else:
@@ -715,9 +768,10 @@ def _evaluate_mlp_policy_numba(
     w2: np.ndarray,
     b2: np.ndarray,
     opponent_code: int,
-    num_games: int,
-    seed: int,
+    game_seeds: np.ndarray,
     seat_fair: bool,
+    policy_argmax: bool,
+    policy_overkill_guard: bool,
 ) -> tuple[int, int, int, int, int]:
     """Valuta una MLP policy contro un opponent JIT e aggrega i risultati."""
     wins_policy = 0
@@ -726,19 +780,50 @@ def _evaluate_mlp_policy_numba(
     sum_policy = 0
     sum_opponent = 0
 
-    for game_index in range(num_games):
-        policy_seat = game_index % 2 if seat_fair else 0
-        policy_points, opponent_points, winner = _play_mlp_policy_game_numba(
-            w1, b1, w2, b2, opponent_code, seed + game_index, policy_seat
-        )
-        sum_policy += policy_points
-        sum_opponent += opponent_points
-        if winner == 0:
-            wins_policy += 1
-        elif winner == 1:
-            wins_opponent += 1
-        else:
-            draws += 1
+    if seat_fair:
+        for seed_index in range(game_seeds.shape[0]):
+            game_seed = int(game_seeds[seed_index])
+            for policy_seat in range(2):
+                policy_points, opponent_points, winner = _play_mlp_policy_game_numba(
+                    w1,
+                    b1,
+                    w2,
+                    b2,
+                    opponent_code,
+                    game_seed,
+                    policy_seat,
+                    policy_argmax,
+                    policy_overkill_guard,
+                )
+                sum_policy += policy_points
+                sum_opponent += opponent_points
+                if winner == 0:
+                    wins_policy += 1
+                elif winner == 1:
+                    wins_opponent += 1
+                else:
+                    draws += 1
+    else:
+        for seed_index in range(game_seeds.shape[0]):
+            policy_points, opponent_points, winner = _play_mlp_policy_game_numba(
+                w1,
+                b1,
+                w2,
+                b2,
+                opponent_code,
+                int(game_seeds[seed_index]),
+                0,
+                policy_argmax,
+                policy_overkill_guard,
+            )
+            sum_policy += policy_points
+            sum_opponent += opponent_points
+            if winner == 0:
+                wins_policy += 1
+            elif winner == 1:
+                wins_opponent += 1
+            else:
+                draws += 1
 
     return wins_policy, wins_opponent, draws, sum_policy, sum_opponent
 
@@ -1409,6 +1494,9 @@ def evaluate_mlp_policy_numba_2p(
     num_games: int,
     seed: int,
     seat_fair: bool = False,
+    game_seeds: Sequence[int] | None = None,
+    deterministic: bool = False,
+    policy_overkill_guard: bool = False,
     policy_name: str = "mlp_numba",
 ) -> NumbaMLPRolloutSummary:
     """
@@ -1420,6 +1508,17 @@ def evaluate_mlp_policy_numba_2p(
     num_games = int(num_games)
     if num_games < 0:
         raise ValueError("num_games deve essere >= 0")
+    if bool(seat_fair) and num_games % 2 != 0:
+        raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari.")
+
+    needed_seeds = num_games // 2 if bool(seat_fair) else num_games
+    if game_seeds is None:
+        seeds_arr = np.asarray([((int(seed) + i) & 0xFFFFFFFF) for i in range(needed_seeds)], dtype=np.int64)
+    else:
+        raw_seeds = [int(s) & 0xFFFFFFFF for s in game_seeds]
+        if len(raw_seeds) < needed_seeds:
+            raise ValueError(f"game_seeds insufficiente: attesi >= {needed_seeds}, ottenuti {len(raw_seeds)}")
+        seeds_arr = np.asarray(raw_seeds[:needed_seeds], dtype=np.int64)
 
     w1_arr = _as_float32_matrix("w1", w1)
     b1_arr = _as_float32_vector("b1", b1)
@@ -1442,9 +1541,10 @@ def evaluate_mlp_policy_numba_2p(
         w2_arr,
         b2_arr,
         numba_agent_code(opponent_name),
-        num_games,
-        int(seed),
+        seeds_arr,
         bool(seat_fair),
+        bool(deterministic),
+        bool(policy_overkill_guard),
     )
     return NumbaMLPRolloutSummary(
         num_games=num_games,
@@ -1717,7 +1817,17 @@ def warm_up_numba_mlp_rollout() -> None:
     b1 = np.zeros((4,), dtype=np.float32)
     w2 = np.zeros((4, ACTION_DIM), dtype=np.float32)
     b2 = np.zeros((ACTION_DIM,), dtype=np.float32)
-    _evaluate_mlp_policy_numba(w1, b1, w2, b2, numba_agent_code("random"), 1, 0, False)
+    _evaluate_mlp_policy_numba(
+        w1,
+        b1,
+        w2,
+        b2,
+        numba_agent_code("random"),
+        np.asarray([0], dtype=np.int64),
+        False,
+        False,
+        False,
+    )
     wv = np.zeros((4,), dtype=np.float32)
     opponent_w1 = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
     opponent_b1 = np.zeros((1,), dtype=np.float32)

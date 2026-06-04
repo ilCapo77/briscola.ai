@@ -586,6 +586,8 @@ Output (convenzione):
 Note pratiche:
 - log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
 - coerenza directory modelli: la pipeline imposta `BRISCOLA_MODELS_DIR=<models-dir>` per i processi figli, così alias come `best_a2c` risolvono sempre nella stessa cartella.
+- performance: `--rollout-engine fast --fast-rollout numba` accelera il training A2C; `--eval-engine numba`
+  accelera la evaluation matrix per modelli MLP contro opponent fast-compatible.
 - modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data`.
   - se `--update-best` è attivo (default), conserva solo `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`.
   - se fai screening con `--no-update-best`, mantiene comunque `data/models/` minimale (conserva i best se esistono; altrimenti conserva il modello run-specific).
@@ -612,7 +614,7 @@ python scripts/run_experiment.py \
   --seat-fair \
   --rollout-engine fast \
   --fast-rollout numba \
-  --eval-workers 4 \
+  --eval-engine numba \
   --minimal-data
 ```
 
@@ -806,6 +808,8 @@ Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 Validazione robusta (consigliata):
 - benchmark “big” (più stabile, più lento):
   - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big.json`
+- evaluation matrix Numba (più veloce per modelli MLP):
+  - `python scripts/evaluate_matrix.py --engine numba --model ./data/MODEL.npz --benchmark big --out-json benchmarks/model_matrix_big_numba.json`
 - holdout di seed (evita “overfitting” su una sola suite):
   - `python scripts/evaluate_agents.py --benchmark big --seed-suite-range-start 1000000 --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big_holdout_1M.json`
 
