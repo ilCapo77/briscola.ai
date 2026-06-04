@@ -7,15 +7,22 @@ Obiettivo:
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
+from pathlib import Path
+
+import numpy as np
 
 from briscola_ai.ai.agents import build_agent
+from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.decision_quality import (
     _is_trump_overkill_second_hand,
     _is_trump_waste_second_hand,
+    evaluate_bc_model_seat_fair_match_2p_with_quality_numba,
     evaluate_seat_fair_match_2p_with_quality,
     evaluate_seat_fair_match_2p_with_quality_parallel,
 )
+from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.state import GameState, PlayerState
 
@@ -123,3 +130,33 @@ def test_parallel_decision_quality_matches_serial_for_deterministic_agents() -> 
 
     assert asdict(parallel.match) == asdict(serial.match)
     assert asdict(parallel.quality) == asdict(serial.quality)
+
+
+def test_numba_decision_quality_returns_consistent_stats(tmp_path: Path) -> None:
+    """Il path Numba decision-quality deve produrre DTO coerenti per un modello MLP."""
+    d = int(FEATURE_DIM_2P_V1)
+    h = 4
+    model_path = tmp_path / "dummy_quality_numba.npz"
+    np.savez(
+        model_path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h, 40), dtype=np.float32),
+        b2=np.zeros((40,), dtype=np.float32),
+        metadata_json=json.dumps({"format": "mlp_bc_v1", "feature_dim": d}, ensure_ascii=False),
+    )
+
+    agent = BCModelAgent.from_npz(model_path)
+    out = evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
+        agent,
+        "heuristic_v1",
+        num_games=20,
+        seed=0,
+        game_seeds=list(range(10)),
+    )
+
+    assert out.match.num_games == 20
+    assert out.match.wins_agent_a + out.match.wins_agent_b + out.match.draws == 20
+    assert out.quality.num_second_hand_with_winning_reply <= out.quality.num_second_hand_decisions
+    assert out.quality.num_trump_waste <= out.quality.num_second_hand_with_winning_reply
+    assert out.quality.num_trump_overkill <= out.quality.num_second_hand_trump_wins

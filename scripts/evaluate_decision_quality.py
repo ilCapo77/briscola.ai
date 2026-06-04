@@ -25,13 +25,25 @@ from pathlib import Path
 
 from briscola_ai.ai.agents import build_agent, list_agent_specs
 from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.decision_quality import evaluate_seat_fair_match_2p_with_quality_parallel
+from briscola_ai.ai.decision_quality import (
+    evaluate_bc_model_seat_fair_match_2p_with_quality_numba,
+    evaluate_seat_fair_match_2p_with_quality_parallel,
+)
 
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta match seat-fair + metriche qualità decisionale (2-player).")
     parser.add_argument("--benchmark", choices=["small", "medium", "big"], default="medium")
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità).")
+    parser.add_argument(
+        "--engine",
+        choices=["domain", "numba"],
+        default="domain",
+        help=(
+            "Engine evaluation. `domain` supporta tutti gli agenti; `numba` supporta A=bc_model MLP "
+            "contro baseline fast-compatible (default: domain)."
+        ),
+    )
     parser.add_argument(
         "--force-overkill-guard",
         action="store_true",
@@ -66,6 +78,7 @@ def main() -> int:
 
     if bool(args.force_overkill_guard):
         os.environ["BRISCOLA_BC_OVERKILL_GUARD"] = "1"
+    effective_workers = 1 if args.engine == "numba" else int(args.workers)
 
     def _build(*, agent_name: str, model_path: str, flag: str):
         if agent_name == "bc_model":
@@ -76,21 +89,38 @@ def main() -> int:
             raise ValueError(f"`--{flag}-model` è valido solo quando `--{flag} bc_model`.")
         return build_agent(agent_name)
 
-    agent_a = _build(agent_name=args.agent_a, model_path=args.agent_a_model, flag="agent-a")
-    agent_b = _build(agent_name=args.agent_b, model_path=args.agent_b_model, flag="agent-b")
-
     t0 = time.perf_counter()
-    out = evaluate_seat_fair_match_2p_with_quality_parallel(
-        agent_a,
-        agent_b,
-        num_games=num_games,
-        seed=int(args.seed),
-        workers=int(args.workers),
-    )
+    if args.engine == "numba":
+        if args.agent_a != "bc_model":
+            raise ValueError("`--engine numba` supporta per ora solo `--agent-a bc_model`.")
+        if args.agent_b == "bc_model" or args.agent_b_model.strip():
+            raise ValueError("`--engine numba` supporta un solo modello: A=bc_model contro baseline.")
+        if not args.agent_a_model.strip():
+            raise ValueError("`--agent-a-model` obbligatorio quando `--engine numba --agent-a bc_model`.")
+        agent_a = BCModelAgent.from_npz(Path(args.agent_a_model.strip()))
+        agent_b_name = str(args.agent_b)
+        out = evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
+            agent_a,
+            agent_b_name,
+            num_games=num_games,
+            seed=int(args.seed),
+        )
+        agent_b_label = agent_b_name
+    else:
+        agent_a = _build(agent_name=args.agent_a, model_path=args.agent_a_model, flag="agent-a")
+        agent_b = _build(agent_name=args.agent_b, model_path=args.agent_b_model, flag="agent-b")
+        out = evaluate_seat_fair_match_2p_with_quality_parallel(
+            agent_a,
+            agent_b,
+            num_games=num_games,
+            seed=int(args.seed),
+            workers=effective_workers,
+        )
+        agent_b_label = agent_b.name
     elapsed = time.perf_counter() - t0
 
-    print(f"Match 2-player (seat-fair): {out.match.agent_a_name} (A) vs {out.match.agent_b_name} (B)")
-    print(f"- games: {out.match.num_games} (seed={int(args.seed)}, workers={int(args.workers)})")
+    print(f"Match 2-player ({args.engine}, seat-fair): {out.match.agent_a_name} (A) vs {out.match.agent_b_name} (B)")
+    print(f"- games: {out.match.num_games} (seed={int(args.seed)}, workers={effective_workers})")
     print(f"- elapsed: {elapsed:.3f}s ({out.match.num_games / elapsed:.1f} games/sec)")
     print(f"- wins A: {out.match.wins_agent_a} | wins B: {out.match.wins_agent_b} | draws: {out.match.draws}")
     print(f"- avg diff punti (A-B): {out.match.avg_point_diff_agent_a_minus_agent_b:+.2f}")
@@ -108,11 +138,12 @@ def main() -> int:
     if args.out_json.strip():
         payload = {
             "benchmark": args.benchmark,
+            "engine": args.engine,
             "num_games": num_games,
             "seed": int(args.seed),
-            "workers": int(args.workers),
+            "workers": effective_workers,
             "elapsed_seconds": elapsed,
-            "agents": {"a": agent_a.name, "b": agent_b.name},
+            "agents": {"a": agent_a.name, "b": agent_b_label},
             "match": asdict(out.match),
             "quality": {
                 **asdict(out.quality),

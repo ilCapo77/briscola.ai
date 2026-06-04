@@ -35,7 +35,10 @@ from ..domain.observation import make_player_observation
 from ..domain.rules import who_wins_trick
 from ..domain.state import GameState, new_game_state
 from .agents import Agent
+from .bc_model_agent import BCModelAgent, MLPBCModel
 from .evaluation import SeatFairStats, _winner_index_2p  # noqa: PLC2701 (didattico, reuse interno)
+from .fast_evaluation import FAST_EVALUATION_AGENT_NAMES
+from .fast_numba_observation import evaluate_mlp_policy_quality_numba_2p
 
 
 @dataclass(frozen=True, slots=True)
@@ -303,6 +306,65 @@ class SeatFairStatsWithQuality:
 
     match: SeatFairStats
     quality: DecisionQualityStats
+
+
+def evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
+    model_agent: BCModelAgent,
+    opponent_name: str,
+    *,
+    num_games: int,
+    seed: int,
+    game_seeds: Optional[Sequence[int]] = None,
+) -> SeatFairStatsWithQuality:
+    """
+    Valuta decision-quality con core Numba per `bc_model` MLP vs baseline fast-compatible.
+
+    La semantica è quella del path dominio:
+    - Agent A è sempre il modello;
+    - valutazione seat-fair;
+    - policy deterministica argmax;
+    - eventuale guard anti-overkill letto dal `BCModelAgent`.
+    """
+    if int(num_games) % 2 != 0:
+        raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari.")
+    if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
+        supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+        raise ValueError(f"`engine=numba` supporta opponent: {supported}. Ottenuto: {opponent_name!r}")
+
+    model = model_agent.model
+    if not isinstance(model, MLPBCModel):
+        raise ValueError("`engine=numba` supporta solo modelli `.npz` MLP con chiavi w1/b1/w2/b2.")
+
+    rng_game = random.Random(seed)
+    num_pairs = int(num_games) // 2
+    seeds = list(game_seeds) if game_seeds is not None else [rng_game.randrange(0, 2**32) for _ in range(num_pairs)]
+    if len(seeds) < num_pairs:
+        raise ValueError(f"game_seeds insufficiente: attesi >= {num_pairs}, ottenuti {len(seeds)}")
+
+    summary = evaluate_mlp_policy_quality_numba_2p(
+        w1=model.w1,
+        b1=model.b1,
+        w2=model.w2,
+        b2=model.b2,
+        opponent_name=opponent_name,
+        num_games=int(num_games),
+        seed=int(seed),
+        game_seeds=seeds[:num_pairs],
+        policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+        policy_name=model_agent.name,
+    )
+    return SeatFairStatsWithQuality(
+        match=summary.to_seat_fair_stats(),
+        quality=DecisionQualityStats(
+            num_second_hand_decisions=summary.num_second_hand_decisions,
+            num_second_hand_with_winning_reply=summary.num_second_hand_with_winning_reply,
+            num_trump_waste=summary.num_trump_waste,
+            num_second_hand_trump_wins=summary.num_second_hand_trump_wins,
+            num_trump_overkill=summary.num_trump_overkill,
+            num_second_hand_trump_wins_low_lead_points=summary.num_second_hand_trump_wins_low_lead_points,
+            num_trump_overkill_low_lead_points=summary.num_trump_overkill_low_lead_points,
+        ),
+    )
 
 
 @dataclass(frozen=True, slots=True)

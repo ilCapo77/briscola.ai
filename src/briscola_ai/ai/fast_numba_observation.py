@@ -88,6 +88,43 @@ class NumbaMLPRolloutSummary:
 
 
 @dataclass(frozen=True, slots=True)
+class NumbaDecisionQualitySummary:
+    """Risultato aggregato Numba per match seat-fair + metriche decision-quality della policy."""
+
+    num_games: int
+    policy_name: str
+    opponent_name: str
+    wins_policy: int
+    wins_opponent: int
+    draws: int
+    sum_policy: int
+    sum_opponent: int
+    num_second_hand_decisions: int
+    num_second_hand_with_winning_reply: int
+    num_trump_waste: int
+    num_second_hand_trump_wins: int
+    num_trump_overkill: int
+    num_second_hand_trump_wins_low_lead_points: int
+    num_trump_overkill_low_lead_points: int
+
+    def to_seat_fair_stats(self) -> SeatFairStats:
+        """Converte match aggregato nel DTO seat-fair standard."""
+        return SeatFairStats(
+            num_games=self.num_games,
+            agent_a_name=self.policy_name,
+            agent_b_name=self.opponent_name,
+            wins_agent_a=self.wins_policy,
+            wins_agent_b=self.wins_opponent,
+            draws=self.draws,
+            avg_points_agent_a=self.sum_policy / self.num_games if self.num_games else 0.0,
+            avg_points_agent_b=self.sum_opponent / self.num_games if self.num_games else 0.0,
+            avg_point_diff_agent_a_minus_agent_b=(
+                (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
+            ),
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class NumbaA2CTrajectory:
     """Traiettoria A2C raccolta da una singola partita full-JIT."""
 
@@ -539,6 +576,97 @@ def _apply_overkill_guard_numba(
 
 
 @njit(cache=True)
+def _trump_waste_metric_numba(
+    action_id: int,
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    player_index: int,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    table_size: int,
+    trump_card: int,
+) -> int:
+    """
+    Metric `trump_waste` numerica.
+
+    Ritorna:
+    - `-1` se la metrica non è applicabile (nessuna risposta vincente);
+    - `0` se applicabile ma non waste;
+    - `1` se la policy usa briscola pur avendo una risposta vincente non-briscola.
+    """
+    if table_size != 1:
+        return -1
+
+    lead_card = table_cards[0]
+    lead_player = table_players[0]
+    trump_suit = CARD_SUIT_NUMBA[trump_card]
+    winning_any_exists = False
+    winning_non_trump_exists = False
+    for i in range(hand_sizes[player_index]):
+        card = hands[player_index, i]
+        if _who_wins_trick_numba(lead_card, lead_player, card, player_index, trump_card) != player_index:
+            continue
+        winning_any_exists = True
+        if CARD_SUIT_NUMBA[card] != trump_suit:
+            winning_non_trump_exists = True
+
+    if not winning_any_exists:
+        return -1
+
+    chosen_is_trump = CARD_SUIT_NUMBA[action_id] == trump_suit
+    if chosen_is_trump and winning_non_trump_exists:
+        return 1
+    return 0
+
+
+@njit(cache=True)
+def _trump_overkill_metric_numba(
+    action_id: int,
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    player_index: int,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    table_size: int,
+    trump_card: int,
+) -> int:
+    """
+    Metric `trump_overkill` numerica.
+
+    Ritorna:
+    - `-1` se la scelta non è una briscola vincente;
+    - `0` se è la briscola vincente minima;
+    - `1` se esiste una briscola vincente più economica.
+    """
+    if table_size != 1:
+        return -1
+
+    trump_suit = CARD_SUIT_NUMBA[trump_card]
+    if CARD_SUIT_NUMBA[action_id] != trump_suit:
+        return -1
+
+    lead_card = table_cards[0]
+    lead_player = table_players[0]
+    if _who_wins_trick_numba(lead_card, lead_player, action_id, player_index, trump_card) != player_index:
+        return -1
+
+    best_points = CARD_POINTS_NUMBA[action_id]
+    best_strength = CARD_STRENGTH_NUMBA[action_id]
+    for i in range(hand_sizes[player_index]):
+        card = hands[player_index, i]
+        if CARD_SUIT_NUMBA[card] != trump_suit:
+            continue
+        if _who_wins_trick_numba(lead_card, lead_player, card, player_index, trump_card) != player_index:
+            continue
+        points = CARD_POINTS_NUMBA[card]
+        strength = CARD_STRENGTH_NUMBA[card]
+        if points < best_points or (points == best_points and strength < best_strength):
+            return 1
+
+    return 0
+
+
+@njit(cache=True)
 def _choose_opponent_card_index_numba(
     opponent_code: int,
     opponent_model_enabled: bool,
@@ -826,6 +954,282 @@ def _evaluate_mlp_policy_numba(
                 draws += 1
 
     return wins_policy, wins_opponent, draws, sum_policy, sum_opponent
+
+
+@njit(cache=True)
+def _play_mlp_policy_quality_game_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    opponent_code: int,
+    seed: int,
+    policy_seat: int,
+    policy_overkill_guard: bool,
+) -> tuple[int, int, int, int, int, int, int, int, int, int]:
+    """
+    Gioca una partita MLP-vs-baseline e raccoglie metriche qualità per la policy.
+
+    Ritorna match result + contatori quality, tutti dal punto di vista della policy.
+    """
+    shuffled = _shuffle_deck_numba(seed)
+
+    deck = np.empty(34, dtype=np.int64)
+    hands = np.empty((2, 3), dtype=np.int64)
+    hand_sizes = np.zeros(2, dtype=np.int64)
+
+    deck_size_source = ACTION_DIM
+    for _ in range(3):
+        for player_index in range(2):
+            deck_size_source -= 1
+            hands[player_index, hand_sizes[player_index]] = shuffled[deck_size_source]
+            hand_sizes[player_index] += 1
+
+    deck_size_source -= 1
+    trump_card = shuffled[deck_size_source]
+    deck[0] = trump_card
+    for i in range(deck_size_source):
+        deck[i + 1] = shuffled[i]
+    deck_size = deck_size_source + 1
+
+    points = np.zeros(2, dtype=np.int64)
+    table_cards = np.empty(2, dtype=np.int64)
+    table_players = np.empty(2, dtype=np.int64)
+    table_size = 0
+    current_turn = 0
+    seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    seen_cards[trump_card] = 1
+
+    q_second = 0
+    q_second_with_win = 0
+    q_waste = 0
+    q_trump_wins = 0
+    q_trump_overkill = 0
+    q_trump_wins_low = 0
+    q_trump_overkill_low = 0
+
+    safety = 5000
+    while safety > 0:
+        safety -= 1
+        if hand_sizes[0] == 0 and hand_sizes[1] == 0:
+            break
+
+        if current_turn == policy_seat:
+            action_id = _argmax_mlp_policy_action_numba(
+                w1,
+                b1,
+                w2,
+                b2,
+                hands,
+                hand_sizes,
+                points,
+                table_cards,
+                table_size,
+                deck_size,
+                current_turn,
+                trump_card,
+                policy_seat,
+                seen_cards,
+            )
+            action_id = _apply_overkill_guard_numba(
+                action_id,
+                hands,
+                hand_sizes,
+                current_turn,
+                table_cards,
+                table_players,
+                table_size,
+                trump_card,
+                policy_overkill_guard,
+            )
+
+            if table_size == 1:
+                q_second += 1
+                waste = _trump_waste_metric_numba(
+                    action_id,
+                    hands,
+                    hand_sizes,
+                    current_turn,
+                    table_cards,
+                    table_players,
+                    table_size,
+                    trump_card,
+                )
+                if waste >= 0:
+                    q_second_with_win += 1
+                    if waste == 1:
+                        q_waste += 1
+
+                overkill = _trump_overkill_metric_numba(
+                    action_id,
+                    hands,
+                    hand_sizes,
+                    current_turn,
+                    table_cards,
+                    table_players,
+                    table_size,
+                    trump_card,
+                )
+                if overkill >= 0:
+                    q_trump_wins += 1
+                    low_lead = CARD_POINTS_NUMBA[table_cards[0]] <= 2
+                    if low_lead:
+                        q_trump_wins_low += 1
+                    if overkill == 1:
+                        q_trump_overkill += 1
+                        if low_lead:
+                            q_trump_overkill_low += 1
+
+            card_index = _action_id_to_hand_index_numba(hands, hand_sizes, current_turn, action_id)
+        else:
+            card_index = _choose_policy_card_index_numba(
+                opponent_code,
+                hands,
+                hand_sizes,
+                current_turn,
+                table_cards,
+                table_players,
+                table_size,
+                deck_size,
+                trump_card,
+                seen_cards,
+            )
+
+        played_card = hands[current_turn, card_index]
+        hand_size = hand_sizes[current_turn]
+        for i in range(card_index, hand_size - 1):
+            hands[current_turn, i] = hands[current_turn, i + 1]
+        hand_sizes[current_turn] -= 1
+
+        table_cards[table_size] = played_card
+        table_players[table_size] = current_turn
+        table_size += 1
+        seen_cards[played_card] = 1
+
+        if table_size == 1:
+            current_turn = 1 - current_turn
+            continue
+
+        first_card = table_cards[0]
+        second_card = table_cards[1]
+        first_player = table_players[0]
+        second_player = table_players[1]
+        winner = _who_wins_trick_numba(first_card, first_player, second_card, second_player, trump_card)
+        points[winner] += CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+        table_size = 0
+
+        if deck_size > 0:
+            for i in range(2):
+                player_to_deal = (winner + i) % 2
+                if deck_size <= 0:
+                    break
+                deck_size -= 1
+                hands[player_to_deal, hand_sizes[player_to_deal]] = deck[deck_size]
+                hand_sizes[player_to_deal] += 1
+
+        current_turn = winner
+
+    policy_points = points[policy_seat]
+    opponent_points = points[1 - policy_seat]
+    if policy_points > opponent_points:
+        winner_out = 0
+    elif opponent_points > policy_points:
+        winner_out = 1
+    else:
+        winner_out = -1
+    return (
+        int(policy_points),
+        int(opponent_points),
+        int(winner_out),
+        q_second,
+        q_second_with_win,
+        q_waste,
+        q_trump_wins,
+        q_trump_overkill,
+        q_trump_wins_low,
+        q_trump_overkill_low,
+    )
+
+
+@njit(cache=True)
+def _evaluate_mlp_policy_quality_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    opponent_code: int,
+    game_seeds: np.ndarray,
+    policy_overkill_guard: bool,
+) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
+    """Valuta seat-fair MLP-vs-baseline e aggrega match stats + quality stats."""
+    wins_policy = 0
+    wins_opponent = 0
+    draws = 0
+    sum_policy = 0
+    sum_opponent = 0
+    q_second = 0
+    q_second_with_win = 0
+    q_waste = 0
+    q_trump_wins = 0
+    q_trump_overkill = 0
+    q_trump_wins_low = 0
+    q_trump_overkill_low = 0
+
+    for seed_index in range(game_seeds.shape[0]):
+        game_seed = int(game_seeds[seed_index])
+        for policy_seat in range(2):
+            (
+                policy_points,
+                opponent_points,
+                winner,
+                second,
+                second_with_win,
+                waste,
+                trump_wins,
+                trump_overkill,
+                trump_wins_low,
+                trump_overkill_low,
+            ) = _play_mlp_policy_quality_game_numba(
+                w1,
+                b1,
+                w2,
+                b2,
+                opponent_code,
+                game_seed,
+                policy_seat,
+                policy_overkill_guard,
+            )
+            sum_policy += policy_points
+            sum_opponent += opponent_points
+            if winner == 0:
+                wins_policy += 1
+            elif winner == 1:
+                wins_opponent += 1
+            else:
+                draws += 1
+
+            q_second += second
+            q_second_with_win += second_with_win
+            q_waste += waste
+            q_trump_wins += trump_wins
+            q_trump_overkill += trump_overkill
+            q_trump_wins_low += trump_wins_low
+            q_trump_overkill_low += trump_overkill_low
+
+    return (
+        wins_policy,
+        wins_opponent,
+        draws,
+        sum_policy,
+        sum_opponent,
+        q_second,
+        q_second_with_win,
+        q_waste,
+        q_trump_wins,
+        q_trump_overkill,
+        q_trump_wins_low,
+        q_trump_overkill_low,
+    )
 
 
 @njit(cache=True)
@@ -1558,6 +1962,96 @@ def evaluate_mlp_policy_numba_2p(
     )
 
 
+def evaluate_mlp_policy_quality_numba_2p(
+    *,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    opponent_name: str,
+    num_games: int,
+    seed: int,
+    game_seeds: Sequence[int] | None = None,
+    policy_overkill_guard: bool = False,
+    policy_name: str = "mlp_numba",
+) -> NumbaDecisionQualitySummary:
+    """
+    Valuta seat-fair una policy MLP con Numba e raccoglie metriche decision-quality.
+
+    Questa funzione replica la semantica inference di `BCModelAgent`: argmax deterministico,
+    action mask e post-processing anti-overkill opzionale.
+    """
+    num_games = int(num_games)
+    if num_games < 0:
+        raise ValueError("num_games deve essere >= 0")
+    if num_games % 2 != 0:
+        raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari.")
+
+    needed_seeds = num_games // 2
+    if game_seeds is None:
+        seeds_arr = np.asarray([((int(seed) + i) & 0xFFFFFFFF) for i in range(needed_seeds)], dtype=np.int64)
+    else:
+        raw_seeds = [int(s) & 0xFFFFFFFF for s in game_seeds]
+        if len(raw_seeds) < needed_seeds:
+            raise ValueError(f"game_seeds insufficiente: attesi >= {needed_seeds}, ottenuti {len(raw_seeds)}")
+        seeds_arr = np.asarray(raw_seeds[:needed_seeds], dtype=np.int64)
+
+    w1_arr = _as_float32_matrix("w1", w1)
+    b1_arr = _as_float32_vector("b1", b1)
+    w2_arr = _as_float32_matrix("w2", w2)
+    b2_arr = _as_float32_vector("b2", b2)
+    feature_dim = int(w1_arr.shape[0])
+    hidden_dim = int(w1_arr.shape[1])
+    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+        raise ValueError(f"w1 feature_dim={feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}")
+    if b1_arr.shape != (hidden_dim,):
+        raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
+    if w2_arr.shape != (hidden_dim, ACTION_DIM):
+        raise ValueError(f"w2 shape={w2_arr.shape}; atteso {(hidden_dim, ACTION_DIM)}")
+    if b2_arr.shape != (ACTION_DIM,):
+        raise ValueError(f"b2 shape={b2_arr.shape}; atteso {(ACTION_DIM,)}")
+
+    (
+        wins_policy,
+        wins_opponent,
+        draws,
+        sum_policy,
+        sum_opponent,
+        q_second,
+        q_second_with_win,
+        q_waste,
+        q_trump_wins,
+        q_trump_overkill,
+        q_trump_wins_low,
+        q_trump_overkill_low,
+    ) = _evaluate_mlp_policy_quality_numba(
+        w1_arr,
+        b1_arr,
+        w2_arr,
+        b2_arr,
+        numba_agent_code(opponent_name),
+        seeds_arr,
+        bool(policy_overkill_guard),
+    )
+    return NumbaDecisionQualitySummary(
+        num_games=num_games,
+        policy_name=policy_name,
+        opponent_name=opponent_name,
+        wins_policy=int(wins_policy),
+        wins_opponent=int(wins_opponent),
+        draws=int(draws),
+        sum_policy=int(sum_policy),
+        sum_opponent=int(sum_opponent),
+        num_second_hand_decisions=int(q_second),
+        num_second_hand_with_winning_reply=int(q_second_with_win),
+        num_trump_waste=int(q_waste),
+        num_second_hand_trump_wins=int(q_trump_wins),
+        num_trump_overkill=int(q_trump_overkill),
+        num_second_hand_trump_wins_low_lead_points=int(q_trump_wins_low),
+        num_trump_overkill_low_lead_points=int(q_trump_overkill_low),
+    )
+
+
 def collect_a2c_trajectory_numba_2p(
     *,
     w1: np.ndarray,
@@ -1826,6 +2320,15 @@ def warm_up_numba_mlp_rollout() -> None:
         np.asarray([0], dtype=np.int64),
         False,
         False,
+        False,
+    )
+    _evaluate_mlp_policy_quality_numba(
+        w1,
+        b1,
+        w2,
+        b2,
+        numba_agent_code("random"),
+        np.asarray([0], dtype=np.int64),
         False,
     )
     wv = np.zeros((4,), dtype=np.float32)
