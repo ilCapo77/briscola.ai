@@ -6,7 +6,7 @@ serializzare ogni osservazione/azione nel DB SQLite. È pensato come ponte verso
 prima validiamo seed, policy semplici e aggregazione; poi possiamo integrare policy neurali.
 
 Limite intenzionale:
-- supporta solo gli agenti semplici già tradotti nel path fast (`random`, `greedy_points`);
+- supporta solo gli agenti già tradotti nel path fast (`random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`);
 - non produce dataset BC completo, perché non salva `PlayerObservation` step-by-step.
 """
 

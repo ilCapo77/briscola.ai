@@ -14,7 +14,9 @@ import subprocess
 import sys
 from pathlib import Path
 
-from briscola_ai.ai.agents import GreedyPointsAgent, RandomAgent
+import pytest
+
+from briscola_ai.ai.agents import Agent, GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
 from briscola_ai.ai.evaluation import play_one_game_2p
 from briscola_ai.ai.fast_self_play import (
     FastSelfPlayAccumulator,
@@ -35,18 +37,26 @@ def _winner_index_domain_2p(state: GameState) -> int | None:
     return None
 
 
-def test_fast_self_play_summaries_match_domain_for_supported_agents() -> None:
+@pytest.mark.parametrize(
+    ("agent0_name", "domain_agent0"),
+    [
+        ("greedy_points", GreedyPointsAgent()),
+        ("heuristic_v1", HeuristicAgentV1()),
+        ("heuristic_v2", HeuristicAgentV2()),
+    ],
+)
+def test_fast_self_play_summaries_match_domain_for_supported_agents(agent0_name: str, domain_agent0: Agent) -> None:
     """
     Ogni summary fast deve coincidere con una partita dominio giocata con gli stessi seed.
 
-    Usiamo `greedy_points` vs `random` perché entrambi consumano RNG e quindi proteggono anche
-    la riproducibilità di `action_seed`.
+    Usiamo `random` come secondo agente perché consuma RNG e protegge anche la riproducibilità
+    di `action_seed`.
     """
-    summaries = list(iter_fast_self_play_2p(agent0_name="greedy_points", agent1_name="random", num_games=10, seed=123))
+    summaries = list(iter_fast_self_play_2p(agent0_name=agent0_name, agent1_name="random", num_games=10, seed=123))
 
     for summary in summaries:
         domain_state = play_one_game_2p(
-            GreedyPointsAgent(),
+            domain_agent0,
             RandomAgent(),
             rng=random.Random(summary.action_seed),
             game_seed=summary.game_seed,

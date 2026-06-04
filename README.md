@@ -360,8 +360,8 @@ e costruisce `PlayerObservation` anti-cheat. Esiste anche un path sperimentale p
 python scripts/evaluate_agents.py --engine fast --seat-fair --num-games 10000 --seed 42 --agent0 greedy_points --agent1 random
 ```
 
-Nota: `--engine fast` per ora supporta solo agenti semplici (`random`, `greedy_points`) e serve per benchmark
-del motore `fast_2p`; non supporta ancora modelli `.npz`, `heuristic_v1` o `heuristic_v2`.
+Nota: `--engine fast` supporta `random`, `greedy_points`, `heuristic_v1` e `heuristic_v2`. Serve per benchmark
+del motore `fast_2p`; non supporta ancora modelli `.npz` come agenti.
 
 Agenti disponibili (baseline):
 - `random`: sceglie una carta casuale tra quelle in mano (baseline “zero”).
@@ -740,11 +740,11 @@ Script:
 Esempio (warm-start + opponent mix):
 - `python scripts/train_a2c.py --init ./data/bc_model_teacher_mlp.npz --out ./data/a2c_shaped.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 200000 --seat-fair --seed 0`
 
-Rollout fast sperimentale (solo avversari semplici):
-- `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_random.npz --opponent random --num-games 20000 --seat-fair --seed 0`
+Rollout fast sperimentale (avversari fast-compatible):
+- `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
 
 Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico, ma per ora supporta
-solo `random`/`greedy_points` e non supporta `--overkill-penalty-beta > 0`.
+solo `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2` e non supporta `--overkill-penalty-beta > 0`.
 
 Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
 - con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.

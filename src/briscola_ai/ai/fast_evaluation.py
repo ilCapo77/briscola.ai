@@ -3,7 +3,7 @@ Valutazione sperimentale basata su `fast_2p`.
 
 Questo modulo è volutamente separato da `ai.evaluation`:
 - `ai.evaluation` resta il path canonico, anti-cheat e compatibile con tutti gli agenti;
-- questo path fast supporta solo agenti semplici traducibili direttamente su card id numerici.
+- questo path fast supporta agenti traducibili direttamente su card id numerici.
 
 L'obiettivo è misurare il guadagno del motore mutabile 2-player prima di integrarlo in training/evaluation
 più complessi. I test devono dimostrare equivalenza aggregata col dominio per gli agenti supportati.
@@ -15,16 +15,227 @@ import random
 from typing import Optional, Sequence
 
 from .evaluation import MatchStats, SeatFairStats
-from .fast_2p import CARD_POINTS, Fast2PState, new_fast_2p_state, step_fast_2p
+from .fast_2p import (
+    CARD_POINTS,
+    CARD_STRENGTH,
+    CARD_SUIT,
+    Fast2PState,
+    fast_who_wins_trick_2p,
+    new_fast_2p_state,
+    step_fast_2p,
+)
 
-FAST_EVALUATION_AGENT_NAMES: frozenset[str] = frozenset({"random", "greedy_points"})
+FAST_EVALUATION_AGENT_NAMES: frozenset[str] = frozenset({"random", "greedy_points", "heuristic_v1", "heuristic_v2"})
 
 
 def _validate_fast_agent_name(agent_name: str) -> None:
     """Fallisce presto se un agente non è ancora supportato dal path fast."""
     if agent_name not in FAST_EVALUATION_AGENT_NAMES:
         supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
-        raise ValueError(f"`--engine fast` supporta solo agenti semplici: {supported}. Ottenuto: {agent_name!r}")
+        raise ValueError(f"`--engine fast` supporta solo agenti fast-compatible: {supported}. Ottenuto: {agent_name!r}")
+
+
+def _trick_points_fast(cards: tuple[int, ...]) -> int:
+    """Somma i punti delle carte numeriche."""
+    return sum(CARD_POINTS[card_id] for card_id in cards)
+
+
+def _fast_card_wins_trick(
+    *,
+    lead_card: int,
+    lead_player: int,
+    response_card: int,
+    response_player: int,
+    trump_card: int,
+) -> bool:
+    """Ritorna True se `response_card` vincerebbe la mano."""
+    winner = fast_who_wins_trick_2p(
+        first_card=lead_card,
+        first_player=lead_player,
+        second_card=response_card,
+        second_player=response_player,
+        trump_card=trump_card,
+    )
+    return winner == response_player
+
+
+def _choose_fast_heuristic_lead_card_index(state: Fast2PState, *, player_index: int) -> int:
+    """Versione numerica della scelta lead di `heuristic_v1/v2`."""
+    hand = state.hands[player_index]
+    if len(state.deck) <= 0:
+        return max(range(len(hand)), key=lambda i: (CARD_STRENGTH[hand[i]], CARD_POINTS[hand[i]]))
+
+    trump_suit = CARD_SUIT[state.trump_card]
+    return min(
+        range(len(hand)),
+        key=lambda i: (
+            CARD_POINTS[hand[i]],
+            1 if CARD_SUIT[hand[i]] == trump_suit else 0,
+            CARD_STRENGTH[hand[i]],
+        ),
+    )
+
+
+def _choose_fast_heuristic_v1_response_card_index(state: Fast2PState, *, player_index: int) -> int:
+    """Versione numerica della risposta di `heuristic_v1`."""
+    hand = state.hands[player_index]
+    lead_card = state.table_cards[0]
+    lead_player = state.table_players[0]
+    trump_suit = CARD_SUIT[state.trump_card]
+
+    winning_candidates: list[int] = []
+    for i, card_id in enumerate(hand):
+        if _fast_card_wins_trick(
+            lead_card=lead_card,
+            lead_player=lead_player,
+            response_card=card_id,
+            response_player=player_index,
+            trump_card=state.trump_card,
+        ):
+            winning_candidates.append(i)
+
+    if winning_candidates:
+        best_win = min(
+            winning_candidates,
+            key=lambda idx: (
+                1 if CARD_SUIT[hand[idx]] == trump_suit else 0,
+                CARD_POINTS[hand[idx]],
+                CARD_STRENGTH[hand[idx]],
+            ),
+        )
+        best_win_card = hand[best_win]
+        total_trick_points = _trick_points_fast((lead_card, best_win_card))
+        best_is_trump = CARD_SUIT[best_win_card] == trump_suit
+        best_is_free = CARD_POINTS[best_win_card] == 0 and not best_is_trump
+
+        if total_trick_points >= 10 or len(state.deck) <= 0 or best_is_free:
+            return best_win
+
+    return min(
+        range(len(hand)),
+        key=lambda idx: (
+            CARD_POINTS[hand[idx]],
+            1 if CARD_SUIT[hand[idx]] == trump_suit else 0,
+            CARD_STRENGTH[hand[idx]],
+        ),
+    )
+
+
+def _count_remaining_trumps_public_fast(*, seen_cards_onehot: tuple[int, ...], trump_suit: int) -> int:
+    """Conta quante briscole non risultano ancora viste pubblicamente."""
+    return sum(1 for card_id, seen in enumerate(seen_cards_onehot) if not seen and CARD_SUIT[card_id] == trump_suit)
+
+
+def _count_unknown_high_trumps_fast(
+    *,
+    hand: list[int],
+    seen_cards_onehot: tuple[int, ...],
+    trump_suit: int,
+    strength_threshold: int = 9,
+) -> int:
+    """Stima quante briscole alte non viste e non in mano al player potrebbero ancora essere in giro."""
+    hand_ids = set(hand)
+    unknown = 0
+    for card_id, seen in enumerate(seen_cards_onehot):
+        if seen:
+            continue
+        if card_id in hand_ids:
+            continue
+        if CARD_SUIT[card_id] == trump_suit and CARD_STRENGTH[card_id] >= strength_threshold:
+            unknown += 1
+    return unknown
+
+
+def _should_take_with_trump_fast(
+    *,
+    hand: list[int],
+    lead_card: int,
+    response_card: int,
+    trump_suit: int,
+    deck_size: int,
+    seen_cards_onehot: tuple[int, ...],
+) -> bool:
+    """Versione numerica della regola `_should_take_with_trump` di `heuristic_v2`."""
+    total_points = _trick_points_fast((lead_card, response_card))
+    if deck_size <= 0:
+        return True
+    if total_points >= 10:
+        return True
+
+    remaining_trumps_public = _count_remaining_trumps_public_fast(
+        seen_cards_onehot=seen_cards_onehot,
+        trump_suit=trump_suit,
+    )
+    unknown_high_trumps = _count_unknown_high_trumps_fast(
+        hand=hand,
+        seen_cards_onehot=seen_cards_onehot,
+        trump_suit=trump_suit,
+        strength_threshold=9,
+    )
+    is_high_trump = CARD_STRENGTH[response_card] >= 8
+    is_late = deck_size <= 4 or remaining_trumps_public <= 2
+
+    if is_late:
+        if CARD_POINTS[response_card] == 0 and not is_high_trump:
+            return True
+        if unknown_high_trumps == 0 and total_points >= 3:
+            return True
+
+    return False
+
+
+def _choose_fast_heuristic_v2_response_card_index(
+    state: Fast2PState,
+    *,
+    player_index: int,
+    seen_cards_onehot: tuple[int, ...],
+) -> int:
+    """Versione numerica della risposta di `heuristic_v2`."""
+    hand = state.hands[player_index]
+    lead_card = state.table_cards[0]
+    lead_player = state.table_players[0]
+    trump_suit = CARD_SUIT[state.trump_card]
+
+    winning_non_trumps: list[int] = []
+    winning_trumps: list[int] = []
+    for i, card_id in enumerate(hand):
+        if not _fast_card_wins_trick(
+            lead_card=lead_card,
+            lead_player=lead_player,
+            response_card=card_id,
+            response_player=player_index,
+            trump_card=state.trump_card,
+        ):
+            continue
+        if CARD_SUIT[card_id] == trump_suit:
+            winning_trumps.append(i)
+        else:
+            winning_non_trumps.append(i)
+
+    if winning_non_trumps:
+        return min(winning_non_trumps, key=lambda idx: (CARD_POINTS[hand[idx]], CARD_STRENGTH[hand[idx]]))
+
+    if winning_trumps:
+        best_trump_idx = min(winning_trumps, key=lambda idx: (CARD_POINTS[hand[idx]], CARD_STRENGTH[hand[idx]]))
+        best_trump = hand[best_trump_idx]
+        if _should_take_with_trump_fast(
+            hand=hand,
+            lead_card=lead_card,
+            response_card=best_trump,
+            trump_suit=trump_suit,
+            deck_size=len(state.deck),
+            seen_cards_onehot=seen_cards_onehot,
+        ):
+            return best_trump_idx
+
+    return min(
+        range(len(hand)),
+        key=lambda idx: (
+            CARD_POINTS[hand[idx]],
+            1 if CARD_SUIT[hand[idx]] == trump_suit else 0,
+            CARD_STRENGTH[hand[idx]],
+        ),
+    )
 
 
 def choose_fast_card_index(
@@ -33,6 +244,7 @@ def choose_fast_card_index(
     player_index: int,
     *,
     rng: random.Random,
+    seen_cards_onehot: tuple[int, ...] | None = None,
 ) -> int:
     """
     Sceglie una carta usando solo lo stato numerico fast.
@@ -51,6 +263,22 @@ def choose_fast_card_index(
         best_points = max(CARD_POINTS[card_id] for card_id in hand)
         candidates = [i for i, card_id in enumerate(hand) if CARD_POINTS[card_id] == best_points]
         return candidates[rng.randrange(len(candidates))]
+
+    if agent_name == "heuristic_v1":
+        if not state.table_cards:
+            return _choose_fast_heuristic_lead_card_index(state, player_index=player_index)
+        return _choose_fast_heuristic_v1_response_card_index(state, player_index=player_index)
+
+    if agent_name == "heuristic_v2":
+        if not state.table_cards:
+            return _choose_fast_heuristic_lead_card_index(state, player_index=player_index)
+        if seen_cards_onehot is None:
+            raise ValueError("heuristic_v2 fast richiede `seen_cards_onehot`")
+        return _choose_fast_heuristic_v2_response_card_index(
+            state,
+            player_index=player_index,
+            seen_cards_onehot=seen_cards_onehot,
+        )
 
     _validate_fast_agent_name(agent_name)
     raise AssertionError("Agente validato ma non implementato nel path fast")
@@ -75,19 +303,22 @@ def play_one_fast_game_2p(
     """
     Simula una singola partita 2-player con `fast_2p`.
 
-    Supporta solo agenti semplici (`random`, `greedy_points`) perché non costruisce `PlayerObservation`.
+    Supporta agenti numerici fast-compatible senza costruire `PlayerObservation`.
     """
     _validate_fast_agent_name(agent0_name)
     _validate_fast_agent_name(agent1_name)
 
     state = new_fast_2p_state(seed=game_seed)
+    seen = [0] * 40
+    seen[state.trump_card] = 1
     safety = 5000
     while not state.game_over and safety > 0:
         safety -= 1
         current = state.current_turn
         agent_name = agent0_name if current == 0 else agent1_name
-        card_index = choose_fast_card_index(agent_name, state, current, rng=rng)
-        step_fast_2p(state, player_index=current, card_index=card_index)
+        card_index = choose_fast_card_index(agent_name, state, current, rng=rng, seen_cards_onehot=tuple(seen))
+        result = step_fast_2p(state, player_index=current, card_index=card_index)
+        seen[result.played_card] = 1
 
     if safety <= 0:
         raise RuntimeError("Loop di sicurezza: la partita fast non termina")
@@ -104,7 +335,7 @@ def evaluate_fast_match_2p(
     game_seeds: Optional[Sequence[int]] = None,
 ) -> MatchStats:
     """
-    Valuta due agenti semplici usando `fast_2p`.
+    Valuta due agenti fast-compatible usando `fast_2p`.
 
     La semantica di seed replica `evaluate_match_2p`: un RNG per gli shuffle e uno per le azioni.
     """
@@ -162,7 +393,7 @@ def evaluate_fast_seat_fair_match_2p(
     game_seeds: Optional[Sequence[int]] = None,
 ) -> SeatFairStats:
     """
-    Valuta due agenti semplici in modalità seat-fair usando `fast_2p`.
+    Valuta due agenti fast-compatible in modalità seat-fair usando `fast_2p`.
 
     `num_games` deve essere pari, come nel path canonico.
     """

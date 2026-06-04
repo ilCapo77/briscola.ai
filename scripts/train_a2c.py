@@ -371,7 +371,7 @@ def _play_one_fast_game_2p_collect(
     Simula una partita A2C usando `fast_2p`.
 
     Limitazioni intenzionali:
-    - supporta solo avversari semplici tradotti su card id (`random`, `greedy_points`);
+    - supporta solo avversari tradotti su card id (`random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`);
     - non applica ancora reward shaping anti-overkill, perché quello oggi dipende da `PlayerObservation`.
     """
     if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
@@ -392,7 +392,13 @@ def _play_one_fast_game_2p_collect(
 
         while not state.game_over and state.current_turn != policy_seat:
             current = state.current_turn
-            card_index = choose_fast_card_index(opponent_name, state, current, rng=rng_opponent)
+            card_index = choose_fast_card_index(
+                opponent_name,
+                state,
+                current,
+                rng=rng_opponent,
+                seen_cards_onehot=tuple(seen),
+            )
             result = step_fast_2p(state, player_index=current, card_index=card_index)
             seen[result.played_card] = 1
 
@@ -431,7 +437,13 @@ def _play_one_fast_game_2p_collect(
 
         while not state.game_over and state.current_turn != policy_seat:
             current = state.current_turn
-            opp_card_index = choose_fast_card_index(opponent_name, state, current, rng=rng_opponent)
+            opp_card_index = choose_fast_card_index(
+                opponent_name,
+                state,
+                current,
+                rng=rng_opponent,
+                seen_cards_onehot=tuple(seen),
+            )
             result = step_fast_2p(state, player_index=current, card_index=opp_card_index)
             seen[result.played_card] = 1
 
@@ -531,7 +543,7 @@ def main() -> int:
         default="domain",
         help=(
             "Motore rollout training. `domain` è canonico e supporta tutti gli agenti; `fast` è sperimentale "
-            "e supporta solo avversari semplici random/greedy_points."
+            "e supporta solo avversari fast-compatible random/greedy_points/heuristic_v1/heuristic_v2."
         ),
     )
     parser.add_argument("--hidden-dim", type=int, default=128, help="Hidden dim (se non si usa --init).")
@@ -649,7 +661,8 @@ def main() -> int:
         if rollout_engine == "fast" and str(args.opponent) not in FAST_EVALUATION_AGENT_NAMES:
             supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
             raise ValueError(
-                f"`--rollout-engine fast` supporta solo avversari semplici: {supported}. Ottenuto: {args.opponent!r}"
+                f"`--rollout-engine fast` supporta solo avversari fast-compatible: {supported}. "
+                f"Ottenuto: {args.opponent!r}"
             )
         opponent = build_agent(args.opponent)
 

@@ -727,14 +727,18 @@ Prossimi step performance (ordine consigliato):
     - dominio canonico: `~4.94k games/sec` medio
     - `fast_2p`: `~22.0k games/sec` medio
     - speedup indicativo: `~4.45x` sul solo motore random
-- [x] Integrare `fast_2p` in evaluation dietro flag sperimentale per agenti semplici
+- [x] Integrare `fast_2p` in evaluation dietro flag sperimentale per agenti fast-compatible
   - modulo: `src/briscola_ai/ai/fast_evaluation.py`
   - CLI: `scripts/evaluate_agents.py --engine fast`
-  - supporto iniziale: `random`, `greedy_points` (no modelli `.npz`, no euristiche v1/v2)
+  - supporto: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2` (no modelli `.npz`)
   - test di equivalenza aggregata: fast e dominio producono gli stessi `MatchStats`/`SeatFairStats`
   - benchmark `greedy_points` vs `random`, seat-fair 10k game:
     - dominio canonico: `~3.52s`
     - fast evaluation: `~0.496s`
+    - speedup indicativo: `~7.1x`
+  - benchmark `heuristic_v2` vs `random`, seat-fair 10k game:
+    - dominio canonico: `~4.38s`
+    - fast evaluation: `~0.614s`
     - speedup indicativo: `~7.1x`
 - [x] Integrare `fast_2p` in self-play summary-only
   - modulo: `src/briscola_ai/ai/fast_self_play.py`
@@ -745,17 +749,17 @@ Prossimi step performance (ordine consigliato):
   - benchmark `greedy_points` vs `random`, 100k game senza JSONL: `5.478s` (`~18.3k games/sec`)
 - [x] Integrare `fast_2p` in training A2C dietro flag sperimentale
   - CLI: `scripts/train_a2c.py --rollout-engine fast`
-  - supporto iniziale: policy A2C neurale vs avversari semplici `random`/`greedy_points`
+  - supporto: policy A2C neurale vs `random`/`greedy_points`/`heuristic_v1`/`heuristic_v2`
   - encoder: `Fast2PState -> feature/mask` equivalente al path canonico (`v1`/`v2`)
-  - limite attuale: no `heuristic_v1/v2`, no modelli `.npz` come opponent, no `--overkill-penalty-beta > 0`
+  - limite attuale: no modelli `.npz` come opponent, no `--overkill-penalty-beta > 0`
   - smoke test: training fast salva modello `.npz` con metadato `rollout_engine=fast`
   - benchmark A2C vs `random`, 5k game, hidden=32:
     - dominio canonico: `7.109s`
     - fast rollout: `5.138s`
     - speedup indicativo: `~1.38x` (il resto del tempo è forward/backprop NumPy)
-- [ ] Estendere il rollout fast A2C ad avversari più forti
-  - opzione A: tradurre `heuristic_v1/v2` su card id numerici
-  - opzione B: supportare policy `.npz` direttamente su encoder fast
+- [ ] Estendere il rollout fast A2C a opponent `.npz`
+  - supportare policy `.npz` direttamente su encoder fast
+  - poi agganciare `best_a2c` senza passare da `PlayerObservation`
 - [ ] Valutare Numba solo sul `fast_2p`
   - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
   - target minimo per giustificare complessita': `>=3x` sui benchmark lunghi

@@ -108,7 +108,7 @@ def main() -> int:
         default="domain",
         help=(
             "Motore di valutazione. `domain` supporta tutti gli agenti; `fast` è sperimentale "
-            "e supporta solo random/greedy_points."
+            "e supporta random/greedy_points/heuristic_v1/heuristic_v2."
         ),
     )
     agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
@@ -227,7 +227,9 @@ def main() -> int:
 
     if args.engine == "fast":
         if args.agent0_model.strip() or args.agent1_model.strip():
-            raise ValueError("`--engine fast` non supporta modelli `.npz`; usa agenti semplici senza path modello.")
+            raise ValueError(
+                "`--engine fast` non supporta modelli `.npz`; usa agenti fast-compatible senza path modello."
+            )
         unsupported = [name for name in (args.agent0, args.agent1) if name not in FAST_EVALUATION_AGENT_NAMES]
         if unsupported:
             supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
