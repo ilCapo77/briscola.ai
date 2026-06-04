@@ -736,9 +736,16 @@ Prossimi step performance (ordine consigliato):
     - dominio canonico: `~3.52s`
     - fast evaluation: `~0.496s`
     - speedup indicativo: `~7.1x`
-- [ ] Integrare `fast_2p` in self-play/training dietro flag sperimentale
-  - prima target: self-play/eval 2-player senza logging completo di osservazioni
-  - poi eventuale path per A2C, riusando encoder/policy senza cambiare il dominio pubblico
+- [x] Integrare `fast_2p` in self-play summary-only
+  - modulo: `src/briscola_ai/ai/fast_self_play.py`
+  - CLI: `scripts/fast_self_play.py`
+  - supporto iniziale: `random`, `greedy_points`
+  - output opzionale JSONL minimale per partita (seed, agenti, punti finali, vincitore), senza osservazioni/azioni step-by-step
+  - test di equivalenza per-game contro dominio usando gli stessi `game_seed/action_seed`
+  - benchmark `greedy_points` vs `random`, 100k game senza JSONL: `5.478s` (`~18.3k games/sec`)
+- [ ] Integrare `fast_2p` in training A2C dietro flag sperimentale
+  - prima target: rollout 2-player con policy neurale + avversari semplici
+  - poi riuso encoder/policy senza cambiare il dominio pubblico
 - [ ] Valutare Numba solo sul `fast_2p`
   - Numba ha senso su stato numerico/array, non su dataclass/Enum/oggetti `Card`
   - target minimo per giustificare complessita': `>=3x` sui benchmark lunghi

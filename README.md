@@ -104,6 +104,7 @@ L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 - `scripts/` – utilità (simulazioni headless)
   - `scripts/simulate_games.py` – simulazioni senza UI
   - `scripts/self_play_to_db.py` – self-play dal dominio verso SQLite (no HTTP)
+  - `scripts/fast_self_play.py` – self-play veloce 2-player summary-only (no DB/event log completo)
   - `scripts/export_dataset.py` – export SQLite → JSONL
   - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio di default, fast path sperimentale)
 - `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
@@ -323,6 +324,24 @@ python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-game
 ```
 
 Nota: se `--agents` è omesso, usa `random` per tutti i player.
+
+### Fast self-play (summary-only)
+
+Per benchmark o roll-out leggeri 2-player puoi evitare SQLite/DTO e usare il motore numerico `fast_2p`:
+
+```
+python scripts/fast_self_play.py --num-games 100000 --seed 0 --agents greedy_points,random
+```
+
+Output opzionale JSONL minimale, una riga per partita:
+
+```
+python scripts/fast_self_play.py --num-games 1000 --seed 0 --agents greedy_points,random --out-jsonl /tmp/fast_self_play.jsonl
+```
+
+Nota: questo comando è volutamente “summary-only”: salva seed, agenti, punti finali e vincitore, ma non salva
+osservazioni/azioni step-by-step. Per dataset BC completo usa ancora `scripts/self_play_to_db.py` + export.
+Per ora supporta solo `random` e `greedy_points`.
 
 ### Valutazione agenti
 
