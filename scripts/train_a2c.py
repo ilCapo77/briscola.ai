@@ -935,31 +935,46 @@ def main() -> int:
 
     opponent_pool: OpponentPool | None = None
     fast_numba_model_opponent: FastNumbaModelOpponent | None = None
+    fast_numba_model_mix_name: str | None = None
     opponent_mix_raw = args.opponent_mix.strip()
     if opponent_mix_raw:
         items = parse_opponent_mix(opponent_mix_raw)
         if rollout_engine == "fast":
+            model_mix_names = [item.name for item in items if item.name in {"best_a2c", "bc_model"}]
             unsupported = [
                 item.name
                 for item in items
                 if item.name not in FAST_EVALUATION_AGENT_NAMES
-                and not (fast_rollout == "numba" and item.name == "best_a2c")
+                and not (fast_rollout == "numba" and item.name in {"best_a2c", "bc_model"})
             ]
             if unsupported:
                 supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
                 raise ValueError(
                     f"`--rollout-engine fast` supporta opponent mix con: {supported}; "
-                    "`best_a2c` è supportato solo con `--fast-rollout numba`. "
+                    "`best_a2c`/`bc_model` sono supportati solo con `--fast-rollout numba`. "
                     f"Non supportati: {unsupported}"
                 )
-            if fast_rollout == "numba" and any(item.name == "best_a2c" for item in items):
+            if len(set(model_mix_names)) > 1:
+                raise ValueError(
+                    "`--opponent-mix` fast Numba supporta al massimo un tipo di opponent modello "
+                    "(`best_a2c` oppure `bc_model`) per batch."
+                )
+            if fast_rollout == "numba" and model_mix_names:
+                fast_numba_model_mix_name = model_mix_names[0]
                 fast_numba_model_opponent = _load_fast_numba_model_opponent(
-                    opponent_name="best_a2c",
+                    opponent_name=fast_numba_model_mix_name,
                     opponent_model_path=str(args.opponent_model),
                 )
-        agents_by_name = {item.name: build_agent(item.name) for item in items}
+        agents_by_name = {}
+        for item in items:
+            if item.name == "bc_model":
+                if fast_numba_model_opponent is None or fast_numba_model_mix_name != "bc_model":
+                    raise ValueError("`bc_model` in `--opponent-mix` richiede fast Numba e `--opponent-model`.")
+                agents_by_name[item.name] = fast_numba_model_opponent.agent
+            else:
+                agents_by_name[item.name] = build_agent(item.name)
         opponent_pool = OpponentPool(items=items, agents_by_name=agents_by_name)
-        opponent = build_agent(items[0].name)
+        opponent = agents_by_name[items[0].name]
     else:
         opponent_name = str(args.opponent)
         if rollout_engine == "fast" and opponent_name in {"best_a2c", "bc_model"}:
@@ -1099,11 +1114,14 @@ def main() -> int:
                                 for _ in range(batch_size)
                             ]
                             opponent_codes = np.asarray(
-                                [0 if name == "best_a2c" else numba_agent_code(name) for name in sampled_names],
+                                [
+                                    0 if name == fast_numba_model_mix_name else numba_agent_code(name)
+                                    for name in sampled_names
+                                ],
                                 dtype=np.int64,
                             )
                             opponent_model_enabled_flags = np.asarray(
-                                [name == "best_a2c" for name in sampled_names],
+                                [name == fast_numba_model_mix_name for name in sampled_names],
                                 dtype=np.bool_,
                             )
                         numba_batch = collect_a2c_batch_numba_2p(

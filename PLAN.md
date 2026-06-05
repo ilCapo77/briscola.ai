@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **173** (pytest).
+- Test attuali: **174** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -850,12 +850,12 @@ Prossimi step performance (ordine consigliato):
   - supporto: `scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --opponent best_a2c`
   - supporto esplicito: `--opponent bc_model --opponent-model path/to/model.npz`
   - scope: opponent `.npz` MLP (`w1/b1/w2/b2`) con forward argmax mascherato nel core JIT
-  - supporto mix: `best_a2c` dentro `--opponent-mix` insieme ad avversari rule-based, con flag opponent per partita
+  - supporto mix: `best_a2c` o `bc_model` dentro `--opponent-mix` insieme ad avversari rule-based, con flag opponent per partita
   - supporto guard: `inference_overkill_guard` viene applicato con post-processing numerico anti-overkill
-  - test: smoke trainer con opponent `.npz` esplicito e mix ibrido rule-based + `best_a2c`
+  - test: smoke trainer con opponent `.npz` esplicito e mix ibrido rule-based + `best_a2c`/`bc_model`
   - benchmark training A2C vs `best_a2c`, 5k game, hidden=32: `~4.31s -> ~0.82s`
   - benchmark training A2C con mix `best_a2c:0.5,random:0.5`, 5k game, hidden=32: `~0.89s`
-  - limite: `bc_model` dentro `--opponent-mix` non è ancora supportato nel fast path; usare `best_a2c` o opponent singolo
+  - limite: nello stesso `--opponent-mix` fast Numba è supportato al massimo un tipo di opponent modello
 - [x] Esporre il rollout Numba nella pipeline esperimenti riproducibile
   - CLI: `scripts/run_experiment.py --rollout-engine fast --fast-rollout numba`
   - validazione: i flag fast/Numba sono accettati solo con `--algo a2c` e richiedono `--rollout-engine fast`

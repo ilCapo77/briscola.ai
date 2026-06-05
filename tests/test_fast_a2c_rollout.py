@@ -251,6 +251,57 @@ def test_train_a2c_fast_numba_rollout_supports_best_a2c_in_opponent_mix(tmp_path
     ]
 
 
+def test_train_a2c_fast_numba_rollout_supports_bc_model_in_opponent_mix(tmp_path: Path) -> None:
+    """Il rollout Numba batch deve poter mischiare un opponent `.npz` esplicito con baseline rule-based."""
+    out_path = tmp_path / "a2c_fast_numba_bc_mix_smoke.npz"
+    opponent_path = tmp_path / "opponent_mix_model.npz"
+    _write_dummy_mlp_model(opponent_path)
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--out",
+            str(out_path),
+            "--rollout-engine",
+            "fast",
+            "--fast-rollout",
+            "numba",
+            "--opponent-mix",
+            "bc_model:0.5,random:0.5",
+            "--opponent-model",
+            str(opponent_path),
+            "--num-games",
+            "4",
+            "--seed",
+            "123",
+            "--hidden-dim",
+            "8",
+            "--update-every",
+            "2",
+            "--log-every",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert out_path.exists()
+    with np.load(out_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+
+    assert metadata["rollout_engine"] == "fast"
+    assert metadata["fast_rollout"] == "numba"
+    assert metadata["opponent"] is None
+    assert metadata["opponent_model"] == str(opponent_path)
+    assert sorted(metadata["opponent_mix"], key=lambda item: item["name"]) == [
+        {"name": "bc_model", "prob": 0.5},
+        {"name": "random", "prob": 0.5},
+    ]
+
+
 class _LinearAnchor:
     """Anchor minimale per testare la regolarizzazione nel batch backprop."""
 
