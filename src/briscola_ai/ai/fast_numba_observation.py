@@ -987,6 +987,114 @@ def _evaluate_mlp_policy_numba(
     return wins_policy, wins_opponent, draws, sum_policy, sum_opponent
 
 
+@njit(cache=True, parallel=True)
+def _evaluate_mlp_policy_numba_parallel_plain(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    game_seeds: np.ndarray,
+    policy_argmax: bool,
+    policy_overkill_guard: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Valuta una MLP policy in parallelo su partite indipendenti con seat fisso.
+
+    Ritorna array per-partita: punti policy, punti opponent, winner (`0/1/-1`).
+    L'aggregazione resta nel wrapper Python per evitare riduzioni complesse dentro `prange`.
+    """
+    total_games = game_seeds.shape[0]
+    policy_points = np.empty(total_games, dtype=np.int64)
+    opponent_points = np.empty(total_games, dtype=np.int64)
+    winners = np.empty(total_games, dtype=np.int64)
+
+    for game_index in prange(total_games):
+        p_points, o_points, winner = _play_mlp_policy_game_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            opponent_code,
+            opponent_model_enabled,
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            opponent_overkill_guard,
+            int(game_seeds[game_index]),
+            0,
+            policy_argmax,
+            policy_overkill_guard,
+        )
+        policy_points[game_index] = p_points
+        opponent_points[game_index] = o_points
+        winners[game_index] = winner
+
+    return policy_points, opponent_points, winners
+
+
+@njit(cache=True, parallel=True)
+def _evaluate_mlp_policy_numba_parallel_seat_fair(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    game_seeds: np.ndarray,
+    policy_argmax: bool,
+    policy_overkill_guard: bool,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Valuta una MLP policy in parallelo con coppie seat-fair per ogni seed.
+
+    Ogni seed genera due partite indipendenti a seat invertiti. Tenere questo kernel
+    separato da quello a seat fisso evita inferenze ambigue degli indici dentro `prange`.
+    """
+    total_games = game_seeds.shape[0] * 2
+    policy_points = np.empty(total_games, dtype=np.int64)
+    opponent_points = np.empty(total_games, dtype=np.int64)
+    winners = np.empty(total_games, dtype=np.int64)
+
+    for game_index in prange(total_games):
+        seed_index = game_index // 2
+        policy_seat = game_index - seed_index * 2
+        p_points, o_points, winner = _play_mlp_policy_game_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            opponent_code,
+            opponent_model_enabled,
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            opponent_overkill_guard,
+            int(game_seeds[seed_index]),
+            int(policy_seat),
+            policy_argmax,
+            policy_overkill_guard,
+        )
+        policy_points[game_index] = p_points
+        opponent_points[game_index] = o_points
+        winners[game_index] = winner
+
+    return policy_points, opponent_points, winners
+
+
 @njit(cache=True)
 def _play_mlp_policy_quality_game_numba(
     w1: np.ndarray,
@@ -1957,6 +2065,7 @@ def evaluate_mlp_policy_numba_2p(
     game_seeds: Sequence[int] | None = None,
     deterministic: bool = False,
     policy_overkill_guard: bool = False,
+    parallel: bool = False,
     opponent_w1: np.ndarray | None = None,
     opponent_b1: np.ndarray | None = None,
     opponent_w2: np.ndarray | None = None,
@@ -2030,23 +2139,64 @@ def evaluate_mlp_policy_numba_2p(
         opponent_b2_arr = np.zeros((ACTION_DIM,), dtype=np.float32)
         opponent_code = numba_agent_code(opponent_name)
 
-    wins_policy, wins_opponent, draws, sum_policy, sum_opponent = _evaluate_mlp_policy_numba(
-        w1_arr,
-        b1_arr,
-        w2_arr,
-        b2_arr,
-        opponent_code,
-        bool(opponent_model_enabled),
-        opponent_w1_arr,
-        opponent_b1_arr,
-        opponent_w2_arr,
-        opponent_b2_arr,
-        bool(opponent_overkill_guard),
-        seeds_arr,
-        bool(seat_fair),
-        bool(deterministic),
-        bool(policy_overkill_guard),
-    )
+    if parallel:
+        if bool(seat_fair):
+            policy_points, opponent_points, winners = _evaluate_mlp_policy_numba_parallel_seat_fair(
+                w1_arr,
+                b1_arr,
+                w2_arr,
+                b2_arr,
+                opponent_code,
+                bool(opponent_model_enabled),
+                opponent_w1_arr,
+                opponent_b1_arr,
+                opponent_w2_arr,
+                opponent_b2_arr,
+                bool(opponent_overkill_guard),
+                seeds_arr,
+                bool(deterministic),
+                bool(policy_overkill_guard),
+            )
+        else:
+            policy_points, opponent_points, winners = _evaluate_mlp_policy_numba_parallel_plain(
+                w1_arr,
+                b1_arr,
+                w2_arr,
+                b2_arr,
+                opponent_code,
+                bool(opponent_model_enabled),
+                opponent_w1_arr,
+                opponent_b1_arr,
+                opponent_w2_arr,
+                opponent_b2_arr,
+                bool(opponent_overkill_guard),
+                seeds_arr,
+                bool(deterministic),
+                bool(policy_overkill_guard),
+            )
+        wins_policy = int(np.count_nonzero(winners == 0))
+        wins_opponent = int(np.count_nonzero(winners == 1))
+        draws = int(np.count_nonzero(winners < 0))
+        sum_policy = int(np.sum(policy_points))
+        sum_opponent = int(np.sum(opponent_points))
+    else:
+        wins_policy, wins_opponent, draws, sum_policy, sum_opponent = _evaluate_mlp_policy_numba(
+            w1_arr,
+            b1_arr,
+            w2_arr,
+            b2_arr,
+            opponent_code,
+            bool(opponent_model_enabled),
+            opponent_w1_arr,
+            opponent_b1_arr,
+            opponent_w2_arr,
+            opponent_b2_arr,
+            bool(opponent_overkill_guard),
+            seeds_arr,
+            bool(seat_fair),
+            bool(deterministic),
+            bool(policy_overkill_guard),
+        )
     return NumbaMLPRolloutSummary(
         num_games=num_games,
         policy_name=policy_name,
@@ -2467,6 +2617,38 @@ def warm_up_numba_mlp_rollout() -> None:
         False,
         np.asarray([0], dtype=np.int64),
         False,
+        False,
+        False,
+    )
+    _evaluate_mlp_policy_numba_parallel_plain(
+        w1,
+        b1,
+        w2,
+        b2,
+        numba_agent_code("random"),
+        False,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        False,
+        np.asarray([0], dtype=np.int64),
+        False,
+        False,
+    )
+    _evaluate_mlp_policy_numba_parallel_seat_fair(
+        w1,
+        b1,
+        w2,
+        b2,
+        numba_agent_code("random"),
+        False,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        False,
+        np.asarray([0], dtype=np.int64),
         False,
         False,
     )

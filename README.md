@@ -593,7 +593,8 @@ Note pratiche:
 - log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
 - coerenza directory modelli: la pipeline imposta `BRISCOLA_MODELS_DIR=<models-dir>` per i processi figli, così alias come `best_a2c` risolvono sempre nella stessa cartella.
 - performance: `--rollout-engine fast --fast-rollout numba` accelera il training A2C; `--eval-engine numba`
-  accelera la evaluation matrix per modelli MLP contro opponent fast-compatible.
+  accelera la evaluation matrix per modelli MLP contro opponent fast-compatible. Anche
+  `scripts/evaluate_agents.py --engine numba` usa kernel paralleli per i rollout MLP.
 - modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data`.
   - se `--update-best` è attivo (default), conserva solo `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`.
   - se fai screening con `--no-update-best`, mantiene comunque `data/models/` minimale (conserva i best se esistono; altrimenti conserva il modello run-specific).
@@ -818,6 +819,7 @@ Validazione robusta (consigliata):
   - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big.json`
 - singola valutazione Numba (modello MLP vs baseline):
   - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_medium_numba.json`
+  - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.261s -> 0.550s` (`~5.9x`)
 - head-to-head Numba (nuovo modello vs best/precedente):
   - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/NEW_MODEL.npz --agent1 bc_model --agent1-model ./data/models/best_a2c.npz --out-json benchmarks/new_vs_best_medium_numba.json`
 - evaluation matrix Numba (più veloce per modelli MLP):

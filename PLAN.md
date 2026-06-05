@@ -874,6 +874,12 @@ Prossimi step performance (ordine consigliato):
   - supporto: `agent0=bc_model` MLP contro baseline fast-compatible oppure `agent1=bc_model` MLP, sia plain sia seat-fair/benchmark
   - uso chiave: head-to-head rapido tra nuovo modello e best/precedente senza tornare al dominio canonico
   - output JSON coerente con gli altri engine (`engine=numba`, `stats` standard)
+- [x] Parallelizzare la evaluation MLP Numba
+  - kernel separati `prange` per seat fisso e seat-fair, così gli indici restano semplici per Numba
+  - `scripts/evaluate_agents.py --engine numba` e `scripts/evaluate_matrix.py --engine numba` usano il path parallelo
+  - test: equivalenza seriale/parallelo su policy deterministica argmax con stessi seed
+  - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.261s -> 0.550s`
+    (`~5.9x`, stesso `avg_diff=+12.4640`)
 - [x] Integrare Numba nelle metriche decision-quality
   - CLI: `scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model <model.npz> --agent-b heuristic_v1`
   - metriche JIT: `trump_waste_rate`, `trump_overkill_rate`, `trump_overkill_rate_low_lead_points`

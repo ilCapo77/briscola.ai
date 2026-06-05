@@ -271,6 +271,7 @@ def main() -> int:
             game_seeds=game_seeds,
             deterministic=True,
             policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+            parallel=True,
             opponent_w1=opponent_model.w1 if opponent_model is not None else None,
             opponent_b1=opponent_model.b1 if opponent_model is not None else None,
             opponent_w2=opponent_model.w2 if opponent_model is not None else None,

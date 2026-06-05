@@ -120,6 +120,33 @@ def test_numba_mlp_rollout_is_deterministic_and_valid(feature_dim: int) -> None:
     stats = first.to_match_stats()
     assert stats.avg_points_agent0 + stats.avg_points_agent1 == pytest.approx(120.0)
 
+    serial_argmax = evaluate_mlp_policy_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        opponent_name="heuristic_v1",
+        num_games=40,
+        seed=99,
+        seat_fair=True,
+        deterministic=True,
+        game_seeds=list(range(20)),
+    )
+    parallel_argmax = evaluate_mlp_policy_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        opponent_name="heuristic_v1",
+        num_games=40,
+        seed=99,
+        seat_fair=True,
+        deterministic=True,
+        parallel=True,
+        game_seeds=list(range(20)),
+    )
+    assert parallel_argmax == serial_argmax
+
 
 def test_numba_mlp_rollout_supports_mlp_opponent() -> None:
     """Il rollout evaluation Numba deve supportare anche opponent `.npz` MLP."""

@@ -164,6 +164,7 @@ def _evaluate_numba_model_vs_opponent(
         game_seeds=game_seeds,
         deterministic=True,
         policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+        parallel=True,
         policy_name=model_agent.name,
     )
     return summary.to_seat_fair_stats()
