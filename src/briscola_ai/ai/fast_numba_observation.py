@@ -994,6 +994,12 @@ def _play_mlp_policy_quality_game_numba(
     w2: np.ndarray,
     b2: np.ndarray,
     opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
     seed: int,
     policy_seat: int,
     policy_overkill_guard: bool,
@@ -1113,15 +1119,22 @@ def _play_mlp_policy_quality_game_numba(
 
             card_index = _action_id_to_hand_index_numba(hands, hand_sizes, current_turn, action_id)
         else:
-            card_index = _choose_policy_card_index_numba(
+            card_index = _choose_opponent_card_index_numba(
                 opponent_code,
+                opponent_model_enabled,
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                opponent_overkill_guard,
                 hands,
                 hand_sizes,
-                current_turn,
+                points,
                 table_cards,
                 table_players,
                 table_size,
                 deck_size,
+                current_turn,
                 trump_card,
                 seen_cards,
             )
@@ -1189,6 +1202,12 @@ def _evaluate_mlp_policy_quality_numba(
     w2: np.ndarray,
     b2: np.ndarray,
     opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
     game_seeds: np.ndarray,
     policy_overkill_guard: bool,
 ) -> tuple[int, int, int, int, int, int, int, int, int, int, int, int]:
@@ -1226,6 +1245,12 @@ def _evaluate_mlp_policy_quality_numba(
                 w2,
                 b2,
                 opponent_code,
+                opponent_model_enabled,
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                opponent_overkill_guard,
                 game_seed,
                 policy_seat,
                 policy_overkill_guard,
@@ -2045,6 +2070,11 @@ def evaluate_mlp_policy_quality_numba_2p(
     seed: int,
     game_seeds: Sequence[int] | None = None,
     policy_overkill_guard: bool = False,
+    opponent_w1: np.ndarray | None = None,
+    opponent_b1: np.ndarray | None = None,
+    opponent_w2: np.ndarray | None = None,
+    opponent_b2: np.ndarray | None = None,
+    opponent_overkill_guard: bool = False,
     policy_name: str = "mlp_numba",
 ) -> NumbaDecisionQualitySummary:
     """
@@ -2083,6 +2113,36 @@ def evaluate_mlp_policy_quality_numba_2p(
     if b2_arr.shape != (ACTION_DIM,):
         raise ValueError(f"b2 shape={b2_arr.shape}; atteso {(ACTION_DIM,)}")
 
+    opponent_model_enabled = (
+        opponent_w1 is not None or opponent_b1 is not None or opponent_w2 is not None or opponent_b2 is not None
+    )
+    if opponent_model_enabled:
+        if opponent_w1 is None or opponent_b1 is None or opponent_w2 is None or opponent_b2 is None:
+            raise ValueError("Opponent model incompleto: servono opponent_w1/b1/w2/b2.")
+        opponent_w1_arr = _as_float32_matrix("opponent_w1", opponent_w1)
+        opponent_b1_arr = _as_float32_vector("opponent_b1", opponent_b1)
+        opponent_w2_arr = _as_float32_matrix("opponent_w2", opponent_w2)
+        opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
+        opp_feature_dim = int(opponent_w1_arr.shape[0])
+        opp_hidden_dim = int(opponent_w1_arr.shape[1])
+        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+            raise ValueError(
+                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
+            )
+        if opponent_b1_arr.shape != (opp_hidden_dim,):
+            raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
+        if opponent_w2_arr.shape != (opp_hidden_dim, ACTION_DIM):
+            raise ValueError(f"opponent_w2 shape={opponent_w2_arr.shape}; atteso {(opp_hidden_dim, ACTION_DIM)}")
+        if opponent_b2_arr.shape != (ACTION_DIM,):
+            raise ValueError(f"opponent_b2 shape={opponent_b2_arr.shape}; atteso {(ACTION_DIM,)}")
+        opponent_code = 0
+    else:
+        opponent_w1_arr = np.zeros((int(FEATURE_DIM_2P_V1), 1), dtype=np.float32)
+        opponent_b1_arr = np.zeros((1,), dtype=np.float32)
+        opponent_w2_arr = np.zeros((1, ACTION_DIM), dtype=np.float32)
+        opponent_b2_arr = np.zeros((ACTION_DIM,), dtype=np.float32)
+        opponent_code = numba_agent_code(opponent_name)
+
     (
         wins_policy,
         wins_opponent,
@@ -2101,7 +2161,13 @@ def evaluate_mlp_policy_quality_numba_2p(
         b1_arr,
         w2_arr,
         b2_arr,
-        numba_agent_code(opponent_name),
+        opponent_code,
+        bool(opponent_model_enabled),
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        bool(opponent_overkill_guard),
         seeds_arr,
         bool(policy_overkill_guard),
     )
@@ -2410,6 +2476,12 @@ def warm_up_numba_mlp_rollout() -> None:
         w2,
         b2,
         numba_agent_code("random"),
+        False,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        False,
         np.asarray([0], dtype=np.int64),
         False,
     )

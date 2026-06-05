@@ -500,6 +500,9 @@ python scripts/evaluate_decision_quality.py --agent-a bc_model --agent-a-model .
 # Variante veloce Numba (modello MLP come A, baseline fast-compatible come B)
 python scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model ./data/models/bc_teacher_v2.npz --agent-b heuristic_v1 --benchmark medium
 
+# Variante head-to-head Numba (stile di A contro un altro modello MLP)
+python scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model ./data/NEW_MODEL.npz --agent-b bc_model --agent-b-model ./data/models/best_a2c.npz --benchmark medium
+
 # 5) (Opzionale) Fine-tuning A2C partendo dal BC
 python scripts/run_experiment.py --algo a2c --init ./data/models/bc_teacher_v2.npz --benchmarks medium --num-games 200000 --train-seed 6 --seat-fair \
   --opponent-mix heuristic_v2:0.4,heuristic_v1:0.3,random:0.2,greedy_points:0.1 --no-update-best --minimal-data -- \

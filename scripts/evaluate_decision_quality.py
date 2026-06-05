@@ -93,17 +93,25 @@ def main() -> int:
     if args.engine == "numba":
         if args.agent_a != "bc_model":
             raise ValueError("`--engine numba` supporta per ora solo `--agent-a bc_model`.")
-        if args.agent_b == "bc_model" or args.agent_b_model.strip():
-            raise ValueError("`--engine numba` supporta un solo modello: A=bc_model contro baseline.")
         if not args.agent_a_model.strip():
             raise ValueError("`--agent-a-model` obbligatorio quando `--engine numba --agent-a bc_model`.")
         agent_a = BCModelAgent.from_npz(Path(args.agent_a_model.strip()))
-        agent_b_name = str(args.agent_b)
+        agent_b_model = None
+        if args.agent_b == "bc_model":
+            if not args.agent_b_model.strip():
+                raise ValueError("`--agent-b-model` obbligatorio quando `--engine numba --agent-b bc_model`.")
+            agent_b_model = BCModelAgent.from_npz(Path(args.agent_b_model.strip()))
+            agent_b_name = agent_b_model.name
+        else:
+            if args.agent_b_model.strip():
+                raise ValueError("`--agent-b-model` è valido solo quando `--agent-b bc_model`.")
+            agent_b_name = str(args.agent_b)
         out = evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
             agent_a,
             agent_b_name,
             num_games=num_games,
             seed=int(args.seed),
+            opponent_agent=agent_b_model,
         )
         agent_b_label = agent_b_name
     else:

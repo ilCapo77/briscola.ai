@@ -160,3 +160,15 @@ def test_numba_decision_quality_returns_consistent_stats(tmp_path: Path) -> None
     assert out.quality.num_second_hand_with_winning_reply <= out.quality.num_second_hand_decisions
     assert out.quality.num_trump_waste <= out.quality.num_second_hand_with_winning_reply
     assert out.quality.num_trump_overkill <= out.quality.num_second_hand_trump_wins
+
+    head_to_head = evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
+        agent,
+        agent.name,
+        num_games=20,
+        seed=0,
+        game_seeds=list(range(10)),
+        opponent_agent=agent,
+    )
+    assert head_to_head.match.num_games == 20
+    assert head_to_head.match.wins_agent_a + head_to_head.match.wins_agent_b + head_to_head.match.draws == 20
+    assert head_to_head.quality.num_trump_waste <= head_to_head.quality.num_second_hand_with_winning_reply

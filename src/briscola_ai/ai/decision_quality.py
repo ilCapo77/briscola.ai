@@ -315,6 +315,7 @@ def evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
     num_games: int,
     seed: int,
     game_seeds: Optional[Sequence[int]] = None,
+    opponent_agent: BCModelAgent | None = None,
 ) -> SeatFairStatsWithQuality:
     """
     Valuta decision-quality con core Numba per `bc_model` MLP vs baseline fast-compatible.
@@ -327,13 +328,20 @@ def evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
     """
     if int(num_games) % 2 != 0:
         raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari.")
-    if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
+    if opponent_agent is None and opponent_name not in FAST_EVALUATION_AGENT_NAMES:
         supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
         raise ValueError(f"`engine=numba` supporta opponent: {supported}. Ottenuto: {opponent_name!r}")
 
     model = model_agent.model
     if not isinstance(model, MLPBCModel):
         raise ValueError("`engine=numba` supporta solo modelli `.npz` MLP con chiavi w1/b1/w2/b2.")
+    opponent_model: MLPBCModel | None = None
+    opponent_label = opponent_name
+    if opponent_agent is not None:
+        if not isinstance(opponent_agent.model, MLPBCModel):
+            raise ValueError("`engine=numba` supporta solo opponent `.npz` MLP con chiavi w1/b1/w2/b2.")
+        opponent_model = opponent_agent.model
+        opponent_label = opponent_agent.name
 
     rng_game = random.Random(seed)
     num_pairs = int(num_games) // 2
@@ -346,11 +354,16 @@ def evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
         b1=model.b1,
         w2=model.w2,
         b2=model.b2,
-        opponent_name=opponent_name,
+        opponent_name=opponent_label,
         num_games=int(num_games),
         seed=int(seed),
         game_seeds=seeds[:num_pairs],
         policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+        opponent_w1=opponent_model.w1 if opponent_model is not None else None,
+        opponent_b1=opponent_model.b1 if opponent_model is not None else None,
+        opponent_w2=opponent_model.w2 if opponent_model is not None else None,
+        opponent_b2=opponent_model.b2 if opponent_model is not None else None,
+        opponent_overkill_guard=bool(opponent_agent.overkill_guard_enabled) if opponent_agent is not None else False,
         policy_name=model_agent.name,
     )
     return SeatFairStatsWithQuality(

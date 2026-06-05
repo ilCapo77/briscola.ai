@@ -878,7 +878,8 @@ Prossimi step performance (ordine consigliato):
   - CLI: `scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model <model.npz> --agent-b heuristic_v1`
   - metriche JIT: `trump_waste_rate`, `trump_overkill_rate`, `trump_overkill_rate_low_lead_points`
   - semantica: policy argmax deterministica + guard anti-overkill opzionale letto dai metadati/env
-  - supporto: modello A MLP vs baseline fast-compatible; il dominio resta fallback per agenti arbitrari/model-vs-model
+  - supporto: modello A MLP vs baseline fast-compatible oppure vs modello B MLP
+  - il dominio resta fallback per agenti arbitrari/non-MLP
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)
 
