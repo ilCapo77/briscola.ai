@@ -418,6 +418,16 @@ Prossimi esperimenti (A2C):
     - nuovo `50080` win, vecchio best `47018` win, draw `2902`
     - `avg_point_diff = +0.9772` a favore del nuovo modello
   - robustezza `big holdout`: vs `random` `+43.85694`, vs `greedy_points` `+42.06212`
+- [x] Run “league” 1M con pipeline Numba completa:
+  - warm-start da `data/models/best_a2c.npz`
+  - config: `lr=1e-4`, `entropy_beta=2e-4`, mix `best_a2c:0.60,heuristic_v1:0.25,greedy_points:0.10,random:0.05`, seat-fair
+  - esperimento: `benchmarks/experiments/a2c_league_best60_h25_g10_r05_1m_seed18_numba/`
+  - pipeline: `--rollout-engine fast --fast-rollout numba --eval-engine numba --minimal-data --no-update-best`
+  - tempo misurato con `/usr/bin/time -p`: `real=215.04s` per training 1M + matrix `medium,big`
+  - evaluation Numba: `medium=4.175s`, `big=34.771s`
+  - score: `big holdout vs heuristic_v1 avg_diff = +13.33254`
+  - confronto con run seed17: `+13.12788 -> +13.33254` (`+0.20466`, circa `+1.6%` sul vantaggio medio)
+  - robustezza `big holdout`: vs `random` `+43.51`, vs `greedy_points` `+41.94`
 
 ### Fase 5F — Comportamenti più “strategici”: storia pubblica + metriche qualità (in progress)
 
