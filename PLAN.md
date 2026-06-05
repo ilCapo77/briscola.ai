@@ -428,6 +428,23 @@ Prossimi esperimenti (A2C):
   - score: `big holdout vs heuristic_v1 avg_diff = +13.33254`
   - confronto con run seed17: `+13.12788 -> +13.33254` (`+0.20466`, circa `+1.6%` sul vantaggio medio)
   - robustezza `big holdout`: vs `random` `+43.51`, vs `greedy_points` `+41.94`
+- [x] Run “league” 5M con pipeline Numba completa + promozione:
+  - warm-start da `data/models/best_a2c.npz`
+  - config: `lr=1e-4`, `entropy_beta=2e-4`, mix `best_a2c:0.60,heuristic_v1:0.25,greedy_points:0.10,random:0.05`, seat-fair
+  - esperimento: `benchmarks/experiments/a2c_league_best60_h25_g10_r05_5m_seed19_numba/`
+  - pipeline: `--rollout-engine fast --fast-rollout numba --eval-engine numba --minimal-data --no-update-best`
+  - inferenza: modello salvato con `--inference-overkill-guard` per mantenere il guard anti-overkill anche nel best ufficiale
+  - tempo misurato con `/usr/bin/time -p`: `real=930.39s` per training 5M + matrix `medium,big`
+  - evaluation Numba: `medium=4.259s`, `big=37.734s`
+  - score: `big holdout vs heuristic_v1 avg_diff = +13.91112`
+  - confronto col best 1M ufficiale: `+13.12788 -> +13.91112` (`+0.78324`, circa `+6.0%` sul vantaggio medio)
+  - head-to-head vs best 1M ufficiale (`big`, 100k, seat-fair): nuovo `50142` win, best precedente `47011` win, draw `2847`,
+    `avg_point_diff = +1.1014`
+  - decision-quality `big` vs `heuristic_v1`: `avg_diff=+13.9865`, `trump_overkill_rate=0.0%`,
+    `trump_overkill_rate_low_lead_points=0.0%`, `trump_waste_rate≈0.08%`
+  - decisione: promosso nuovo `data/models/best_a2c.npz` (`A2C shaped 5.0M game`, guard ON)
+  - nota storage: il modello completo dell'esperimento contiene `250000` record metriche e pesa circa `244 MB`; il best ufficiale
+    è una copia compattata (`metrics` rimossi dai metadati, `metrics_summary` conservato) e pesa circa `138 KB`
 
 ### Fase 5F — Comportamenti più “strategici”: storia pubblica + metriche qualità (in progress)
 
