@@ -121,6 +121,36 @@ def test_numba_mlp_rollout_is_deterministic_and_valid(feature_dim: int) -> None:
     assert stats.avg_points_agent0 + stats.avg_points_agent1 == pytest.approx(120.0)
 
 
+def test_numba_mlp_rollout_supports_mlp_opponent() -> None:
+    """Il rollout evaluation Numba deve supportare anche opponent `.npz` MLP."""
+    feature_dim = int(FEATURE_DIM_2P_V1)
+    w1 = np.zeros((feature_dim, 8), dtype=np.float32)
+    b1 = np.zeros((8,), dtype=np.float32)
+    w2 = np.zeros((8, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+
+    summary = evaluate_mlp_policy_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        opponent_name="opponent_model",
+        num_games=20,
+        seed=11,
+        seat_fair=True,
+        deterministic=True,
+        opponent_w1=w1,
+        opponent_b1=b1,
+        opponent_w2=w2,
+        opponent_b2=b2,
+        opponent_overkill_guard=False,
+    )
+
+    assert summary.wins_policy + summary.wins_opponent + summary.draws == 20
+    assert summary.sum_policy + summary.sum_opponent == 20 * 120
+    assert summary.to_seat_fair_stats().agent_b_name == "opponent_model"
+
+
 def test_numba_mlp_rollout_rejects_bad_shapes() -> None:
     """Il wrapper Python deve intercettare modelli MLP non compatibili prima del JIT."""
     w1 = np.zeros((123, 8), dtype=np.float32)

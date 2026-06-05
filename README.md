@@ -813,6 +813,8 @@ Validazione robusta (consigliata):
   - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big.json`
 - singola valutazione Numba (modello MLP vs baseline):
   - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_medium_numba.json`
+- head-to-head Numba (nuovo modello vs best/precedente):
+  - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/NEW_MODEL.npz --agent1 bc_model --agent1-model ./data/models/best_a2c.npz --out-json benchmarks/new_vs_best_medium_numba.json`
 - evaluation matrix Numba (più veloce per modelli MLP):
   - `python scripts/evaluate_matrix.py --engine numba --model ./data/MODEL.npz --benchmark big --out-json benchmarks/model_matrix_big_numba.json`
 - holdout di seed (evita “overfitting” su una sola suite):

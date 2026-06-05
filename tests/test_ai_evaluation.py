@@ -143,6 +143,7 @@ def test_evaluate_agents_cli_numba_engine_supports_mlp_model(tmp_path: Path) -> 
     h = 4
     model_path = tmp_path / "dummy_numba_eval.npz"
     out_json = tmp_path / "result.json"
+    head_to_head_json = tmp_path / "head_to_head.json"
     np.savez(
         model_path,
         w1=np.zeros((d, h), dtype=np.float32),
@@ -182,3 +183,35 @@ def test_evaluate_agents_cli_numba_engine_supports_mlp_model(tmp_path: Path) -> 
     assert payload["engine"] == "numba"
     assert stats["num_games"] == 4
     assert stats["wins_agent0"] + stats["wins_agent1"] + stats["draws"] == 4
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script),
+            "--engine",
+            "numba",
+            "--num-games",
+            "4",
+            "--seed",
+            "0",
+            "--agent0",
+            "bc_model",
+            "--agent0-model",
+            str(model_path),
+            "--agent1",
+            "bc_model",
+            "--agent1-model",
+            str(model_path),
+            "--out-json",
+            str(head_to_head_json),
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    h2h = json.loads(head_to_head_json.read_text(encoding="utf-8"))
+    h2h_stats = h2h["stats"]
+    assert h2h["engine"] == "numba"
+    assert h2h_stats["num_games"] == 4
+    assert h2h_stats["wins_agent0"] + h2h_stats["wins_agent1"] + h2h_stats["draws"] == 4

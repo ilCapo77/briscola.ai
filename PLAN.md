@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **172** (pytest).
+- Test attuali: **173** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -871,7 +871,8 @@ Prossimi step performance (ordine consigliato):
   - limite: model-vs-model nella matrix resta sul dominio canonico; il path Numba ufficiale copre model-vs-baseline
 - [x] Integrare Numba nello script di valutazione singola
   - CLI: `scripts/evaluate_agents.py --engine numba --agent0 bc_model --agent0-model <model.npz> --agent1 heuristic_v1`
-  - supporto: `agent0=bc_model` MLP contro baseline fast-compatible, sia plain sia seat-fair/benchmark
+  - supporto: `agent0=bc_model` MLP contro baseline fast-compatible oppure `agent1=bc_model` MLP, sia plain sia seat-fair/benchmark
+  - uso chiave: head-to-head rapido tra nuovo modello e best/precedente senza tornare al dominio canonico
   - output JSON coerente con gli altri engine (`engine=numba`, `stats` standard)
 - [x] Integrare Numba nelle metriche decision-quality
   - CLI: `scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model <model.npz> --agent-b heuristic_v1`

@@ -111,7 +111,7 @@ def main() -> int:
         default="domain",
         help=(
             "Motore di valutazione. `domain` supporta tutti gli agenti; `fast` supporta baseline "
-            "fast-compatible; `numba` supporta `agent0=bc_model` MLP contro baseline fast-compatible."
+            "fast-compatible; `numba` supporta `agent0=bc_model` MLP contro baseline o `agent1=bc_model` MLP."
         ),
     )
     agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
@@ -231,31 +231,53 @@ def main() -> int:
     if args.engine == "numba":
         if args.agent0 != "bc_model":
             raise ValueError("`--engine numba` supporta per ora solo `--agent0 bc_model`.")
-        if args.agent1 == "bc_model" or args.agent1_model.strip():
-            raise ValueError("`--engine numba` supporta un solo modello: `agent0=bc_model` contro baseline.")
         if not args.agent0_model.strip():
             raise ValueError("`--agent0-model` obbligatorio quando `--engine numba --agent0 bc_model`.")
-        if args.agent1 not in FAST_EVALUATION_AGENT_NAMES:
-            supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
-            raise ValueError(f"`--engine numba` supporta agent1: {supported}. Ottenuto: {args.agent1!r}")
 
         model_agent = BCModelAgent.from_npz(args.agent0_model.strip())
         model = model_agent.model
         if not isinstance(model, MLPBCModel):
             raise ValueError("`--engine numba` supporta solo modelli `.npz` MLP con chiavi w1/b1/w2/b2.")
 
+        opponent_agent: BCModelAgent | None = None
+        opponent_model: MLPBCModel | None = None
+        opponent_label = str(args.agent1)
+        if args.agent1 == "bc_model":
+            if not args.agent1_model.strip():
+                raise ValueError("`--agent1-model` obbligatorio quando `--engine numba --agent1 bc_model`.")
+            opponent_agent = BCModelAgent.from_npz(args.agent1_model.strip())
+            if not isinstance(opponent_agent.model, MLPBCModel):
+                raise ValueError("`--engine numba` supporta solo opponent `.npz` MLP con chiavi w1/b1/w2/b2.")
+            opponent_model = opponent_agent.model
+            opponent_label = opponent_agent.name
+        else:
+            if args.agent1_model.strip():
+                raise ValueError("`--agent1-model` è valido solo quando `--agent1 bc_model`.")
+            if args.agent1 not in FAST_EVALUATION_AGENT_NAMES:
+                supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
+                raise ValueError(
+                    f"`--engine numba` supporta agent1: {supported} oppure bc_model. Ottenuto: {args.agent1!r}"
+                )
+
         summary = evaluate_mlp_policy_numba_2p(
             w1=model.w1,
             b1=model.b1,
             w2=model.w2,
             b2=model.b2,
-            opponent_name=args.agent1,
+            opponent_name=opponent_label,
             num_games=args.num_games,
             seed=args.seed,
             seat_fair=bool(args.seat_fair),
             game_seeds=game_seeds,
             deterministic=True,
             policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+            opponent_w1=opponent_model.w1 if opponent_model is not None else None,
+            opponent_b1=opponent_model.b1 if opponent_model is not None else None,
+            opponent_w2=opponent_model.w2 if opponent_model is not None else None,
+            opponent_b2=opponent_model.b2 if opponent_model is not None else None,
+            opponent_overkill_guard=bool(opponent_agent.overkill_guard_enabled)
+            if opponent_agent is not None
+            else False,
             policy_name=model_agent.name,
         )
 
@@ -280,7 +302,7 @@ def main() -> int:
                         "range_step": args.seed_suite_range_step if args.seed_suite_range_start is not None else None,
                         "num_seeds_used": len(game_seeds) if game_seeds is not None else None,
                     },
-                    "agents": {"agent0": model_agent.name, "agent1": args.agent1},
+                    "agents": {"agent0": model_agent.name, "agent1": opponent_label},
                     "stats": asdict(stats),
                 }
                 Path(args.out_json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -306,7 +328,7 @@ def main() -> int:
                     "range_step": args.seed_suite_range_step if args.seed_suite_range_start is not None else None,
                     "num_seeds_used": len(game_seeds) if game_seeds is not None else None,
                 },
-                "agents": {"agent0": model_agent.name, "agent1": args.agent1},
+                "agents": {"agent0": model_agent.name, "agent1": opponent_label},
                 "stats": asdict(stats),
             }
             Path(args.out_json).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
