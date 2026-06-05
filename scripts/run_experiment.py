@@ -450,6 +450,9 @@ def main() -> int:
         raise ValueError(f"--benchmarks deve essere subset di {sorted(allowed)} (ottenuto: {benchmarks})")
 
     matrix_paths: dict[str, Path] = {}
+    requested_eval_workers = int(args.eval_workers)
+    effective_eval_workers = 1 if str(args.eval_engine) == "numba" else requested_eval_workers
+    eval_parallelism = "numba_threads" if str(args.eval_engine) == "numba" else "process_workers"
     for b in benchmarks:
         out_json = experiments_dir / f"matrix_{b}.json"
         log_path = experiments_dir / f"matrix_{b}.log"
@@ -469,7 +472,7 @@ def main() -> int:
             "--format",
             "csv",
             "--workers",
-            str(int(args.eval_workers)),
+            str(effective_eval_workers),
         ]
         _run(eval_cmd, log_path=log_path, env_overrides=env_overrides)
         matrix_paths[b] = out_json
@@ -500,7 +503,9 @@ def main() -> int:
                 "benchmark": b,
                 "matrix_json": str(p),
                 "engine": str(args.eval_engine),
-                "workers": int(args.eval_workers),
+                "workers": effective_eval_workers,
+                "requested_workers": requested_eval_workers,
+                "parallelism": eval_parallelism,
             }
             for b, p in matrix_paths.items()
         ],

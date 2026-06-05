@@ -596,6 +596,8 @@ Note pratiche:
 - performance: `--rollout-engine fast --fast-rollout numba` accelera il training A2C; `--eval-engine numba`
   accelera la evaluation matrix per modelli MLP contro opponent fast-compatible. Anche
   `scripts/evaluate_agents.py --engine numba` usa kernel paralleli per i rollout MLP.
+  Se usi `--eval-engine numba`, la pipeline registra `requested_workers` ma forza `workers=1` per evitare
+  oversubscription: il parallelismo reale è nei thread Numba.
 - modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data`.
   - se `--update-best` è attivo (default), conserva solo `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`.
   - se fai screening con `--no-update-best`, mantiene comunque `data/models/` minimale (conserva i best se esistono; altrimenti conserva il modello run-specific).

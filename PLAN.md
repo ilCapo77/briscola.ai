@@ -859,7 +859,8 @@ Prossimi step performance (ordine consigliato):
 - [x] Esporre il rollout Numba nella pipeline esperimenti riproducibile
   - CLI: `scripts/run_experiment.py --rollout-engine fast --fast-rollout numba`
   - validazione: i flag fast/Numba sono accettati solo con `--algo a2c` e richiedono `--rollout-engine fast`
-  - manifest: `train.rollout` registra engine, encoder e collector usati
+  - manifest: `train.rollout` registra engine, encoder e collector usati; `eval.parallelism` distingue
+    `numba_threads` da process worker
   - test: help CLI, validazione PG e comando/manifest con `_run` mockato
 - [x] Integrare Numba nella evaluation matrix ufficiale
   - CLI: `scripts/evaluate_matrix.py --engine numba --model <model.npz> ...`
