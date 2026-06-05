@@ -255,13 +255,15 @@ def evaluate_model_matrix(
     if opponent_model_path_str and "bc_model" not in opponents:
         raise ValueError("`opponent_model_path` è valido solo se `opponents` contiene `bc_model`.")
 
+    effective_workers = 1 if engine == "numba" else int(workers)
+
     jobs: list[tuple[str, str, str, int, SuiteSpec, list[int], EvaluationEngine]] = []
     for suite in suites:
         seeds = make_range_seed_suite(start=suite.range_start, step=suite.range_step, count=suite.num_seeds)
         for opp_name in opponents:
             jobs.append((str(Path(model_path)), opp_name, opponent_model_path_str, int(seed), suite, seeds, engine))
 
-    if int(workers) <= 1:
+    if effective_workers <= 1:
         model = BCModelAgent.from_npz(model_path)
         rows = []
         opponent_agent = BCModelAgent.from_npz(opponent_model_path_str) if opponent_model_path_str else None
@@ -286,7 +288,7 @@ def evaluate_model_matrix(
                 )
             rows.append(MatrixRow(suite=suite, opponent=stats.agent_b_name, stats=stats))
     else:
-        worker_count = max(1, min(int(workers), len(jobs)))
+        worker_count = max(1, min(effective_workers, len(jobs)))
         with ProcessPoolExecutor(max_workers=worker_count) as executor:
             rows = list(executor.map(_evaluate_matrix_row_job, jobs))
 

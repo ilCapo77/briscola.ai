@@ -129,7 +129,10 @@ def main() -> int:
         "--workers",
         type=int,
         default=1,
-        help="Numero processi per parallelizzare le righe della matrix. Default: 1 (seriale).",
+        help=(
+            "Numero processi per parallelizzare le righe della matrix con engine=domain. "
+            "Con engine=numba viene ignorato: il parallelismo usa thread Numba interni."
+        ),
     )
     parser.add_argument(
         "--format",
@@ -151,6 +154,7 @@ def main() -> int:
         if not opponents:
             raise ValueError("`--opponents` non contiene elementi validi.")
 
+    effective_workers = 1 if args.engine == "numba" else int(args.workers)
     t0 = time.perf_counter()
     matrix = evaluate_model_matrix(
         model_path=Path(args.model),
@@ -160,7 +164,7 @@ def main() -> int:
         standard_start=args.standard_start,
         holdout_start=args.holdout_start,
         range_step=args.range_step,
-        workers=int(args.workers),
+        workers=effective_workers,
         engine=args.engine,
         opponent_model_path=Path(args.opponent_model) if args.opponent_model.strip() else None,
     )
@@ -175,7 +179,8 @@ def main() -> int:
 
     if not printed_rich:
         print(format_matrix_table(matrix), end="")
-    print(f"elapsed_seconds={elapsed:.3f} workers={int(args.workers)}", file=sys.stderr)
+    parallelism = "numba_threads" if args.engine == "numba" else f"workers={effective_workers}"
+    print(f"elapsed_seconds={elapsed:.3f} {parallelism}", file=sys.stderr)
 
     if args.out_json.strip():
         out_path = Path(args.out_json)

@@ -869,6 +869,8 @@ Prossimi step performance (ordine consigliato):
   - supporto: modelli `.npz` MLP (`w1/b1/w2/b2`) contro opponent fast-compatible (`random`, `greedy_points`,
     `heuristic_v1`, `heuristic_v2`)
   - supporto head-to-head: opponent `bc_model` con `opponent_model_path`, utile per confrontare candidato vs best/precedente
+  - performance: con `engine=numba` i process worker della matrix vengono disabilitati per evitare oversubscription;
+    il parallelismo è quello interno ai kernel `prange`
   - test: matrix Numba model-vs-baseline e model-vs-model con path opponent esplicito
 - [x] Integrare Numba nello script di valutazione singola
   - CLI: `scripts/evaluate_agents.py --engine numba --agent0 bc_model --agent0-model <model.npz> --agent1 heuristic_v1`

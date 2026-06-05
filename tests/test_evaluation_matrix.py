@@ -124,6 +124,16 @@ def test_evaluation_matrix_numba_engine_returns_consistent_rows(
         assert row.stats.wins_agent_a + row.stats.wins_agent_b + row.stats.draws == 20
         assert row.stats.agent_b_name == "heuristic_v1"
 
+    workers_requested = evaluate_model_matrix(
+        model_path=model_path,
+        opponents=["heuristic_v1"],
+        benchmark="small",
+        seed=7,
+        workers=2,
+        engine="numba",
+    )
+    assert workers_requested.to_json_dict() == matrix.to_json_dict()
+
 
 def test_evaluation_matrix_numba_engine_supports_model_opponent(
     monkeypatch: pytest.MonkeyPatch,
