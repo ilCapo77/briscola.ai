@@ -10,7 +10,8 @@ o dimenticare un confronto (es. holdout). Una *evaluation matrix* standard:
 - fornisce una fotografia di robustezza (vs avversari diversi + holdout seed).
 
 Questa implementazione è offline (no HTTP/WS). Il path di default riusa il dominio canonico;
-quando `engine="numba"` usa il rollout MLP full-JIT per modelli `.npz` MLP e avversari fast-compatible.
+quando `engine="numba"` usa il rollout MLP full-JIT per modelli `.npz` MLP, avversari fast-compatible
+e un eventuale opponent `bc_model` MLP.
 """
 
 from __future__ import annotations
@@ -133,6 +134,7 @@ def _evaluate_numba_model_vs_opponent(
     *,
     model_agent: BCModelAgent,
     opponent_name: str,
+    opponent_agent: BCModelAgent | None = None,
     num_games: int,
     seed: int,
     game_seeds: list[int],
@@ -140,24 +142,30 @@ def _evaluate_numba_model_vs_opponent(
     """
     Valuta un modello MLP `.npz` con il core Numba e ritorna lo stesso DTO del path dominio.
 
-    Limite intenzionale:
-    il path Numba ufficiale valuta la policy modello come Agent A contro avversari rule-based
-    fast-compatible. Per confronti model-vs-model resta disponibile il dominio canonico.
+    Il modello sotto test è sempre Agent A. L'opponent può essere una baseline fast-compatible
+    oppure un secondo modello MLP (`bc_model`) caricato dal caller.
     """
-    if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
+    if opponent_agent is None and opponent_name not in FAST_EVALUATION_AGENT_NAMES:
         supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
-        raise ValueError(f"`engine=numba` supporta opponent: {supported}. Ottenuto: {opponent_name!r}")
+        raise ValueError(f"`engine=numba` supporta opponent: {supported} oppure bc_model. Ottenuto: {opponent_name!r}")
 
     model = model_agent.model
     if not isinstance(model, MLPBCModel):
         raise ValueError("`engine=numba` supporta solo modelli `.npz` MLP con chiavi w1/b1/w2/b2.")
+    opponent_model: MLPBCModel | None = None
+    opponent_label = opponent_name
+    if opponent_agent is not None:
+        if not isinstance(opponent_agent.model, MLPBCModel):
+            raise ValueError("`engine=numba` supporta solo opponent `.npz` MLP con chiavi w1/b1/w2/b2.")
+        opponent_model = opponent_agent.model
+        opponent_label = opponent_agent.name
 
     summary = evaluate_mlp_policy_numba_2p(
         w1=model.w1,
         b1=model.b1,
         w2=model.w2,
         b2=model.b2,
-        opponent_name=opponent_name,
+        opponent_name=opponent_label,
         num_games=int(num_games),
         seed=int(seed),
         seat_fair=True,
@@ -165,25 +173,41 @@ def _evaluate_numba_model_vs_opponent(
         deterministic=True,
         policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
         parallel=True,
+        opponent_w1=opponent_model.w1 if opponent_model is not None else None,
+        opponent_b1=opponent_model.b1 if opponent_model is not None else None,
+        opponent_w2=opponent_model.w2 if opponent_model is not None else None,
+        opponent_b2=opponent_model.b2 if opponent_model is not None else None,
+        opponent_overkill_guard=bool(opponent_agent.overkill_guard_enabled) if opponent_agent is not None else False,
         policy_name=model_agent.name,
     )
     return summary.to_seat_fair_stats()
 
 
-def _evaluate_matrix_row_job(args: tuple[str, str, int, SuiteSpec, list[int], EvaluationEngine]) -> MatrixRow:
+def _build_domain_matrix_opponent(opponent_name: str, opponent_model_path: str):
+    """Costruisce l'opponent del path dominio, incluso `bc_model` con path esplicito."""
+    if opponent_name == "bc_model":
+        if not opponent_model_path:
+            raise ValueError("`bc_model` nella matrix richiede `opponent_model_path`.")
+        return build_agent("bc_model", model_path=Path(opponent_model_path))
+    return build_agent(opponent_name)
+
+
+def _evaluate_matrix_row_job(args: tuple[str, str, str, int, SuiteSpec, list[int], EvaluationEngine]) -> MatrixRow:
     """Valuta una singola riga della matrix. Funzione top-level per multiprocessing."""
-    model_path, opponent_name, seed, suite, seeds, engine = args
+    model_path, opponent_name, opponent_model_path, seed, suite, seeds, engine = args
     model = BCModelAgent.from_npz(model_path)
+    opponent_agent = BCModelAgent.from_npz(opponent_model_path) if opponent_name == "bc_model" else None
     if engine == "numba":
         stats = _evaluate_numba_model_vs_opponent(
             model_agent=model,
             opponent_name=opponent_name,
+            opponent_agent=opponent_agent,
             num_games=len(seeds) * 2,
             seed=int(seed),
             game_seeds=seeds,
         )
     else:
-        opponent = build_agent(opponent_name)
+        opponent = _build_domain_matrix_opponent(opponent_name, opponent_model_path)
         stats = evaluate_seat_fair_match_2p(
             model,
             opponent,
@@ -191,7 +215,7 @@ def _evaluate_matrix_row_job(args: tuple[str, str, int, SuiteSpec, list[int], Ev
             seed=int(seed),
             game_seeds=seeds,
         )
-    return MatrixRow(suite=suite, opponent=opponent_name, stats=stats)
+    return MatrixRow(suite=suite, opponent=stats.agent_b_name, stats=stats)
 
 
 def evaluate_model_matrix(
@@ -205,6 +229,7 @@ def evaluate_model_matrix(
     range_step: int = 1,
     workers: int = 1,
     engine: EvaluationEngine = "domain",
+    opponent_model_path: str | Path | None = None,
 ) -> EvaluationMatrix:
     """
     Valuta un modello `.npz` contro una lista di avversari su 2 suite (standard + holdout).
@@ -224,27 +249,34 @@ def evaluate_model_matrix(
 
     if engine not in ("domain", "numba"):
         raise ValueError(f"engine non supportato: {engine!r}")
+    opponent_model_path_str = str(Path(opponent_model_path)) if opponent_model_path is not None else ""
+    if "bc_model" in opponents and not opponent_model_path_str:
+        raise ValueError("`bc_model` negli opponent della matrix richiede `opponent_model_path`.")
+    if opponent_model_path_str and "bc_model" not in opponents:
+        raise ValueError("`opponent_model_path` è valido solo se `opponents` contiene `bc_model`.")
 
-    jobs: list[tuple[str, str, int, SuiteSpec, list[int], EvaluationEngine]] = []
+    jobs: list[tuple[str, str, str, int, SuiteSpec, list[int], EvaluationEngine]] = []
     for suite in suites:
         seeds = make_range_seed_suite(start=suite.range_start, step=suite.range_step, count=suite.num_seeds)
         for opp_name in opponents:
-            jobs.append((str(Path(model_path)), opp_name, int(seed), suite, seeds, engine))
+            jobs.append((str(Path(model_path)), opp_name, opponent_model_path_str, int(seed), suite, seeds, engine))
 
     if int(workers) <= 1:
         model = BCModelAgent.from_npz(model_path)
         rows = []
-        for _, opp_name, _, suite, seeds, _ in jobs:
+        opponent_agent = BCModelAgent.from_npz(opponent_model_path_str) if opponent_model_path_str else None
+        for _, opp_name, opp_model_path, _, suite, seeds, _ in jobs:
             if engine == "numba":
                 stats = _evaluate_numba_model_vs_opponent(
                     model_agent=model,
                     opponent_name=opp_name,
+                    opponent_agent=opponent_agent if opp_name == "bc_model" else None,
                     num_games=num_games,
                     seed=seed,
                     game_seeds=seeds,
                 )
             else:
-                opponent = build_agent(opp_name)
+                opponent = _build_domain_matrix_opponent(opp_name, opp_model_path)
                 stats = evaluate_seat_fair_match_2p(
                     model,
                     opponent,
@@ -252,7 +284,7 @@ def evaluate_model_matrix(
                     seed=seed,
                     game_seeds=seeds,
                 )
-            rows.append(MatrixRow(suite=suite, opponent=opp_name, stats=stats))
+            rows.append(MatrixRow(suite=suite, opponent=stats.agent_b_name, stats=stats))
     else:
         worker_count = max(1, min(int(workers), len(jobs)))
         with ProcessPoolExecutor(max_workers=worker_count) as executor:

@@ -123,3 +123,53 @@ def test_evaluation_matrix_numba_engine_returns_consistent_rows(
         assert row.stats.num_games == 20
         assert row.stats.wins_agent_a + row.stats.wins_agent_b + row.stats.draws == 20
         assert row.stats.agent_b_name == "heuristic_v1"
+
+
+def test_evaluation_matrix_numba_engine_supports_model_opponent(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """La matrix Numba deve supportare anche head-to-head contro un opponent `.npz` MLP."""
+    monkeypatch.setattr(evaluation_matrix, "benchmark_num_games", lambda benchmark: 20)
+
+    d = int(FEATURE_DIM_2P_V1)
+    h = 4
+    model_path = tmp_path / "candidate_numba.npz"
+    opponent_path = tmp_path / "previous_best_numba.npz"
+    for path in (model_path, opponent_path):
+        np.savez(
+            path,
+            w1=np.zeros((d, h), dtype=np.float32),
+            b1=np.zeros((h,), dtype=np.float32),
+            w2=np.zeros((h, 40), dtype=np.float32),
+            b2=np.zeros((40,), dtype=np.float32),
+            metadata_json=json.dumps({"format": "mlp_bc_v1", "feature_dim": d}, ensure_ascii=False),
+        )
+
+    with pytest.raises(ValueError, match="opponent_model_path"):
+        evaluate_model_matrix(
+            model_path=model_path,
+            opponents=["bc_model"],
+            benchmark="small",
+            seed=7,
+            workers=1,
+            engine="numba",
+        )
+
+    matrix = evaluate_model_matrix(
+        model_path=model_path,
+        opponents=["bc_model"],
+        benchmark="small",
+        seed=7,
+        workers=1,
+        engine="numba",
+        opponent_model_path=opponent_path,
+    )
+
+    assert matrix.engine == "numba"
+    assert len(matrix.rows) == 2
+    for row in matrix.rows:
+        assert row.stats.num_games == 20
+        assert row.stats.wins_agent_a + row.stats.wins_agent_b + row.stats.draws == 20
+        assert row.opponent == row.stats.agent_b_name
+        assert row.stats.agent_b_name.startswith("bc_model(previous_best_numba.npz")

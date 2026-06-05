@@ -82,7 +82,7 @@ def main() -> int:
         default="domain",
         help=(
             "Engine evaluation. `domain` usa il motore canonico; `numba` usa rollout MLP full-JIT "
-            "per modelli MLP e opponent fast-compatible (default: domain)."
+            "per modelli MLP, opponent fast-compatible e opponent `bc_model` MLP (default: domain)."
         ),
     )
     parser.add_argument(
@@ -96,6 +96,11 @@ def main() -> int:
         "--opponents",
         default="",
         help="Lista avversari CSV (default: heuristic_v1,random,greedy_points).",
+    )
+    parser.add_argument(
+        "--opponent-model",
+        default="",
+        help="Path modello `.npz` da usare quando `--opponents` contiene `bc_model`.",
     )
     parser.add_argument(
         "--holdout-start",
@@ -157,6 +162,7 @@ def main() -> int:
         range_step=args.range_step,
         workers=int(args.workers),
         engine=args.engine,
+        opponent_model_path=Path(args.opponent_model) if args.opponent_model.strip() else None,
     )
     elapsed = time.perf_counter() - t0
 
