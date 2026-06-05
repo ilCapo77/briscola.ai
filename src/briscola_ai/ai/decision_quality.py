@@ -359,6 +359,7 @@ def evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
         seed=int(seed),
         game_seeds=seeds[:num_pairs],
         policy_overkill_guard=bool(model_agent.overkill_guard_enabled),
+        parallel=True,
         opponent_w1=opponent_model.w1 if opponent_model is not None else None,
         opponent_b1=opponent_model.b1 if opponent_model is not None else None,
         opponent_w2=opponent_model.w2 if opponent_model is not None else None,

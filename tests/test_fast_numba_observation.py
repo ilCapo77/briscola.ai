@@ -21,6 +21,7 @@ from briscola_ai.ai.fast_numba_observation import (
     collect_a2c_trajectory_numba_2p,
     encode_fast_observation_numba_2p,
     evaluate_mlp_policy_numba_2p,
+    evaluate_mlp_policy_quality_numba_2p,
     warm_up_numba_mlp_rollout,
     warm_up_numba_observation,
 )
@@ -176,6 +177,43 @@ def test_numba_mlp_rollout_supports_mlp_opponent() -> None:
     assert summary.wins_policy + summary.wins_opponent + summary.draws == 20
     assert summary.sum_policy + summary.sum_opponent == 20 * 120
     assert summary.to_seat_fair_stats().agent_b_name == "opponent_model"
+
+
+def test_numba_quality_parallel_matches_serial() -> None:
+    """Le metriche decision-quality Numba parallele devono combaciare col path seriale."""
+    warm_up_numba_mlp_rollout()
+
+    feature_dim = int(FEATURE_DIM_2P_V1)
+    w1 = np.zeros((feature_dim, 8), dtype=np.float32)
+    b1 = np.zeros((8,), dtype=np.float32)
+    w2 = np.zeros((8, 40), dtype=np.float32)
+    b2 = np.zeros((40,), dtype=np.float32)
+
+    serial = evaluate_mlp_policy_quality_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        opponent_name="heuristic_v1",
+        num_games=40,
+        seed=17,
+        game_seeds=list(range(20)),
+        policy_overkill_guard=True,
+    )
+    parallel = evaluate_mlp_policy_quality_numba_2p(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        opponent_name="heuristic_v1",
+        num_games=40,
+        seed=17,
+        game_seeds=list(range(20)),
+        policy_overkill_guard=True,
+        parallel=True,
+    )
+
+    assert parallel == serial
 
 
 def test_numba_mlp_rollout_rejects_bad_shapes() -> None:

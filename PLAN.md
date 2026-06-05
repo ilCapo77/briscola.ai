@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **174** (pytest).
+- Test attuali: **175** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -885,6 +885,10 @@ Prossimi step performance (ordine consigliato):
   - metriche JIT: `trump_waste_rate`, `trump_overkill_rate`, `trump_overkill_rate_low_lead_points`
   - semantica: policy argmax deterministica + guard anti-overkill opzionale letto dai metadati/env
   - supporto: modello A MLP vs baseline fast-compatible oppure vs modello B MLP
+  - parallelizzazione: kernel `prange` seat-fair per match + contatori quality, usato dal path pubblico Numba
+  - test: equivalenza seriale/parallelo dei contatori quality con stessi seed
+  - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.253s -> 0.533s`
+    (`~6.1x`, stesso `avg_diff=+12.4640`, `waste=23`, `overkill=0`)
   - il dominio resta fallback per agenti arbitrari/non-MLP
 
 ## Deliverable (come sapremo di aver “finito” ogni fase)

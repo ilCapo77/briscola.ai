@@ -1396,6 +1396,106 @@ def _evaluate_mlp_policy_quality_numba(
     )
 
 
+@njit(cache=True, parallel=True)
+def _evaluate_mlp_policy_quality_numba_parallel(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    opponent_code: int,
+    opponent_model_enabled: bool,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    game_seeds: np.ndarray,
+    policy_overkill_guard: bool,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """
+    Valuta decision-quality MLP in parallelo con due partite seat-fair per seed.
+
+    Il kernel produce array per-partita; l'aggregazione resta nel wrapper Python per
+    mantenere il loop `prange` semplice e allineato al path evaluation MLP parallelo.
+    """
+    total_games = game_seeds.shape[0] * 2
+    policy_points = np.empty(total_games, dtype=np.int64)
+    opponent_points = np.empty(total_games, dtype=np.int64)
+    winners = np.empty(total_games, dtype=np.int64)
+    q_second = np.empty(total_games, dtype=np.int64)
+    q_second_with_win = np.empty(total_games, dtype=np.int64)
+    q_waste = np.empty(total_games, dtype=np.int64)
+    q_trump_wins = np.empty(total_games, dtype=np.int64)
+    q_trump_overkill = np.empty(total_games, dtype=np.int64)
+    q_trump_wins_low = np.empty(total_games, dtype=np.int64)
+    q_trump_overkill_low = np.empty(total_games, dtype=np.int64)
+
+    for game_index in prange(total_games):
+        seed_index = game_index // 2
+        policy_seat = game_index - seed_index * 2
+        (
+            p_points,
+            o_points,
+            winner,
+            second,
+            second_with_win,
+            waste,
+            trump_wins,
+            trump_overkill,
+            trump_wins_low,
+            trump_overkill_low,
+        ) = _play_mlp_policy_quality_game_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            opponent_code,
+            opponent_model_enabled,
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            opponent_overkill_guard,
+            int(game_seeds[seed_index]),
+            int(policy_seat),
+            policy_overkill_guard,
+        )
+        policy_points[game_index] = p_points
+        opponent_points[game_index] = o_points
+        winners[game_index] = winner
+        q_second[game_index] = second
+        q_second_with_win[game_index] = second_with_win
+        q_waste[game_index] = waste
+        q_trump_wins[game_index] = trump_wins
+        q_trump_overkill[game_index] = trump_overkill
+        q_trump_wins_low[game_index] = trump_wins_low
+        q_trump_overkill_low[game_index] = trump_overkill_low
+
+    return (
+        policy_points,
+        opponent_points,
+        winners,
+        q_second,
+        q_second_with_win,
+        q_waste,
+        q_trump_wins,
+        q_trump_overkill,
+        q_trump_wins_low,
+        q_trump_overkill_low,
+    )
+
+
 @njit(cache=True)
 def _apply_numba_card_index(
     hands: np.ndarray,
@@ -2220,6 +2320,7 @@ def evaluate_mlp_policy_quality_numba_2p(
     seed: int,
     game_seeds: Sequence[int] | None = None,
     policy_overkill_guard: bool = False,
+    parallel: bool = False,
     opponent_w1: np.ndarray | None = None,
     opponent_b1: np.ndarray | None = None,
     opponent_w2: np.ndarray | None = None,
@@ -2293,34 +2394,74 @@ def evaluate_mlp_policy_quality_numba_2p(
         opponent_b2_arr = np.zeros((ACTION_DIM,), dtype=np.float32)
         opponent_code = numba_agent_code(opponent_name)
 
-    (
-        wins_policy,
-        wins_opponent,
-        draws,
-        sum_policy,
-        sum_opponent,
-        q_second,
-        q_second_with_win,
-        q_waste,
-        q_trump_wins,
-        q_trump_overkill,
-        q_trump_wins_low,
-        q_trump_overkill_low,
-    ) = _evaluate_mlp_policy_quality_numba(
-        w1_arr,
-        b1_arr,
-        w2_arr,
-        b2_arr,
-        opponent_code,
-        bool(opponent_model_enabled),
-        opponent_w1_arr,
-        opponent_b1_arr,
-        opponent_w2_arr,
-        opponent_b2_arr,
-        bool(opponent_overkill_guard),
-        seeds_arr,
-        bool(policy_overkill_guard),
-    )
+    if parallel:
+        (
+            policy_points,
+            opponent_points,
+            winners,
+            q_second_arr,
+            q_second_with_win_arr,
+            q_waste_arr,
+            q_trump_wins_arr,
+            q_trump_overkill_arr,
+            q_trump_wins_low_arr,
+            q_trump_overkill_low_arr,
+        ) = _evaluate_mlp_policy_quality_numba_parallel(
+            w1_arr,
+            b1_arr,
+            w2_arr,
+            b2_arr,
+            opponent_code,
+            bool(opponent_model_enabled),
+            opponent_w1_arr,
+            opponent_b1_arr,
+            opponent_w2_arr,
+            opponent_b2_arr,
+            bool(opponent_overkill_guard),
+            seeds_arr,
+            bool(policy_overkill_guard),
+        )
+        wins_policy = int(np.count_nonzero(winners == 0))
+        wins_opponent = int(np.count_nonzero(winners == 1))
+        draws = int(np.count_nonzero(winners < 0))
+        sum_policy = int(np.sum(policy_points))
+        sum_opponent = int(np.sum(opponent_points))
+        q_second = int(np.sum(q_second_arr))
+        q_second_with_win = int(np.sum(q_second_with_win_arr))
+        q_waste = int(np.sum(q_waste_arr))
+        q_trump_wins = int(np.sum(q_trump_wins_arr))
+        q_trump_overkill = int(np.sum(q_trump_overkill_arr))
+        q_trump_wins_low = int(np.sum(q_trump_wins_low_arr))
+        q_trump_overkill_low = int(np.sum(q_trump_overkill_low_arr))
+    else:
+        (
+            wins_policy,
+            wins_opponent,
+            draws,
+            sum_policy,
+            sum_opponent,
+            q_second,
+            q_second_with_win,
+            q_waste,
+            q_trump_wins,
+            q_trump_overkill,
+            q_trump_wins_low,
+            q_trump_overkill_low,
+        ) = _evaluate_mlp_policy_quality_numba(
+            w1_arr,
+            b1_arr,
+            w2_arr,
+            b2_arr,
+            opponent_code,
+            bool(opponent_model_enabled),
+            opponent_w1_arr,
+            opponent_b1_arr,
+            opponent_w2_arr,
+            opponent_b2_arr,
+            bool(opponent_overkill_guard),
+            seeds_arr,
+            bool(policy_overkill_guard),
+        )
     return NumbaDecisionQualitySummary(
         num_games=num_games,
         policy_name=policy_name,
@@ -2653,6 +2794,21 @@ def warm_up_numba_mlp_rollout() -> None:
         False,
     )
     _evaluate_mlp_policy_quality_numba(
+        w1,
+        b1,
+        w2,
+        b2,
+        numba_agent_code("random"),
+        False,
+        opponent_w1,
+        opponent_b1,
+        opponent_w2,
+        opponent_b2,
+        False,
+        np.asarray([0], dtype=np.int64),
+        False,
+    )
+    _evaluate_mlp_policy_quality_numba_parallel(
         w1,
         b1,
         w2,

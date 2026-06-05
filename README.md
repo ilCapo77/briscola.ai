@@ -499,6 +499,7 @@ python scripts/evaluate_decision_quality.py --agent-a bc_model --agent-a-model .
 
 # Variante veloce Numba (modello MLP come A, baseline fast-compatible come B)
 python scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model ./data/models/bc_teacher_v2.npz --agent-b heuristic_v1 --benchmark medium
+# Il path Numba usa kernel paralleli: benchmark locale 10k game `3.253s -> 0.533s` vs seriale.
 
 # Variante head-to-head Numba (stile di A contro un altro modello MLP)
 python scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model ./data/NEW_MODEL.npz --agent-b bc_model --agent-b-model ./data/models/best_a2c.npz --benchmark medium
@@ -820,6 +821,9 @@ Validazione robusta (consigliata):
 - singola valutazione Numba (modello MLP vs baseline):
   - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_medium_numba.json`
   - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.261s -> 0.550s` (`~5.9x`)
+- decision-quality Numba (stesse metriche, kernel parallelo):
+  - `python scripts/evaluate_decision_quality.py --engine numba --benchmark medium --agent-a bc_model --agent-a-model ./data/MODEL.npz --agent-b heuristic_v1 --out-json benchmarks/model_quality_medium_numba.json`
+  - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.253s -> 0.533s` (`~6.1x`)
 - head-to-head Numba (nuovo modello vs best/precedente):
   - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/NEW_MODEL.npz --agent1 bc_model --agent1-model ./data/models/best_a2c.npz --out-json benchmarks/new_vs_best_medium_numba.json`
 - evaluation matrix Numba (più veloce per modelli MLP):

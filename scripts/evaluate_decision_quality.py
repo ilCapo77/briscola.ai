@@ -65,7 +65,7 @@ def main() -> int:
         default=1,
         help=(
             "Numero processi per parallelizzare le coppie seat-fair. "
-            "Default: 1 (seriale storico). Valori utili: 2..numero core."
+            "Usato con engine=domain; engine=numba usa thread Numba interni."
         ),
     )
     args = parser.parse_args()
@@ -126,9 +126,10 @@ def main() -> int:
         )
         agent_b_label = agent_b.name
     elapsed = time.perf_counter() - t0
+    parallelism = "numba_threads" if args.engine == "numba" else f"workers={effective_workers}"
 
     print(f"Match 2-player ({args.engine}, seat-fair): {out.match.agent_a_name} (A) vs {out.match.agent_b_name} (B)")
-    print(f"- games: {out.match.num_games} (seed={int(args.seed)}, workers={effective_workers})")
+    print(f"- games: {out.match.num_games} (seed={int(args.seed)}, {parallelism})")
     print(f"- elapsed: {elapsed:.3f}s ({out.match.num_games / elapsed:.1f} games/sec)")
     print(f"- wins A: {out.match.wins_agent_a} | wins B: {out.match.wins_agent_b} | draws: {out.match.draws}")
     print(f"- avg diff punti (A-B): {out.match.avg_point_diff_agent_a_minus_agent_b:+.2f}")
@@ -150,6 +151,7 @@ def main() -> int:
             "num_games": num_games,
             "seed": int(args.seed),
             "workers": effective_workers,
+            "parallelism": parallelism,
             "elapsed_seconds": elapsed,
             "agents": {"a": agent_a.name, "b": agent_b_label},
             "match": asdict(out.match),
