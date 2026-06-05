@@ -398,6 +398,10 @@ Miglioramenti di ergonomia (pipeline):
 - [x] Modalità “data minimale”:
   - mantenere in `data/models/` solo `best_<algo>.npz` + `best_<algo>.json`
   - evitare accumulo di molti `.npz` intermedi (restano i manifest/log in `benchmarks/experiments/`)
+- [x] Compattazione automatica dei best model:
+  - quando `run_experiment.py` promuove `best_<algo>.npz`, rimuove `metadata_json.metrics` dalla copia runtime
+  - conserva `metrics_summary` nel `.npz` e `metadata_compaction` nel JSON laterale
+  - il modello completo dell'esperimento resta in `benchmarks/experiments/<name>/model.npz` per audit/riproducibilità
 
 Prossimi esperimenti (A2C):
 - [x] Run “lunga” 500k:

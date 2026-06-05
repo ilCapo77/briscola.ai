@@ -15,6 +15,7 @@ import subprocess
 import sys
 from pathlib import Path
 
+import numpy as np
 import pytest
 
 from briscola_ai.ai.experiment_pipeline import build_experiment_name, extract_best_metric_from_matrix_json
@@ -85,6 +86,69 @@ def test_extract_best_metric_from_matrix_json_reads_holdout_diff() -> None:
 def test_extract_best_metric_from_matrix_json_raises_when_missing() -> None:
     with pytest.raises(ValueError):
         extract_best_metric_from_matrix_json({"rows": []}, benchmark="big")
+
+
+def test_copy_best_model_compacts_training_metrics(tmp_path: Path) -> None:
+    """
+    Il best runtime deve restare leggero: le metriche complete vivono nel modello
+    dell'esperimento, mentre `best_a2c.npz` conserva solo un riassunto.
+    """
+    module = _load_run_experiment_module()
+    source_model = tmp_path / "experiment_model.npz"
+    best_model = tmp_path / "best_a2c.npz"
+    best_meta = tmp_path / "best_a2c.json"
+
+    w1 = np.arange(6, dtype=np.float32).reshape(2, 3)
+    b1 = np.asarray([0.1, 0.2, 0.3], dtype=np.float32)
+    metrics = [
+        {"iter": 1, "games": 20, "avg_return": 0.1},
+        {"iter": 2, "games": 40, "avg_return": 0.2},
+    ]
+    metadata = {
+        "format": "mlp_a2c_shaped_v1",
+        "label": "A2C shaped smoke",
+        "inference_overkill_guard": True,
+        "metrics": metrics,
+    }
+    np.savez(
+        source_model,
+        w1=w1,
+        b1=b1,
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+
+    updated = module._copy_best_model(
+        model_path=source_model,
+        best_path=best_model,
+        score=12.34,
+        meta_path=best_meta,
+        manifest={"name": "compact_test"},
+    )
+
+    assert updated is True
+    with np.load(best_model, allow_pickle=False) as data:
+        compacted_metadata = json.loads(str(data["metadata_json"]))
+        np.testing.assert_array_equal(data["w1"], w1)
+        np.testing.assert_array_equal(data["b1"], b1)
+
+    assert "metrics" not in compacted_metadata
+    assert compacted_metadata["metrics_summary"] == {
+        "stripped_for_best_model": True,
+        "num_records": 2,
+        "first_record": metrics[0],
+        "last_record": metrics[-1],
+        "full_metrics_source_model_path": str(source_model),
+    }
+    assert compacted_metadata["inference_overkill_guard"] is True
+
+    sidecar = json.loads(best_meta.read_text(encoding="utf-8"))
+    assert sidecar["score"] == pytest.approx(12.34)
+    assert sidecar["inference_overkill_guard"] is True
+    assert sidecar["metadata_compaction"] == {
+        "best_model_metrics_stripped": True,
+        "num_training_metric_records": 2,
+        "full_metrics_source_model_path": str(source_model),
+    }
 
 
 def test_run_experiment_help_exposes_fast_rollout_flags() -> None:

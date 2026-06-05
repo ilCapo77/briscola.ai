@@ -22,11 +22,15 @@ gli artefatti in `data/` e `benchmarks/` sono locali (gitignored).
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import shutil
 import subprocess
 import sys
 from pathlib import Path
+from typing import Any
+
+import numpy as np
 
 from briscola_ai.ai.experiment_pipeline import (
     AlgoName,
@@ -81,11 +85,95 @@ def _run(cmd: list[str], *, log_path: Path, env_overrides: dict[str, str] | None
             raise RuntimeError(f"Comando fallito (exit={rc}): {' '.join(cmd)}")
 
 
+def _parse_model_metadata_json(raw: Any) -> dict[str, Any]:
+    """
+    Parsa i metadati salvati nel `.npz`.
+
+    Il loader runtime è best-effort; qui usiamo la stessa filosofia perché la
+    compattazione non deve rendere inutilizzabile un modello solo per metadati
+    non standard.
+    """
+    text = str(raw)
+    try:
+        parsed = json.loads(text)
+    except json.JSONDecodeError:
+        return {"raw_metadata_json": text}
+    if isinstance(parsed, dict):
+        return parsed
+    return {"raw_metadata_json": text}
+
+
+def _compact_best_model_metadata(*, metadata: dict[str, Any], source_model_path: Path) -> dict[str, Any]:
+    """
+    Rimuove i record metriche raw dai metadati del best model.
+
+    I trainer salvano una riga metrica ogni pochi update; su run lunghi questi
+    record possono pesare centinaia di MB pur non servendo al runtime. Il modello
+    completo resta nella cartella esperimento, mentre il best ufficiale conserva
+    solo un riassunto sufficiente per audit rapido e UI.
+    """
+    metrics = metadata.pop("metrics", None)
+    if not isinstance(metrics, list):
+        if metrics is not None:
+            metadata["metrics"] = metrics
+        return {
+            "best_model_metrics_stripped": False,
+            "num_training_metric_records": None,
+            "full_metrics_source_model_path": str(source_model_path),
+        }
+
+    metadata["metrics_summary"] = {
+        "stripped_for_best_model": True,
+        "num_records": len(metrics),
+        "first_record": metrics[0] if metrics else None,
+        "last_record": metrics[-1] if metrics else None,
+        "full_metrics_source_model_path": str(source_model_path),
+    }
+    return {
+        "best_model_metrics_stripped": True,
+        "num_training_metric_records": len(metrics),
+        "full_metrics_source_model_path": str(source_model_path),
+    }
+
+
+def _write_compact_best_model(*, model_path: Path, best_path: Path) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """
+    Scrive `best_path` come copia runtime compatta di `model_path`.
+
+    Se il modello non contiene `metadata_json`, manteniamo il comportamento
+    storico e facciamo una copia byte-per-byte: non c'è nulla da compattare.
+    """
+    with np.load(model_path, allow_pickle=False) as data:
+        if "metadata_json" not in data.files:
+            shutil.copy2(model_path, best_path)
+            return {
+                "best_model_metrics_stripped": False,
+                "num_training_metric_records": None,
+                "full_metrics_source_model_path": str(model_path),
+                "reason": "metadata_json_missing",
+            }, None
+
+        arrays = {key: np.asarray(data[key]).copy() for key in data.files if key != "metadata_json"}
+        metadata = _parse_model_metadata_json(data["metadata_json"])
+
+    compaction = _compact_best_model_metadata(metadata=metadata, source_model_path=model_path)
+    tmp_path = best_path.with_name(best_path.name + ".tmp.npz")
+    np.savez_compressed(
+        tmp_path,
+        **arrays,
+        metadata_json=json.dumps(metadata, ensure_ascii=False, indent=2),
+    )
+    os.replace(tmp_path, best_path)
+    return compaction, metadata
+
+
 def _copy_best_model(*, model_path: Path, best_path: Path, score: float, meta_path: Path, manifest: dict) -> bool:
     """
     Aggiorna il best model se lo score è migliore.
 
     Persistiamo anche un JSON a fianco, così il best non è “magico”.
+    Il `.npz` ufficiale viene compattato per evitare che lunghe serie di
+    `metadata_json.metrics` gonfino inutilmente il modello usato da UI/runtime.
     """
     previous_score: float | None = None
     if meta_path.exists():
@@ -102,19 +190,20 @@ def _copy_best_model(*, model_path: Path, best_path: Path, score: float, meta_pa
         return False
 
     best_path.parent.mkdir(parents=True, exist_ok=True)
-    shutil.copy2(model_path, best_path)
-    write_json(
-        meta_path,
-        {
-            "score": float(score),
-            # Nota: se vuoi tenere `data/models/` minimal, questo path deve puntare al best
-            # (non al modello “run-specific”, che potrebbe essere eliminato).
-            "model_path": str(best_path),
-            "source_model_path": str(model_path),
-            "updated_utc": utc_now_iso(),
-            "manifest": manifest,
-        },
-    )
+    compaction, compacted_metadata = _write_compact_best_model(model_path=model_path, best_path=best_path)
+    payload = {
+        "score": float(score),
+        # Nota: se vuoi tenere `data/models/` minimal, questo path deve puntare al best
+        # (non al modello “run-specific”, che potrebbe essere eliminato).
+        "model_path": str(best_path),
+        "source_model_path": str(model_path),
+        "updated_utc": utc_now_iso(),
+        "metadata_compaction": compaction,
+        "manifest": manifest,
+    }
+    if compacted_metadata is not None and isinstance(compacted_metadata.get("inference_overkill_guard"), bool):
+        payload["inference_overkill_guard"] = bool(compacted_metadata["inference_overkill_guard"])
+    write_json(meta_path, payload)
     print(f"Updated best model: {best_path} (score={score:+.2f})")
     return True
 
