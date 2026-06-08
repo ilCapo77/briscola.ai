@@ -35,7 +35,7 @@ Rendere il progetto **attuale, testabile e “insegnabile”**, così da poter i
     - Il backend evita `asyncio.sleep()` per ritardi di presentazione (reveal/risultato mano).
     - Il frontend “trattiene” gli snapshot WS per mostrare reveal e risultato con tempi controllati lato UI.
 - Test: presenti in `tests/` (unit + integrazione API base).
-- Test attuali: **176** (pytest).
+- Test attuali: **177** (pytest).
 - Coverage: misurata con `pytest-cov` (attuale ~74% su `briscola_ai`; obiettivo: crescita progressiva).
 - Badge coverage: manuale via Shields.io nel `README.md` (niente `coverage.svg` versionato / script di generazione).
 - AI: agenti baseline selezionabili (random/greedy/euristica) + possibilità di giocare contro un modello locale `.npz` via UI (catalogo server-side, no path arbitrari dal browser).
@@ -517,7 +517,7 @@ Prossimo esperimento (per verificare che v2 sia “meno miope”):
 - [x] Valutare la qualità decisionale del modello v2 vs `heuristic_v1`:
   - `scripts/evaluate_decision_quality.py` (benchmark `medium`)
   - confronto qualitativo: `trump_waste_rate` del v2 vs `best_a2c` v1
-- [ ] (Opzionale) Se migliora forza+qualità, promuovere un “best_a2c” v2 (decisione esplicita):
+- [x] (Opzionale) Se migliora forza+qualità, promuovere un “best_a2c” v2 (decisione esplicita):
   - aggiornare `data/models/best_a2c.npz` solo se migliora su `holdout vs heuristic_v1` e non peggiora troppo su `trump_waste_rate`
 
 Risultati (screening, seed=6, 200k game, encoder v2):
@@ -740,13 +740,33 @@ Fine-tuning A2C v2:
   - decisione: NON promuovere per ora; score ufficiale ancora leggermente sotto al best 5M e head-to-head non abbastanza netto
   - artefatto UI locale: `data/models/a2c_v2_teacher_strength_seed47_1m_candidate.npz`
     (copia compatta, encoder v2, guard ON)
+- candidato strength +5M dal checkpoint seed47:
+  - esperimento: `benchmarks/experiments/a2c_v2_strength_from_teacher_seed48_5m_numba/`
+  - warm-start: `benchmarks/experiments/a2c_v2_strength_from_teacher_seed47_1m_numba/model.npz`
+  - config: `lr=1e-4`, `entropy_beta=2e-4`,
+    mix `best_a2c:0.65,heuristic_v2:0.20,heuristic_v1:0.05,greedy_points:0.05,random:0.05`, seat-fair,
+    encoder v2, rollout/eval Numba, guard ON
+  - tempo misurato con `/usr/bin/time -p`: `real=1041.12s` per training 5M + matrix `medium,big`
+  - evaluation Numba: `medium=4.692s`, `big=45.118s`
+  - score ufficiale: `big holdout vs heuristic_v1 avg_diff = +16.39058`
+  - confronto col best precedente seed19: `+13.91112 -> +16.39058` (`+2.47946`, circa `+17.8%`
+    sul vantaggio medio)
+  - head-to-head vs best precedente seed19 (`big`, 100k, seat-fair): `avg_point_diff=+3.76068`;
+    suite indipendenti seat-fair: `+3.66524` e `+3.55502`
+  - decision-quality `big` vs `heuristic_v1`:
+    - guard ON: `avg_diff=+16.49182`, `trump_overkill_rate=0.0%`, low-lead `0.0%`, `trump_waste_rate≈0.05%`
+    - guard OFF: `avg_diff=+16.58308`, `trump_overkill_rate=9.8%`, low-lead `5.1%`, `trump_waste_rate≈0.05%`
+  - decisione: promosso nuovo `data/models/best_a2c.npz` (encoder v2, guard ON, copia compattata)
+  - storage: modello completo esperimento `245 MB`; best runtime compattato `157 KB` con `metrics_summary`
+    e sidecar `data/models/best_a2c.json`
 
 Conclusione:
-- Il percorso teacher v2 funziona: riduce molto l'overkill raw rispetto al vecchio ~20%.
-- Il miglior candidato v2 è quasi pari al best 5M in head-to-head, ma non lo supera chiaramente.
-- Prossimo step consigliato, se vogliamo continuare questa linea: scalare `seed47` con altri 1-2M game oppure
-  fare un run 3-5M unico da quel checkpoint; promuovere solo se supera sia `big holdout vs heuristic_v1`
-  sia head-to-head contro `best_a2c`.
+- Il percorso teacher v2 funziona anche in forza, non solo nello stile: il run 5M seed48 supera chiaramente il
+  precedente best v1/seed19 sia sul criterio ufficiale (`big holdout vs heuristic_v1`) sia in head-to-head.
+- Il nuovo best ufficiale è un A2C encoder v2 con guard anti-overkill attivo; senza guard il modello raw resta molto
+  meno miope del vecchio best storico (~9.8% overkill vs ~20%), ma il guard resta utile per azzerare l'overkill in UI/runtime.
+- Prossimo step consigliato: usare il nuovo `best_a2c` v2 come baseline ufficiale e fare solo esperimenti mirati
+  (es. una replica 5M con seed diverso o una variante PPO/GAE) se vogliamo verificare robustezza oltre al singolo seed.
 
 Risultati tuning anchor più debole (seed training=8, 200k game, benchmark `medium`, guard OFF)
 - baseline senza anchor (`..._seed8_from_bc_teacher_v2_no_anchor`):
