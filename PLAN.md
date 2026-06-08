@@ -756,6 +756,12 @@ Fine-tuning A2C v2:
   - decision-quality `big` vs `heuristic_v1`:
     - guard ON: `avg_diff=+16.49182`, `trump_overkill_rate=0.0%`, low-lead `0.0%`, `trump_waste_rate≈0.05%`
     - guard OFF: `avg_diff=+16.58308`, `trump_overkill_rate=9.8%`, low-lead `5.1%`, `trump_waste_rate≈0.05%`
+  - validazione extra `big` vs `heuristic_v2` (nuovo teacher/avversario più strategico):
+    - matrix Numba: standard `avg_diff=+13.26248`, holdout `avg_diff=+13.28656`
+    - decision-quality Numba: `avg_diff=+13.39930`, `trump_overkill_rate=0.0%`,
+      low-lead `0.0%`, `trump_waste_rate≈0.06%`
+  - smoke UI: la UI espone il modello come `A2C v2 strength 5M (best) (best_a2c.npz)`,
+    mostra guard attivo/metriche e permette di avviare una partita contro `bc_model` senza errori console
   - decisione: promosso nuovo `data/models/best_a2c.npz` (encoder v2, guard ON, copia compattata)
   - storage: modello completo esperimento `245 MB`; best runtime compattato `157 KB` con `metrics_summary`
     e sidecar `data/models/best_a2c.json`
@@ -765,6 +771,9 @@ Conclusione:
   precedente best v1/seed19 sia sul criterio ufficiale (`big holdout vs heuristic_v1`) sia in head-to-head.
 - Il nuovo best ufficiale è un A2C encoder v2 con guard anti-overkill attivo; senza guard il modello raw resta molto
   meno miope del vecchio best storico (~9.8% overkill vs ~20%), ma il guard resta utile per azzerare l'overkill in UI/runtime.
+- Baseline congelata: da ora un candidato deve battere almeno `+16.39058` su `big holdout vs heuristic_v1`,
+  risultare positivo in head-to-head contro questo `best_a2c` su 100k partite seat-fair più almeno una suite indipendente,
+  e non peggiorare materialmente le metriche `trump_waste_rate`/`trump_overkill_rate`.
 - Prossimo step consigliato: usare il nuovo `best_a2c` v2 come baseline ufficiale e fare solo esperimenti mirati
   (es. una replica 5M con seed diverso o una variante PPO/GAE) se vogliamo verificare robustezza oltre al singolo seed.
 
