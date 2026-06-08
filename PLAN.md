@@ -765,6 +765,24 @@ Fine-tuning A2C v2:
   - decisione: promosso nuovo `data/models/best_a2c.npz` (encoder v2, guard ON, copia compattata)
   - storage: modello completo esperimento `245 MB`; best runtime compattato `157 KB` con `metrics_summary`
     e sidecar `data/models/best_a2c.json`
+- replica strength +5M con seed diverso dal checkpoint seed47:
+  - primo tentativo: `benchmarks/experiments/a2c_v2_strength_from_teacher_seed49_5m_numba/`
+    si è fermato a `4.388M/5M` senza `model.npz`/`manifest.json`; resta solo come log parziale, non come candidato
+  - retry completo: `benchmarks/experiments/a2c_v2_strength_from_teacher_seed49_5m_numba_retry1/`
+  - stessa config seed48, ma `train_seed=49`; warm-start da
+    `benchmarks/experiments/a2c_v2_strength_from_teacher_seed47_1m_numba/model.npz`
+  - tempo misurato con `/usr/bin/time -p`: `real=1084.55s` per training 5M + matrix `medium,big`
+  - evaluation Numba: `medium=4.877s`, `big=40.001s`
+  - score ufficiale: `big holdout vs heuristic_v1 avg_diff = +15.91892`
+    (baseline/promozione seed48: `+16.39058`)
+  - head-to-head vs best corrente seed48 (`100k`, seat-fair):
+    `avg_point_diff=+0.17608`; suite indipendenti: `+0.00512` e `+0.14716`
+  - decision-quality `big` vs `heuristic_v1`:
+    - guard ON: `avg_diff=+15.92230`, `trump_overkill_rate=0.0%`, low-lead `0.0%`, `trump_waste_rate≈0.06%`
+    - guard OFF: `avg_diff=+16.06572`, `trump_overkill_rate=19.0%`, low-lead `11.5%`, `trump_waste_rate≈0.06%`
+  - validazione extra `big` vs `heuristic_v2`: `avg_diff=+12.78530`
+  - decisione: NON promuovere; il modello è sostanzialmente pari in H2H ma sotto il criterio ufficiale e più miope raw
+    senza guard
 
 Conclusione:
 - Il percorso teacher v2 funziona anche in forza, non solo nello stile: il run 5M seed48 supera chiaramente il
@@ -774,8 +792,9 @@ Conclusione:
 - Baseline congelata: da ora un candidato deve battere almeno `+16.39058` su `big holdout vs heuristic_v1`,
   risultare positivo in head-to-head contro questo `best_a2c` su 100k partite seat-fair più almeno una suite indipendente,
   e non peggiorare materialmente le metriche `trump_waste_rate`/`trump_overkill_rate`.
-- Prossimo step consigliato: usare il nuovo `best_a2c` v2 come baseline ufficiale e fare solo esperimenti mirati
-  (es. una replica 5M con seed diverso o una variante PPO/GAE) se vogliamo verificare robustezza oltre al singolo seed.
+- Replica 5M con seed diverso completata: conferma che il best seed48 è robusto, ma non produce un candidato migliore.
+- Prossimo step consigliato: fare esperimenti mirati invece di ripetere run 5M identici, ad esempio PPO/GAE oppure
+  shaping anti-overkill in training per ridurre la dipendenza dal guard senza perdere forza.
 
 Risultati tuning anchor più debole (seed training=8, 200k game, benchmark `medium`, guard OFF)
 - baseline senza anchor (`..._seed8_from_bc_teacher_v2_no_anchor`):
