@@ -473,7 +473,8 @@ Validazione rapida (benchmark decision-quality `medium` vs `heuristic_v1`, seed=
 - guard OFF: `avg_diff=+12.89`, `trump_overkill_rate≈20.3%`, low-lead `≈18.4%`
 - guard ON (`--force-overkill-guard`): `avg_diff=+12.80`, `trump_overkill_rate=0.0%`, low-lead `=0.0%`
 - Nota storica: questi numeri si riferiscono al precedente best v1, prima della promozione del modello 1M
-  (`A2C shaped 1.0M game`, seed=17). Il best attuale ha `inference_overkill_guard=false`.
+  (`A2C shaped 1.0M game`, seed=17). Il best attuale è il modello 5M seed=19 con
+  `inference_overkill_guard=true`.
 
 Operatività (senza env var):
 - [x] Abilitare `inference_overkill_guard=true` nei metadati di `data/models/best_a2c.npz`
@@ -481,6 +482,8 @@ Operatività (senza env var):
   - verifica (`medium` vs `heuristic_v1`, seed=0): `trump_overkill_rate=0.0%` e low-lead `=0.0%` con `avg_diff≈+12.80`
 - Nota: questa scelta era valida per il best precedente. Dopo la promozione del modello 1M, il nuovo
   `data/models/best_a2c.npz` non usa il guard in metadati; prima di riattivarlo va rifatta una A/B decision-quality.
+  Nota aggiornata: dopo la promozione del modello 5M, il best ufficiale usa di nuovo
+  `inference_overkill_guard=true`; questa nota resta solo come storico della decisione sul best 1M.
 
 A/B test storico (evaluation matrix `medium`, seed=0, stessi avversari, prima della promozione del modello 1M):
 - modello guard ON: vecchio `data/models/best_a2c.npz` (metadati `inference_overkill_guard=true`)
@@ -531,7 +534,7 @@ Risultati (screening, seed=6, 200k game, encoder v2):
     `trump_overkill_rate≈20.3%` (5692 / 27985), low-lead `≈18.4%` (2199 / 11975)
 - decisione: NON promuovere a best (in questo screening v2 non migliora né forza né `trump_waste_rate`)
 
-Prossimo controllo consigliato sul best attuale 1M:
+Controllo storico sul best 1M:
 - [x] Eseguire `evaluate_decision_quality.py` sul nuovo `data/models/best_a2c.npz`
   - confrontare guard OFF vs guard forzato ON
   - decidere se salvare `inference_overkill_guard=true` anche sul best 1M oppure tenerlo “puro”
@@ -550,8 +553,8 @@ Prossimo controllo consigliato sul best attuale 1M:
   - guard ON (copia temporanea con metadato `inference_overkill_guard=true`): `avg_diff=+12.8115`,
     `trump_overkill_rate=0.0%`, low-lead `=0.0%`, `trump_waste_rate≈0.02%`
   - costo guard su `big`: `Δ≈-0.1442` punti medi vs `heuristic_v1`
-  - decisione: abilitato `inference_overkill_guard=true` nel best ufficiale `data/models/best_a2c.npz`
-    e registrata la decisione in `data/models/best_a2c.json`
+  - decisione storica: abilitato `inference_overkill_guard=true` nel best ufficiale dell'epoca
+    `data/models/best_a2c.npz` e registrata la decisione in `data/models/best_a2c.json`
 
 Prossimo step (shaping mirato su “spreco briscole alte”):
 - [x] A2C: aggiungere shaping opzionale `--overkill-penalty-beta` (penalità flat) quando:
@@ -608,11 +611,11 @@ Piano (ordine consigliato, 1→2→3):
   - usa `PlayerObservation.seen_cards_onehot[40]` (info pubblica) per stimare fase e risorse rimaste
   - regole più “da umano”: conservazione briscole alte, evitare sprechi in early game, aggressività in late game
   - obiettivo: usare `heuristic_v2` come avversario e come teacher per BC
-- [ ] (2) Generare un dataset BC “pulito” via self-play del teacher:
+- [x] (2) Generare un dataset BC “pulito” via self-play del teacher:
   - `scripts/self_play_to_db.py` con `--agents heuristic_v2,heuristic_v2` (o mix)
   - `scripts/export_dataset.py` → JSONL
   - `scripts/train_bc.py --encoder-version v2` (consigliato `--model mlp`) per ottenere `bc_teacher_v2.npz`
-- [ ] (3) Fine-tuning A2C (encoder v2) partendo da BC:
+- [x] (3) Fine-tuning A2C (encoder v2) partendo da BC:
   - init = `bc_teacher_v2.npz`, opponent mix più robusto (`heuristic_v1` + `heuristic_v2` + baseline)
   - valutare con `evaluate_matrix.py` + `evaluate_decision_quality.py` (forza + stile)
 
@@ -694,6 +697,56 @@ Risultati run di prova (anchor attivo, beta=0.02)
 Interpretazione:
 - l'anchor aiuta a tenere basso l'overkill (vs A2C non ancorato), ma con questo `beta` sembra “frenare” troppo la policy,
   riducendo la forza vs `heuristic_v1`. Prossimo tuning naturale: provare `beta` più piccoli (es. 0.005–0.01) e confrontare.
+
+Risultati aggiornati (2026-06-08): teacher v2 → BC v2 → A2C v2 strength
+-----------------------------------------------------------------------------
+
+Obiettivo:
+- verificare se il percorso teacher v2 + encoder v2 può avvicinarsi al best 5M mantenendo migliore stile raw
+  (meno overkill anche senza guard).
+
+Dataset/BC:
+- smoke: 200 partite `heuristic_v2,heuristic_v2` → 8000 esempi, BC MLP v2 val acc `0.797`
+- dataset serio: 10000 partite (seed=43) → 400000 esempi, zero observation mancanti
+- BC serio: `benchmarks/experiments/bc_teacher_v2_seed43_10k/bc_teacher_v2_10k.npz`
+  - MLP encoder v2, 25 epoche, val acc `0.969`
+  - forza: `+2.18` vs `heuristic_v1` medium; circa pari al teacher (`+0.29` vs `heuristic_v2`)
+  - qualità: `trump_overkill_rate=0.0%` con guard ON; teacher `heuristic_v2` ha overkill `0.0%` anche nativo
+
+Fine-tuning A2C v2:
+- candidato 200k con anchor BC (`beta=0.01`):
+  - esperimento: `a2c_v2_from_bc_teacher_v2_10k_seed44_200k_numba`
+  - `big holdout vs heuristic_v1 = +6.59`
+  - head-to-head vs best 5M: `avg_point_diff=-7.30`
+  - decisione: non promuovere, ma conferma che il BC è un init utile
+- candidato 1M con anchor leggero (`beta=0.003`):
+  - esperimento: `a2c_v2_from_bc_teacher_v2_10k_seed45_1m_numba`
+  - `big holdout vs heuristic_v1 = +10.32`
+  - head-to-head vs best 5M: `avg_point_diff=-3.74`
+  - guard OFF: `trump_overkill_rate=3.6%`, low-lead `1.2%`
+  - decisione: non promuovere; buon miglioramento di stile raw
+- candidato strength +1M senza anchor:
+  - esperimento: `a2c_v2_strength_from_teacher_seed46_1m_numba`
+  - `big holdout vs heuristic_v1 = +12.87`
+  - head-to-head vs best 5M: `avg_point_diff=-1.22`
+  - guard OFF: `trump_overkill_rate=8.8%`, low-lead `4.3%`
+  - decisione: non promuovere; recupera forza ma perde parte dello stile raw
+- candidato strength +1M con più pressione su `best_a2c`:
+  - esperimento: `a2c_v2_strength_from_teacher_seed47_1m_numba`
+  - `big holdout vs heuristic_v1 = +13.78` (best 5M ufficiale: `+13.91112`)
+  - head-to-head vs best 5M, seat-fair 100k: `avg_point_diff=+0.10`; su suite indipendenti seat-fair:
+    `+0.15` e `-0.01` (sostanzialmente pari)
+  - guard OFF: `trump_overkill_rate=8.7%`, low-lead `5.7%`
+  - decisione: NON promuovere per ora; score ufficiale ancora leggermente sotto al best 5M e head-to-head non abbastanza netto
+  - artefatto UI locale: `data/models/a2c_v2_teacher_strength_seed47_1m_candidate.npz`
+    (copia compatta, encoder v2, guard ON)
+
+Conclusione:
+- Il percorso teacher v2 funziona: riduce molto l'overkill raw rispetto al vecchio ~20%.
+- Il miglior candidato v2 è quasi pari al best 5M in head-to-head, ma non lo supera chiaramente.
+- Prossimo step consigliato, se vogliamo continuare questa linea: scalare `seed47` con altri 1-2M game oppure
+  fare un run 3-5M unico da quel checkpoint; promuovere solo se supera sia `big holdout vs heuristic_v1`
+  sia head-to-head contro `best_a2c`.
 
 Risultati tuning anchor più debole (seed training=8, 200k game, benchmark `medium`, guard OFF)
 - baseline senza anchor (`..._seed8_from_bc_teacher_v2_no_anchor`):
