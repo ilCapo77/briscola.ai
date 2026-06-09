@@ -821,6 +821,61 @@ Conclusione:
 - Prossimo step consigliato: fare esperimenti mirati invece di ripetere run 5M identici, ad esempio PPO/GAE oppure
   un tuning più fine dello shaping anti-overkill (`beta`/scope low-lead) per ridurre la dipendenza dal guard senza perdere forza.
 
+### Fase 5G — Strategia esplicita: endgame esatto + feature strategiche (proposta)
+
+Obiettivo: trasformare alcune euristiche “da giocatore umano” in componenti testabili, senza far barare il modello e senza
+buttare via la pipeline A2C/BC già funzionante.
+
+Contesto:
+- Il progetto ha già una memoria pubblica lecita (`seen_cards_onehot`) e un encoder v2.
+- `seen_cards_onehot` però non è un “cimitero” puro: include anche la briscola scoperta, quindi va bene per card counting
+  pubblico, ma non basta da solo per dedurre con precisione quali carte siano definitivamente fuori gioco.
+- Il best attuale è forte, ma usa ancora un guard inference anti-overkill: vogliamo ridurre progressivamente la dipendenza
+  da post-processing e rendere più spiegabile il comportamento raw.
+
+Piano consigliato (ordine):
+1. **Endgame solver esatto (minimax 2-player)**:
+   - implementare un modulo piccolo e puro (es. `src/briscola_ai/ai/endgame_solver.py`) che, quando `deck_size == 0`,
+     esplora tutte le sequenze possibili dalle mani correnti e sceglie la carta che massimizza il delta punti finale;
+   - supportare almeno lo stato a tavolo vuoto e lo stato “secondo di mano” (`len(table_cards)==1`);
+   - usare `domain.step` come fonte canonica per la transizione, così il solver resta coerente con le regole;
+   - testare casi deterministici: briscola alta da conservare, presa obbligata, scelta che massimizza punti e non solo numero prese.
+2. **Agente ibrido per UI/evaluation**:
+   - aggiungere un agente tipo `hybrid_endgame`:
+     - early/mid game: `best_a2c` o `heuristic_v2`;
+     - endgame (`deck_size == 0`): solver esatto;
+   - benchmarkare contro `best_a2c` puro su `medium/big` e head-to-head seat-fair;
+   - misurare anche decision-quality per verificare che non migliori solo il punteggio medio ma anche lo stile.
+3. **Distinguere memoria pubblica da carte fuori gioco**:
+   - aggiungere a `PlayerObservation` un campo esplicito tipo `played_cards_onehot[40]` o `out_of_play_cards_onehot[40]`;
+   - definizione: carte finite nelle prese + carte sul tavolo, escludendo la briscola scoperta se è ancora nel mazzo;
+   - aggiornare DTO/export/encoder in modo backward-compatible;
+   - mantenere `seen_cards_onehot` per “informazione pubblica” e usare il nuovo campo quando serve ragionare su carte non più disponibili.
+4. **Encoder v3 con feature strategiche aggregate**:
+   - aggiungere feature compatte e leggibili invece di affidarsi solo ai 40 bit raw:
+     - numero di briscole ignote;
+     - briscole alte ignote (Asso/Tre/Re di briscola);
+     - Assi/Tre usciti per seme;
+     - carichi ignoti per seme;
+     - fase partita (`deck_size`, carte in mano, endgame flag);
+     - “sono secondo di mano” e valore/forza della presa corrente;
+   - confrontare v3 contro v2 con la stessa pipeline (`run_experiment.py`, `evaluate_matrix.py`, `evaluate_decision_quality.py`).
+5. **Teacher endgame-aware per BC/RL**:
+   - generare un dataset in cui `heuristic_v2` delega al solver nel finale;
+   - allenare BC encoder v3 e poi fare fine-tuning A2C;
+   - criterio: migliorare forza raw e ridurre overkill raw senza peggiorare `trump_waste_rate`.
+6. **PPO/GAE solo dopo baseline ibrida**:
+   - mantenere A2C come default, perché è già integrato con Numba, opponent mix, BC-anchor e evaluation matrix;
+   - usare PPO/GAE come spike mirato se A2C v3/endgame-aware si stabilizza ma mostra ancora regressioni;
+   - non introdurre DQN per ora: action mask, self-play e parziale osservabilità rendono più utile continuare sulla linea policy-gradient già presente.
+
+Criteri di successo:
+- solver endgame: test dominio verdi + casi noti spiegabili;
+- agente ibrido: nessuna regressione UI/API e benchmark seat-fair ripetibile;
+- encoder v3: modello compatibile con catalogo UI e metadati `metadata.encoder="v3"`;
+- training: candidato promosso solo se supera il best ufficiale su `big holdout vs heuristic_v1`, è positivo in head-to-head
+  contro `best_a2c`, e migliora o non peggiora materialmente `trump_waste_rate`/`trump_overkill_rate` raw.
+
 Risultati tuning anchor più debole (seed training=8, 200k game, benchmark `medium`, guard OFF)
 - baseline senza anchor (`..._seed8_from_bc_teacher_v2_no_anchor`):
   - matrix holdout vs `heuristic_v1`: `avg_diff=+9.53`
