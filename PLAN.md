@@ -834,12 +834,18 @@ Contesto:
   da post-processing e rendere più spiegabile il comportamento raw.
 
 Piano consigliato (ordine):
-1. **Endgame solver esatto (minimax 2-player)**:
-   - implementare un modulo piccolo e puro (es. `src/briscola_ai/ai/endgame_solver.py`) che, quando `deck_size == 0`,
-     esplora tutte le sequenze possibili dalle mani correnti e sceglie la carta che massimizza il delta punti finale;
-   - supportare almeno lo stato a tavolo vuoto e lo stato “secondo di mano” (`len(table_cards)==1`);
-   - usare `domain.step` come fonte canonica per la transizione, così il solver resta coerente con le regole;
-   - testare casi deterministici: briscola alta da conservare, presa obbligata, scelta che massimizza punti e non solo numero prese.
+1. [x] **Endgame solver esatto (minimax 2-player)**:
+   - modulo `src/briscola_ai/ai/endgame_solver.py`: `solve_endgame(state) -> EndgameSolution`
+     (con `best_card_index`, `final_delta_p0_p1`, `principal_variation`);
+   - minimax completo a `deck_size == 0`: il player 0 massimizza `players[0].points - players[1].points`,
+     il player 1 lo minimizza (zero-sum, totale 120); tie-break deterministico sull'indice più basso;
+   - tutte le transizioni passano da `domain.step` (nessuna regola duplicata); memoization su `GameState` (frozen/hashable);
+   - supporta tavolo vuoto e "secondo di mano" (`len(table_cards) == 1`);
+   - guard "strict": 2 giocatori, partita non finita, mazzo vuoto, ≤ 6 carte residue, mani bilanciate;
+   - **oracolo di dominio** (vede entrambe le mani): diventerà agent-safe nello step 2 ricostruendo lo stato da `PlayerObservation`;
+   - test (`tests/test_endgame_solver.py`): valore esatto a 1 presa, scelta strategica "il tempo conta" (conservare/incassare),
+     polarità `current_turn == 1`, pareggio, secondo-di-mano, coerenza principal variation, partita reale fino a mazzo vuoto
+     (somma punti = 120), e guard sugli stati fuori scope.
 2. **Agente ibrido per UI/evaluation**:
    - aggiungere un agente tipo `hybrid_endgame`:
      - early/mid game: `best_a2c` o `heuristic_v2`;
