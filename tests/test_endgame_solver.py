@@ -284,3 +284,53 @@ def test_guard_rejects_too_many_remaining_cards() -> None:
     state = _endgame_state(hand0=hand0, hand1=hand1, current_turn=0)
     with pytest.raises(ValueError, match="Troppe carte"):
         solve_endgame(state)
+
+
+def test_guard_rejects_current_turn_out_of_range() -> None:
+    """`current_turn` negativo: senza guard l'indicizzazione negativa darebbe risultati errati."""
+    state = _endgame_state(
+        hand0=(Card(Suit.CUPS, Rank.ACE),),
+        hand1=(Card(Suit.CUPS, Rank.KING),),
+        current_turn=-1,
+    )
+    with pytest.raises(ValueError, match="current_turn fuori range"):
+        solve_endgame(state)
+
+
+def test_guard_rejects_table_player_out_of_range() -> None:
+    """Player id incoerente sulla carta a tavolo: stato malformato, rifiutato."""
+    state = _endgame_state(
+        hand0=(Card(Suit.SWORDS, Rank.FOUR),),
+        hand1=(Card(Suit.CLUBS, Rank.ACE), Card(Suit.SWORDS, Rank.FIVE)),
+        current_turn=1,
+        table_cards=((Card(Suit.CLUBS, Rank.TWO), 5),),
+    )
+    with pytest.raises(ValueError, match="Player id sul tavolo"):
+        solve_endgame(state)
+
+
+def test_guard_rejects_non_terminal_state_without_cards() -> None:
+    """Mani vuote ma `game_over=False`: stato non terminale senza mosse, deve fallire pulito."""
+    state = _endgame_state(hand0=(), hand1=(), current_turn=0)
+    with pytest.raises(ValueError, match="Nessuna carta residua"):
+        solve_endgame(state)
+
+
+def test_guard_rejects_wrong_players_tuple_length() -> None:
+    """`num_players == 2` ma tupla `players` incoerente: rifiutato prima di indicizzare."""
+    state = GameState(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        players=(PlayerState("P0", (Card(Suit.CUPS, Rank.ACE),), (), 0),),
+        deck=(),
+        trump_card=TRUMP_CARD,
+        table_cards=(),
+        current_turn=0,
+        first_player=0,
+        game_over=False,
+        winner_index=None,
+        winning_team=None,
+    )
+    with pytest.raises(ValueError, match="Attesi 2 player"):
+        solve_endgame(state)

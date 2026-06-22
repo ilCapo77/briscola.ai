@@ -76,13 +76,26 @@ def _validate(state: GameState) -> None:
     """
     if state.num_players != 2:
         raise ValueError(f"Il solver endgame supporta solo 2 giocatori (ricevuti {state.num_players})")
+    # `num_players` e la tupla `players` potrebbero in teoria divergere su stati artificiali:
+    # verifichiamo entrambi, perché più sotto indicizziamo direttamente `players[0]`/`players[1]`.
+    if len(state.players) != 2:
+        raise ValueError(f"Attesi 2 player, trovati {len(state.players)}")
+    # Indici di player validi: senza questo controllo `current_turn=-1` verrebbe accettato e
+    # l'indicizzazione negativa di Python produrrebbe risultati silenziosamente sbagliati.
+    if state.current_turn not in (0, 1):
+        raise ValueError(f"current_turn fuori range: {state.current_turn}")
     if state.game_over:
         raise ValueError("Partita già terminata: nessuna mossa da risolvere")
     if len(state.deck) != 0:
         raise ValueError(f"Il solver richiede il mazzo vuoto (deck_size={len(state.deck)})")
     if len(state.table_cards) not in (0, 1):
         raise ValueError(f"Stato tavolo non supportato: attese 0 o 1 carte, trovate {len(state.table_cards)}")
+    for _card, player_idx in state.table_cards:
+        if player_idx not in (0, 1):
+            raise ValueError(f"Player id sul tavolo fuori range: {player_idx}")
     remaining = sum(len(p.hand) for p in state.players) + len(state.table_cards)
+    if remaining == 0:
+        raise ValueError("Nessuna carta residua: stato non terminale ma senza mosse possibili")
     if remaining > _MAX_REMAINING_CARDS:
         raise ValueError(f"Troppe carte residue per l'endgame esatto: {remaining} > {_MAX_REMAINING_CARDS}")
 
