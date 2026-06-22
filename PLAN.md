@@ -847,11 +847,16 @@ Piano consigliato (ordine):
      polarità `current_turn == 1`, pareggio, secondo-di-mano, coerenza principal variation, partita reale fino a mazzo vuoto
      (somma punti = 120), e guard sugli stati fuori scope.
 2. **Agente ibrido per UI/evaluation**:
-   - aggiungere un agente tipo `hybrid_endgame`:
-     - early/mid game: `best_a2c` o `heuristic_v2`;
-     - endgame (`deck_size == 0`): solver esatto;
-   - benchmarkare contro `best_a2c` puro su `medium/big` e head-to-head seat-fair;
-   - misurare anche decision-quality per verificare che non migliori solo il punteggio medio ma anche lo stile.
+   - [x] agente `hybrid_endgame` registrato in `build_agent`/`list_agent_specs`;
+   - [x] early/mid game: fallback `heuristic_v2`;
+   - [x] endgame (`deck_size == 0`): ricostruisce uno `GameState` dalla sola `PlayerObservation` e delega al solver esatto;
+   - [x] ricostruzione anti-cheat: deduce la mano avversaria da `seen_cards_onehot`, mano propria, tavolo e dimensioni mani;
+   - [x] punti/prese azzerati nello stato ricostruito (preserva l'argmax/argmin ed evita il ricalcolo punti errato in `domain.step`);
+   - [x] fallback difensivo su osservazioni fuori scope/incoerenti;
+   - [x] test (`tests/test_hybrid_endgame_agent.py`): base punti azzerata, briscola in mano avversaria, secondo di mano,
+     fallback pre-endgame/incoerente, partita reale fino a endgame, registrazione catalogo agenti;
+   - [ ] benchmarkare contro `best_a2c` puro su `medium/big` e head-to-head seat-fair;
+   - [ ] misurare anche decision-quality per verificare che non migliori solo il punteggio medio ma anche lo stile.
 3. **Distinguere memoria pubblica da carte fuori gioco**:
    - aggiungere a `PlayerObservation` un campo esplicito tipo `played_cards_onehot[40]` o `out_of_play_cards_onehot[40]`;
    - definizione: carte finite nelle prese + carte sul tavolo, escludendo la briscola scoperta se è ancora nel mazzo;
