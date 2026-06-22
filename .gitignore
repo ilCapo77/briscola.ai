@@ -28,3 +28,6 @@ benchmarks/
 *.egg-info/
 build/
 dist/
+
+# Symlink locale ad AGENTS.md (non versionato)
+CLAUDE.md
