@@ -868,12 +868,15 @@ Piano consigliato (ordine):
    - [x] variante `hybrid_endgame_best_a2c` (fallback = `best_a2c`, mid-game forte + finale esatto), catalogata a parte
      per non toccare `hybrid_endgame`. Helper condiviso `_load_best_a2c_agent()`; test in `tests/test_hybrid_endgame_agent.py`.
      Benchmark `medium` (engine `domain`, seed suite `medium`, commit successivo a `bbc6460`, modello `data/models/best_a2c.npz`):
-     - vs `best_a2c` puro: win 5124 / 4557 / 319 draw, **avg diff +1.83** (51.2% win) → il finale esatto aggiunge valore
-       anche sopra una policy mid-game forte;
-     - decision-quality vs `best_a2c`: avg diff +1.91; trump_waste 0.2%, trump_overkill 8.0%, overkill low-lead 6.0%
-       (l'overkill più alto riflette lo stile raw di `best_a2c` ora usato in mid-game, non il solver).
-   - Possibili next step: consolidare con `big` vs `best_a2c`/`heuristic_v1` se si vuole promuovere la variante; valutare se
-     l'overkill mid-game di `best_a2c` vada mitigato (guard/anchor) ora che è la policy dell'ibrido.
+     - vs `best_a2c` puro (`medium`): win 5124 / 4557 / 319 draw, **avg diff +1.83** (51.2% win) → il finale esatto aggiunge
+       valore anche sopra una policy mid-game forte;
+     - decision-quality vs `best_a2c` (`medium`, riferimento): avg diff +1.91; trump_waste 0.2%, trump_overkill 8.0%,
+       overkill low-lead 6.0% (l'overkill più alto riflette lo stile raw di `best_a2c` ora usato in mid-game, non il solver).
+   - [x] consolidamento `big` (engine `domain`, seed suite `big` via range, 100000 partite seat-fair, ~3m35s):
+     - vs `best_a2c` puro: win 51459 / 45431 / 3110 draw, **avg diff +1.90** (51.5% win) → segnale stabile, coerente col `medium`.
+   - **Esito**: `hybrid_endgame_best_a2c` è una **candidata chiara** come nuova baseline UI/evaluation (positiva e stabile su 100k).
+   - Possibili next step: eventuale mitigazione dell'overkill mid-game di `best_a2c` (guard/anchor) — non urgente, misura il fallback
+     non il solver; oppure promuovere la variante a baseline e procedere allo step 3.
 3. **Distinguere memoria pubblica da carte fuori gioco**:
    - aggiungere a `PlayerObservation` un campo esplicito tipo `played_cards_onehot[40]` o `out_of_play_cards_onehot[40]`;
    - definizione: carte finite nelle prese + carte sul tavolo, escludendo la briscola scoperta se è ancora nel mazzo;
