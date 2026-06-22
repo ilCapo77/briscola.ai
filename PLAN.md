@@ -894,15 +894,28 @@ Piano consigliato (ordine):
      (`tests/test_dto.py`), ricostruzione via `out_of_play` con `seen` azzerato e fallback su `seen` con `out_of_play` azzerato
      (`tests/test_hybrid_endgame_agent.py`).
    - `seen_cards_onehot` resta invariato come "informazione pubblica vista".
-4. **Encoder v3 con feature strategiche aggregate**:
-   - aggiungere feature compatte e leggibili invece di affidarsi solo ai 40 bit raw:
-     - numero di briscole ignote;
-     - briscole alte ignote (Asso/Tre/Re di briscola);
-     - Assi/Tre usciti per seme;
-     - carichi ignoti per seme;
-     - fase partita (`deck_size`, carte in mano, endgame flag);
-     - “sono secondo di mano” e valore/forza della presa corrente;
-   - confrontare v3 contro v2 con la stessa pipeline (`run_experiment.py`, `evaluate_matrix.py`, `evaluate_decision_quality.py`).
+4. **Encoder v3 con feature strategiche aggregate** (domain-first, no promozione modello in questo step):
+   - [x] `FEATURE_DIM_2P_V3 = 310` = v2 (288) + **22** feature aggregate, blocco congelato:
+     - `unknown_trumps_count_norm` (1) + briscole alte ignote Asso/Tre/Re (3);
+     - per seme (×4): `ace_out_of_play`, `three_out_of_play`, `unknown_load_count_norm` (12);
+     - fase: `deck_size_norm`, `my_hand_size_norm`, `is_endgame` (3);
+     - presa corrente: `current_trick_points_norm`, `current_trick_lead_strength_norm`, `current_trick_lead_is_trump` (3).
+   - [x] definizione "ignota" anti-cheat: `unknown = not seen and not in_my_hand`; poiché la briscola scoperta è sempre in
+     `seen`, è esclusa correttamente dalle ignote **senza** usarne l'id (parità dict/oggetto garantita anche a mazzo vuoto,
+     dove il DTO azzera `trump_card`). Le feature `*_out_of_play` usano `out_of_play_cards_onehot` (step 3).
+   - [x] implementato in entrambi i path: `encode_observation_2p_v3` (dict/DTO) e ramo v3 di `encode_player_observation_2p`
+     (oggetto), con `_compute_v3_extra_features` condiviso; selettore + `feature_dim_for_encoder_version` aggiornati.
+   - [x] compatibilità: `bc_model_agent` (inferenza v3 da metadata/feature_dim + validazione coerenza), `model_catalog`
+     (UI accetta 310), `_load_best_a2c_agent` (set feature_dim += v3); label/metadata `encoder=v3`.
+   - [x] **guard domain-first**: encoder fast (`fast_observation_encoder`) e numba (`fast_numba_observation`) rifiutano v3
+     con errore chiaro (niente fallback a v2); `train_a2c` blocca `--encoder-version v3` con `--rollout-engine fast/numba`.
+   - [x] training: `--encoder-version v3` esposto in `train_a2c/train_bc/train_pg` (path domain).
+   - [x] test: contratto dim/prefisso v2, parità dict-oggetto (mid-game + endgame), briscola scoperta non-ignota,
+     `*_out_of_play` da prese, `is_endgame`, guard fast/numba, roundtrip modello v3 + mismatch metadata
+     (`tests/test_observation_encoder_v3.py`).
+   - [ ] (prerequisito training v3 BC) re-export dataset con `out_of_play` popolato (dataset vecchi → feature degradate).
+   - [ ] confrontare v3 vs v2 con la pipeline (`run_experiment.py`, `evaluate_*`) — quando si addestra un modello v3.
+   - [ ] (follow-up) parità v3 su path fast/numba per training/eval ad alto throughput.
 5. **Teacher endgame-aware per BC/RL**:
    - generare un dataset in cui `heuristic_v2` delega al solver nel finale;
    - allenare BC encoder v3 e poi fare fine-tuning A2C;

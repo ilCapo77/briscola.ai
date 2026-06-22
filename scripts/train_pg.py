@@ -270,11 +270,12 @@ def main() -> int:
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC).")
     parser.add_argument(
         "--encoder-version",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v1",
         help=(
             "Versione encoder per observation 2-player. "
-            "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica)."
+            "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica), "
+            "v3=v2 + feature strategiche aggregate (310 dim, solo engine domain)."
         ),
     )
     parser.add_argument(

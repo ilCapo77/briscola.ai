@@ -762,11 +762,12 @@ def main() -> int:
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC/RL).")
     parser.add_argument(
         "--encoder-version",
-        choices=["v1", "v2"],
+        choices=["v1", "v2", "v3"],
         default="v1",
         help=(
             "Versione encoder per observation 2-player. "
-            "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica)."
+            "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica), "
+            "v3=v2 + feature strategiche aggregate (310 dim, solo engine domain)."
         ),
     )
     parser.add_argument(
@@ -928,6 +929,12 @@ def main() -> int:
 
     out_path = Path(args.out)
     encoder_version: EncoderVersion = str(args.encoder_version)
+    # Guard domain-first: l'encoder v3 vive solo sul path domain. Falliamo subito con un messaggio
+    # chiaro invece di lasciare che il rollout fast/numba ripieghi o produca un encoding errato.
+    if encoder_version == "v3" and rollout_engine != "domain":
+        raise ValueError(
+            "`--encoder-version v3` è supportato solo con `--rollout-engine domain` (parità fast/numba TODO)."
+        )
     rng_action = np.random.default_rng(args.seed)
     rng_game = np.random.default_rng(args.seed ^ 0x9E3779B9)
     rng_opponent_select = np.random.default_rng(args.seed ^ 0xA5A5A5A5)

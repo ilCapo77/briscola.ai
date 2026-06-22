@@ -33,8 +33,10 @@ from .training.card_action_space import action_id_from_suit_number
 from .training.observation_encoder import (
     FEATURE_DIM_2P_V1,
     FEATURE_DIM_2P_V2,
+    FEATURE_DIM_2P_V3,
     EncoderVersion,
     encode_player_observation_2p,
+    feature_dim_for_encoder_version,
 )
 
 
@@ -135,24 +137,21 @@ def _infer_encoder_version_from_metadata(metadata: dict[str, Any]) -> EncoderVer
     Estrae (best effort) la versione encoder dai metadati.
 
     Convenzioni supportate:
-    - `metadata.encoder_version`: "v1" / "v2"
-    - `metadata.encoder`: stringa tipo "encode_observation_2p:v1" / "...:v2"
+    - `metadata.encoder_version`: "v1" / "v2" / "v3"
+    - `metadata.encoder`: stringa tipo "encode_observation_2p:v1" / "...:v2" / "...:v3"
     """
     raw_version = metadata.get("encoder_version")
     if isinstance(raw_version, str):
         v = raw_version.strip().lower()
-        if v == "v1":
-            return "v1"
-        if v == "v2":
-            return "v2"
+        if v in ("v1", "v2", "v3"):
+            return v  # type: ignore[return-value]
 
     raw_encoder = metadata.get("encoder")
     if isinstance(raw_encoder, str):
         enc = raw_encoder.strip().lower()
-        if enc.endswith(":v1") or enc == "v1":
-            return "v1"
-        if enc.endswith(":v2") or enc == "v2":
-            return "v2"
+        for candidate in ("v1", "v2", "v3"):
+            if enc.endswith(f":{candidate}") or enc == candidate:
+                return candidate
 
     return None
 
@@ -163,11 +162,11 @@ def _infer_encoder_version_for_model(*, metadata: dict[str, Any], feature_dim: i
 
     Regola (in ordine):
     1) se `metadata.encoder[_version]` è presente, lo rispettiamo (e validiamo `feature_dim`);
-    2) altrimenti facciamo fallback su `feature_dim` (248=v1, 288=v2).
+    2) altrimenti facciamo fallback su `feature_dim` (248=v1, 288=v2, 310=v3).
     """
     declared = _infer_encoder_version_from_metadata(metadata)
     if declared is not None:
-        expected = int(FEATURE_DIM_2P_V1) if declared == "v1" else int(FEATURE_DIM_2P_V2)
+        expected = feature_dim_for_encoder_version(declared)
         if int(feature_dim) != expected:
             raise ValueError(
                 "Modello incoerente: "
@@ -179,10 +178,13 @@ def _infer_encoder_version_for_model(*, metadata: dict[str, Any], feature_dim: i
         return "v1"
     if int(feature_dim) == int(FEATURE_DIM_2P_V2):
         return "v2"
+    if int(feature_dim) == int(FEATURE_DIM_2P_V3):
+        return "v3"
 
     raise ValueError(
         "Impossibile inferire l'encoder: "
-        f"feature_dim={int(feature_dim)} non è né v1({int(FEATURE_DIM_2P_V1)}) né v2({int(FEATURE_DIM_2P_V2)})."
+        f"feature_dim={int(feature_dim)} non è v1({int(FEATURE_DIM_2P_V1)}), "
+        f"v2({int(FEATURE_DIM_2P_V2)}) o v3({int(FEATURE_DIM_2P_V3)})."
     )
 
 

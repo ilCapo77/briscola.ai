@@ -88,4 +88,8 @@ def encode_fast_observation_2p(
         return EncodedObservation(features=features, action_mask=mask)
     if version == "v2":
         return EncodedObservation(features=features + _seen_cards_onehot_to_floats(seen_cards_onehot), action_mask=mask)
+    if version == "v3":
+        # Guard esplicito (domain-first): v3 cambia la semantica delle feature e per ora vive solo
+        # sul path domain. Falliamo invece di ripiegare su v2, che produrrebbe un encoding errato.
+        raise ValueError("Encoder v3 non supportato sul path fast: usa l'engine domain (parità fast/numba TODO).")
     raise ValueError(f"Encoder version non supportata: {version!r}")

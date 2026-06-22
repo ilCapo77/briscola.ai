@@ -33,7 +33,7 @@ from ..domain.state import GameState, PlayerState
 from .bc_model_agent import BCModelAgent
 from .endgame_solver import solve_endgame
 from .model_catalog import get_models_dir_from_env, resolve_model_path
-from .training.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2
+from .training.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
 
 
 class Agent(Protocol):
@@ -931,8 +931,9 @@ def _load_best_a2c_agent() -> BCModelAgent:
         ) from exc
 
     agent = BCModelAgent.from_npz(path)
-    if int(agent.model.feature_dim) not in {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)}:
-        expected = f"{int(FEATURE_DIM_2P_V1)} (v1) or {int(FEATURE_DIM_2P_V2)} (v2)"
+    supported = {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)}
+    if int(agent.model.feature_dim) not in supported:
+        expected = f"{int(FEATURE_DIM_2P_V1)} (v1), {int(FEATURE_DIM_2P_V2)} (v2) or {int(FEATURE_DIM_2P_V3)} (v3)"
         raise ValueError(
             "Modello 'best_a2c' non compatibile: feature_dim non coerente con un encoder 2-player supportato. "
             f"model={int(agent.model.feature_dim)} expected={expected} ({path})."

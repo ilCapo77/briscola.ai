@@ -48,9 +48,14 @@ _CARD_FEATURES = build_card_features()
 # - 4 scalari = 4                 -> 248
 FEATURE_DIM_2P_V1 = 248
 FEATURE_DIM_2P_V2 = FEATURE_DIM_2P_V1 + 40
+# v3 = v2 + 22 feature strategiche aggregate (vedi `_compute_v3_extra_features`).
+FEATURE_DIM_2P_V3 = FEATURE_DIM_2P_V2 + 22
 ACTION_DIM = 40
 
-EncoderVersion = Literal["v1", "v2"]
+EncoderVersion = Literal["v1", "v2", "v3"]
+
+# Numero di feature aggiunte da v3 sopra v2 (contratto esplicito per i test).
+_V3_EXTRA_DIM = 22
 
 
 def _one_hot_suit(suit: str | None) -> list[float]:
@@ -98,6 +103,125 @@ def _one_hot_suit_from_card(card: Card | None) -> list[float]:
         out[2] = 1.0
     elif card.suit is Suit.SWORDS:
         out[3] = 1.0
+    return out
+
+
+_SUIT_STR_TO_INDEX = {"clubs": 0, "cups": 1, "coins": 2, "swords": 3}
+
+
+def _suit_str_to_index(suit: str | None) -> int | None:
+    """Indice seme (clubs=0, cups=1, coins=2, swords=3) o None se assente/sconosciuto."""
+    if not isinstance(suit, str):
+        return None
+    return _SUIT_STR_TO_INDEX.get(suit)
+
+
+def _suit_to_index(suit: Suit | None) -> int | None:
+    """Indice seme da `Suit` (stesso ordine dello spazio azioni)."""
+    if suit is Suit.CLUBS:
+        return 0
+    if suit is Suit.CUPS:
+        return 1
+    if suit is Suit.COINS:
+        return 2
+    if suit is Suit.SWORDS:
+        return 3
+    return None
+
+
+def _onehot_to_id_set(raw: object) -> set[int]:
+    """
+    Converte una one-hot (list/tuple di 0/1, lunghezza 40) in set di card id.
+
+    Tollerante per backward compatibility: `None` o lista vuota -> set vuoto (dataset vecchi senza
+    il campo). Una lunghezza diversa da 0/40 o valori non binari sono invece un errore esplicito.
+    """
+    if raw is None:
+        return set()
+    if not isinstance(raw, (list, tuple)):
+        raise ValueError("one-hot deve essere list/tuple")
+    if len(raw) == 0:
+        return set()
+    if len(raw) != 40:
+        raise ValueError(f"one-hot len={len(raw)} (atteso 40)")
+    ids: set[int] = set()
+    for i, value in enumerate(raw):
+        if isinstance(value, bool):
+            iv = int(value)
+        elif isinstance(value, (int, float)) and value in (0, 1):
+            iv = int(value)
+        else:
+            raise ValueError("one-hot deve contenere solo 0/1")
+        if iv:
+            ids.add(i)
+    return ids
+
+
+def _compute_v3_extra_features(
+    *,
+    my_hand_ids: set[int],
+    seen_ids: set[int],
+    out_of_play_ids: set[int],
+    trump_suit_index: int | None,
+    table_action_ids: list[int],
+    deck_size: int,
+    my_hand_size: int,
+) -> list[float]:
+    """
+    Calcola il blocco v3 (22 feature) condiviso dai path dict e oggetto (parità garantita).
+
+    Definizione "ignota" (anti-cheat): `unknown = not seen and not in_my_hand`. Poiché la briscola
+    scoperta è SEMPRE in `seen` (anche quando è nel mazzo/in mano), questa formula esclude
+    correttamente la briscola pubblica dalle carte ignote, senza bisogno di conoscerne l'id.
+    Le feature `*_out_of_play` usano invece `out_of_play` (solo prese + tavolo).
+
+    Layout (22): [unknown_trumps_norm, unk_high_ace, unk_high_three, unk_high_king]
+    + per seme(×4) [ace_out_of_play, three_out_of_play, unknown_load_norm]
+    + [deck_size_norm, my_hand_size_norm, is_endgame]
+    + [current_trick_points_norm, current_trick_lead_strength_norm, current_trick_lead_is_trump].
+    """
+    points_by_id = _CARD_FEATURES.points_by_action_id
+    strength_by_id = _CARD_FEATURES.strength_by_action_id
+    unknown_ids = set(range(40)) - seen_ids - my_hand_ids
+
+    # Blocco briscole (Asso=offset 0, Tre=offset 2, Re=offset 9 dentro il seme).
+    if trump_suit_index is None:
+        out: list[float] = [0.0, 0.0, 0.0, 0.0]
+    else:
+        base = trump_suit_index * 10
+        unknown_trumps = sum(1 for cid in range(base, base + 10) if cid in unknown_ids)
+        out = [
+            float(unknown_trumps) / 10.0,
+            1.0 if (base + 0) in unknown_ids else 0.0,
+            1.0 if (base + 2) in unknown_ids else 0.0,
+            1.0 if (base + 9) in unknown_ids else 0.0,
+        ]
+
+    # Per seme: assi/tre usciti (out_of_play) + carichi (Asso/Tre) ignoti.
+    for suit_index in range(4):
+        ace_id = suit_index * 10 + 0
+        three_id = suit_index * 10 + 2
+        load_unknown = (1 if ace_id in unknown_ids else 0) + (1 if three_id in unknown_ids else 0)
+        out += [
+            1.0 if ace_id in out_of_play_ids else 0.0,
+            1.0 if three_id in out_of_play_ids else 0.0,
+            float(load_unknown) / 2.0,
+        ]
+
+    # Fase partita.
+    out += [float(deck_size) / 40.0, float(my_hand_size) / 3.0, 1.0 if deck_size == 0 else 0.0]
+
+    # Presa corrente (lead = prima carta giocata sul tavolo; in 2-player al più 1 prima della mossa).
+    if table_action_ids:
+        lead_id = table_action_ids[0]
+        trick_points = sum(float(points_by_id[a]) for a in table_action_ids)
+        lead_strength = float(strength_by_id[lead_id])
+        lead_is_trump = 1.0 if (trump_suit_index is not None and (lead_id // 10) == trump_suit_index) else 0.0
+    else:
+        trick_points = 0.0
+        lead_strength = 0.0
+        lead_is_trump = 0.0
+    out += [trick_points / 11.0, lead_strength / 10.0, lead_is_trump]
     return out
 
 
@@ -248,18 +372,63 @@ def encode_observation_2p_v2(observation: dict) -> EncodedObservation:
     return EncodedObservation(features=features, action_mask=base.action_mask)
 
 
+def encode_observation_2p_v3(observation: dict) -> EncodedObservation:
+    """
+    Encoder 2-player v3 = v2 + 22 feature strategiche aggregate (vedi `_compute_v3_extra_features`).
+
+    Usa `seen_cards_onehot` (per le carte "ignote", che escludono la briscola pubblica) e
+    `out_of_play_cards_onehot` (per assi/tre usciti). Su dataset vecchi senza `out_of_play` le
+    feature relative degradano a 0: per un training v3 "serio" serve un re-export aggiornato.
+    """
+    base = encode_observation_2p_v2(observation)
+
+    my_index = observation.get("my_index")
+    my_hand = observation.get("my_hand") or []
+    my_hand_ids = {card_dto_to_action_id(card) for card in my_hand if isinstance(card, dict)}
+
+    table_cards = observation.get("table_cards") or []
+    table_action_ids: list[int] = []
+    for item in table_cards:
+        if isinstance(item, dict) and isinstance(item.get("card"), dict):
+            table_action_ids.append(card_dto_to_action_id(item["card"]))
+
+    deck_size = observation.get("cards_remaining_in_deck")
+    if not isinstance(deck_size, int):
+        raise ValueError("ObservationDTO invalida: cards_remaining_in_deck mancante")
+
+    trump_suit = observation.get("trump_suit")
+    extra = _compute_v3_extra_features(
+        my_hand_ids=my_hand_ids,
+        seen_ids=_onehot_to_id_set(observation.get("seen_cards_onehot")),
+        out_of_play_ids=_onehot_to_id_set(observation.get("out_of_play_cards_onehot")),
+        trump_suit_index=_suit_str_to_index(trump_suit if isinstance(trump_suit, str) else None),
+        table_action_ids=table_action_ids,
+        deck_size=deck_size,
+        my_hand_size=len(my_hand_ids) if isinstance(my_index, int) else len(my_hand),
+    )
+    return EncodedObservation(features=list(base.features) + extra, action_mask=base.action_mask)
+
+
 def encode_observation_2p_with_version(observation: dict, *, version: EncoderVersion) -> EncodedObservation:
-    """Selettore esplicito dell'encoder 2-player (v1/v2)."""
+    """Selettore esplicito dell'encoder 2-player (v1/v2/v3)."""
     if version == "v1":
         return encode_observation_2p(observation)
     if version == "v2":
         return encode_observation_2p_v2(observation)
+    if version == "v3":
+        return encode_observation_2p_v3(observation)
     raise ValueError(f"Encoder version non supportata: {version!r}")
 
 
 def feature_dim_for_encoder_version(version: EncoderVersion) -> int:
-    """Ritorna la feature_dim attesa dall'encoder 2-player (v1/v2)."""
-    return int(FEATURE_DIM_2P_V1) if version == "v1" else int(FEATURE_DIM_2P_V2)
+    """Ritorna la feature_dim attesa dall'encoder 2-player (v1/v2/v3)."""
+    if version == "v1":
+        return int(FEATURE_DIM_2P_V1)
+    if version == "v2":
+        return int(FEATURE_DIM_2P_V2)
+    if version == "v3":
+        return int(FEATURE_DIM_2P_V3)
+    raise ValueError(f"Encoder version non supportata: {version!r}")
 
 
 def encode_player_observation_2p(
@@ -330,7 +499,19 @@ def encode_player_observation_2p(
 
     if version == "v1":
         return EncodedObservation(features=features, action_mask=mask)
+
+    seen = _seen_cards_onehot_to_floats(list(observation.seen_cards_onehot))
     if version == "v2":
-        seen = _seen_cards_onehot_to_floats(list(observation.seen_cards_onehot))
         return EncodedObservation(features=features + seen, action_mask=mask)
+    if version == "v3":
+        extra = _compute_v3_extra_features(
+            my_hand_ids={_card_to_action_id_fast(card) for card in observation.hand},
+            seen_ids=_onehot_to_id_set(list(observation.seen_cards_onehot)),
+            out_of_play_ids=_onehot_to_id_set(list(observation.out_of_play_cards_onehot)),
+            trump_suit_index=_suit_to_index(observation.trump_card.suit if observation.trump_card else None),
+            table_action_ids=[_card_to_action_id_fast(card) for card, _ in observation.table_cards],
+            deck_size=int(observation.deck_size),
+            my_hand_size=len(observation.hand),
+        )
+        return EncodedObservation(features=features + seen + extra, action_mask=mask)
     raise ValueError(f"Encoder version non supportata: {version!r}")

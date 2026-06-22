@@ -2007,6 +2007,9 @@ def encode_fast_observation_numba_2p(
         feature_dim = int(FEATURE_DIM_2P_V1)
     elif version == "v2":
         feature_dim = int(FEATURE_DIM_2P_V2)
+    elif version == "v3":
+        # Guard esplicito (domain-first): v3 non è ancora portato sul path numba.
+        raise ValueError("Encoder v3 non supportato sul path numba: usa l'engine domain (parità fast/numba TODO).")
     else:
         raise ValueError(f"Encoder version non supportata: {version!r}")
 
