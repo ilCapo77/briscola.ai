@@ -107,6 +107,34 @@ class TestObservationDTO:
         assert data["players"][0]["name"] == "Player"
         assert data["players"][1]["name"] == "AI"
         assert len(data["seen_cards_onehot"]) == 40
+        # Step 3: il nuovo campo è sempre presente nel dump (default lista vuota).
+        assert "out_of_play_cards_onehot" in data
+
+    def test_accepts_old_payload_without_out_of_play_field(self) -> None:
+        """Backward compatibility: payload vecchi (senza out_of_play) restano validi."""
+        payload = {
+            "server_version": 1,
+            "my_index": 0,
+            "my_hand": [],
+            "my_points": 0,
+            "my_turn": True,
+            "trump_card": None,
+            "trump_suit": "clubs",
+            "table_cards": [],
+            "cards_remaining_in_deck": 0,
+            "valid_actions": [],
+            "game_over": False,
+            "num_players": 2,
+            "is_team_game": False,
+            "players": [],
+            "seen_cards_onehot": [0] * 40,
+            # nota: nessun `out_of_play_cards_onehot`
+        }
+
+        dto = ObservationDTO.model_validate(payload)
+
+        # Il campo mancante prende il default (lista vuota), senza errori di validazione.
+        assert dto.out_of_play_cards_onehot == []
 
 
 class TestAiCardRevealDTO:

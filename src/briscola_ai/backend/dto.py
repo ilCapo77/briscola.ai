@@ -137,6 +137,11 @@ class ObservationDTO(BaseModel):
     # - È opzionale per backward compatibility (client vecchi possono ignorarla).
     seen_cards_onehot: list[int] = Field(default_factory=list)
 
+    # Carte "fuori gioco" (one-hot su 40 carte): SOLO prese + tavolo (no briscola scoperta
+    # finché è pescabile/in mano). Distinta da `seen_cards_onehot`: "non più disponibile" vs
+    # "vista pubblicamente". Opzionale/default per non rompere payload e dataset vecchi.
+    out_of_play_cards_onehot: list[int] = Field(default_factory=list)
+
     # Campi 4-player (opzionali, None in modalità 2-player)
     my_team: int | None = None
     teammate_index: int | None = None

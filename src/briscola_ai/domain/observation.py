@@ -32,6 +32,11 @@ def _empty_seen_cards_onehot() -> tuple[int, ...]:
     return (0,) * 40
 
 
+def _empty_out_of_play_cards_onehot() -> tuple[int, ...]:
+    """Default (backward-compatible): nessuna carta “fuori gioco” (lunghezza 40)."""
+    return (0,) * 40
+
+
 def _card_to_id_fast(card: Card) -> int:
     """
     Converte una carta in id canonico nel path caldo di osservazione.
@@ -104,6 +109,18 @@ class PlayerObservation:
     # Non include mai carte specifiche in mano agli avversari.
     seen_cards_onehot: tuple[int, ...] = field(default_factory=_empty_seen_cards_onehot)
 
+    # Carte "fuori gioco" (one-hot sulle 40 carte): definitivamente non più disponibili.
+    #
+    # Differenza con `seen_cards_onehot` (volutamente distinte):
+    # - `seen_cards_onehot` è "informazione pubblica vista", e include sempre la briscola scoperta;
+    # - `out_of_play_cards_onehot` è "carta non più in gioco", quindi SOLO prese + tavolo.
+    #   La briscola scoperta NON è qui finché resta pescabile (nel mazzo) o è stata pescata in mano:
+    #   compare solo quando finisce in una presa o sul tavolo.
+    #
+    # È anti-cheat: dipende solo da prese (pubbliche) e tavolo. Default a 40 zeri per backward
+    # compatibility con dataset/osservazioni vecchie.
+    out_of_play_cards_onehot: tuple[int, ...] = field(default_factory=_empty_out_of_play_cards_onehot)
+
 
 def make_player_observation(state: GameState, player_index: int) -> PlayerObservation:
     """
@@ -132,6 +149,16 @@ def make_player_observation(state: GameState, player_index: int) -> PlayerObserv
         for card in p.captured_cards:
             seen[_card_to_id_fast(card)] = 1
 
+    # Carte fuori gioco (40): SOLO prese + tavolo, senza la briscola scoperta (che resta in gioco
+    # finché è pescabile o in mano). Quando la briscola viene catturata o giocata, finisce qui
+    # automaticamente perché appartiene a `captured_cards`/`table_cards`.
+    out_of_play = [0] * 40
+    for card, _ in state.table_cards:
+        out_of_play[_card_to_id_fast(card)] = 1
+    for p in state.players:
+        for card in p.captured_cards:
+            out_of_play[_card_to_id_fast(card)] = 1
+
     return PlayerObservation(
         num_players=state.num_players,
         is_team_game=state.is_team_game,
@@ -150,4 +177,5 @@ def make_player_observation(state: GameState, player_index: int) -> PlayerObserv
         players_points=tuple(p.points for p in state.players),
         players_hand_sizes=tuple(len(p.hand) for p in state.players),
         seen_cards_onehot=tuple(seen),
+        out_of_play_cards_onehot=tuple(out_of_play),
     )

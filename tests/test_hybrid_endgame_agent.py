@@ -201,7 +201,9 @@ def test_hybrid_agent_falls_back_on_incoherent_observation() -> None:
     """Osservazioni vecchie/malformate non devono produrre stati inventati."""
     state = _tempo_state()
     observation = make_player_observation(state, player_index=0)
-    malformed = replace(observation, seen_cards_onehot=(0,) * 40)
+    # Azzeriamo entrambe le storie pubbliche: senza out_of_play né seen non c'è modo lecito di
+    # dedurre la mano avversaria, quindi l'agente deve usare il fallback.
+    malformed = replace(observation, seen_cards_onehot=(0,) * 40, out_of_play_cards_onehot=(0,) * 40)
     fallback = FixedFallbackAgent(card_index=0)
     agent = HybridEndgameAgent(fallback=fallback)
 
@@ -225,6 +227,30 @@ def test_reconstruction_matches_real_solver_after_real_game_reaches_endgame() ->
     assert reconstructed_solution.best_card_index == real_solution.best_card_index
     base_delta = state.players[0].points - state.players[1].points
     assert real_solution.final_delta_p0_p1 == base_delta + reconstructed_solution.final_delta_p0_p1
+
+
+def test_reconstruction_prefers_out_of_play_when_seen_is_zeroed() -> None:
+    """Con `out_of_play` valido la ricostruzione funziona anche se `seen` è azzerato (path pulito)."""
+    state = _tempo_state()
+    observation = make_player_observation(state, player_index=0)
+    only_out_of_play = replace(observation, seen_cards_onehot=(0,) * 40)
+
+    reconstructed = reconstruct_endgame_state(only_out_of_play)
+
+    assert set(reconstructed.players[1].hand) == set(state.players[1].hand)
+    assert solve_endgame(reconstructed).best_card_index == solve_endgame(state).best_card_index
+
+
+def test_reconstruction_falls_back_to_seen_when_out_of_play_is_zeroed() -> None:
+    """Con `out_of_play` azzerato (dataset vecchi) la ricostruzione usa il fallback su `seen`."""
+    state = _tempo_state()
+    observation = make_player_observation(state, player_index=0)
+    only_seen = replace(observation, out_of_play_cards_onehot=(0,) * 40)
+
+    reconstructed = reconstruct_endgame_state(only_seen)
+
+    assert set(reconstructed.players[1].hand) == set(state.players[1].hand)
+    assert solve_endgame(reconstructed).best_card_index == solve_endgame(state).best_card_index
 
 
 def test_hybrid_endgame_is_registered_in_agent_catalog() -> None:

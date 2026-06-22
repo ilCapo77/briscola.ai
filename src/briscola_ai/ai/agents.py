@@ -626,6 +626,91 @@ def _validate_endgame_observation_scope(observation: PlayerObservation) -> None:
         raise ValueError("Mani sbilanciate rispetto alla carta sul tavolo")
 
 
+def _opponent_hand_ids_from_out_of_play(
+    observation: PlayerObservation,
+    *,
+    my_hand_ids: set[int],
+    table_ids: set[int],
+    opponent_hand_size: int,
+) -> set[int] | None:
+    """
+    Deduce la mano avversaria dal campo `out_of_play_cards_onehot`, se presente e coerente.
+
+    È il path "pulito": le carte fuori gioco sono SOLO prese + tavolo, quindi a mazzo vuoto
+    `mano_avversario = tutte − mia_mano − fuori_gioco` (la briscola non richiede trattamenti
+    speciali: se è in mano avversaria non è fuori gioco, quindi ricade nel complemento).
+
+    Ritorna `None` (→ fallback su `seen_cards_onehot`) se il campo è assente/default/incoerente:
+    - lunghezza diversa da 40 o valori non binari;
+    - non contiene tutte le carte sul tavolo (il tavolo è per definizione fuori gioco);
+    - si sovrappone alla mano osservante (la mia mano non è fuori gioco);
+    - il complemento non ha la dimensione attesa (es. campo a 40 zeri dei dataset vecchi).
+    """
+    raw = observation.out_of_play_cards_onehot
+    if len(raw) != 40:
+        return None
+
+    out_of_play_ids: set[int] = set()
+    for card_id, value in enumerate(raw):
+        if value not in (0, 1):
+            return None
+        if value:
+            out_of_play_ids.add(card_id)
+
+    if not table_ids.issubset(out_of_play_ids):
+        return None
+    if my_hand_ids & out_of_play_ids:
+        return None
+
+    candidate = set(_ALL_CARD_IDS - my_hand_ids - out_of_play_ids)
+    if len(candidate) != opponent_hand_size:
+        return None
+    return candidate
+
+
+def _opponent_hand_ids_from_seen(
+    observation: PlayerObservation,
+    *,
+    my_hand_ids: set[int],
+    table_ids: set[int],
+    trump_id: int,
+    opponent_hand_size: int,
+) -> set[int]:
+    """
+    Deduce la mano avversaria dalla sola `seen_cards_onehot` (path compatibile, fallback).
+
+    `seen_cards_onehot` include sempre la briscola scoperta, anche quando è stata pescata in mano:
+    è l'unico bit ambiguo, risolto contando le mani (se manca esattamente una carta ai candidati,
+    quella carta è la briscola). Solleva `ValueError` se l'osservazione è incoerente.
+    """
+    seen_ids = _seen_card_ids_from_observation(observation)
+    if trump_id not in seen_ids:
+        raise ValueError("seen_cards_onehot non contiene la briscola pubblica")
+    if not table_ids.issubset(seen_ids):
+        raise ValueError("seen_cards_onehot non contiene tutte le carte sul tavolo")
+
+    # La briscola scoperta è l'unica sovrapposizione lecita tra mano osservata e carte "viste".
+    illegal_seen_hand_overlap = (my_hand_ids & seen_ids) - {trump_id}
+    if illegal_seen_hand_overlap:
+        raise ValueError("seen_cards_onehot contiene carte non-briscola ancora nella mano osservata")
+
+    remaining_unknown_ids = set(_ALL_CARD_IDS - my_hand_ids - seen_ids)
+    if len(remaining_unknown_ids) == opponent_hand_size:
+        return remaining_unknown_ids
+    if (
+        len(remaining_unknown_ids) == opponent_hand_size - 1
+        and trump_id not in my_hand_ids
+        and trump_id not in table_ids
+    ):
+        opponent_hand_ids = set(remaining_unknown_ids)
+        opponent_hand_ids.add(trump_id)
+        return opponent_hand_ids
+    raise ValueError(
+        "Impossibile dedurre in modo univoco la mano avversaria "
+        f"(candidati={len(remaining_unknown_ids)}, attesi={opponent_hand_size})"
+    )
+
+
 def reconstruct_endgame_state(observation: PlayerObservation) -> GameState:
     """
     Ricostruisce uno `GameState` endgame 2-player dalla sola `PlayerObservation`.
@@ -633,7 +718,13 @@ def reconstruct_endgame_state(observation: PlayerObservation) -> GameState:
     Anti-cheat
     ----------
     La funzione non legge mai la mano avversaria dal dominio: usa solo informazione pubblica
-    (`seen_cards_onehot`, tavolo, dimensioni mani) e la mano del player osservante.
+    (`out_of_play_cards_onehot`/`seen_cards_onehot`, tavolo, dimensioni mani) e la mano propria.
+
+    Deduzione mano avversaria
+    -------------------------
+    Preferisce `out_of_play_cards_onehot` (path pulito: complemento diretto) quando presente e
+    coerente; altrimenti usa il fallback storico su `seen_cards_onehot`. Questo evita una
+    migrazione "tutto o niente" e mantiene la compatibilità coi dataset/osservazioni vecchie.
 
     Punti e prese
     -------------
@@ -651,10 +742,7 @@ def reconstruct_endgame_state(observation: PlayerObservation) -> GameState:
         # Ridondante rispetto alla validate, ma aiuta mypy a restringere il tipo.
         raise ValueError("Briscola assente")
 
-    seen_ids = _seen_card_ids_from_observation(observation)
     trump_id = card_to_id(trump_card)
-    if trump_id not in seen_ids:
-        raise ValueError("seen_cards_onehot non contiene la briscola pubblica")
 
     my_hand_ids = {card_to_id(card) for card in observation.hand}
     if len(my_hand_ids) != len(observation.hand):
@@ -663,32 +751,25 @@ def reconstruct_endgame_state(observation: PlayerObservation) -> GameState:
     table_ids = {card_to_id(card) for card, _player_idx in observation.table_cards}
     if len(table_ids) != len(observation.table_cards):
         raise ValueError("Il tavolo contiene carte duplicate")
-    if not table_ids.issubset(seen_ids):
-        raise ValueError("seen_cards_onehot non contiene tutte le carte sul tavolo")
     if my_hand_ids & table_ids:
         raise ValueError("Una carta non può essere insieme in mano e sul tavolo")
 
-    # In `seen_cards_onehot` la briscola scoperta resta marcata anche se è stata pescata in mano.
-    # È l'unica sovrapposizione lecita tra mano osservata e carte "viste".
-    illegal_seen_hand_overlap = (my_hand_ids & seen_ids) - {trump_id}
-    if illegal_seen_hand_overlap:
-        raise ValueError("seen_cards_onehot contiene carte non-briscola ancora nella mano osservata")
-
     opponent_hand_size = observation.players_hand_sizes[opponent_index]
-    remaining_unknown_ids = set(_ALL_CARD_IDS - my_hand_ids - seen_ids)
-    if len(remaining_unknown_ids) == opponent_hand_size:
-        opponent_hand_ids = remaining_unknown_ids
-    elif (
-        len(remaining_unknown_ids) == opponent_hand_size - 1
-        and trump_id not in my_hand_ids
-        and trump_id not in table_ids
-    ):
-        opponent_hand_ids = set(remaining_unknown_ids)
-        opponent_hand_ids.add(trump_id)
-    else:
-        raise ValueError(
-            "Impossibile dedurre in modo univoco la mano avversaria "
-            f"(candidati={len(remaining_unknown_ids)}, attesi={opponent_hand_size})"
+
+    # Path pulito (out_of_play) con fallback compatibile (seen).
+    opponent_hand_ids = _opponent_hand_ids_from_out_of_play(
+        observation,
+        my_hand_ids=my_hand_ids,
+        table_ids=table_ids,
+        opponent_hand_size=opponent_hand_size,
+    )
+    if opponent_hand_ids is None:
+        opponent_hand_ids = _opponent_hand_ids_from_seen(
+            observation,
+            my_hand_ids=my_hand_ids,
+            table_ids=table_ids,
+            trump_id=trump_id,
+            opponent_hand_size=opponent_hand_size,
         )
 
     if len(opponent_hand_ids) != opponent_hand_size:

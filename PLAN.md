@@ -877,11 +877,20 @@ Piano consigliato (ordine):
    - **Esito**: `hybrid_endgame_best_a2c` è una **candidata chiara** come nuova baseline UI/evaluation (positiva e stabile su 100k).
    - Possibili next step: eventuale mitigazione dell'overkill mid-game di `best_a2c` (guard/anchor) — non urgente, misura il fallback
      non il solver; oppure promuovere la variante a baseline e procedere allo step 3.
-3. **Distinguere memoria pubblica da carte fuori gioco**:
-   - aggiungere a `PlayerObservation` un campo esplicito tipo `played_cards_onehot[40]` o `out_of_play_cards_onehot[40]`;
-   - definizione: carte finite nelle prese + carte sul tavolo, escludendo la briscola scoperta se è ancora nel mazzo;
-   - aggiornare DTO/export/encoder in modo backward-compatible;
-   - mantenere `seen_cards_onehot` per “informazione pubblica” e usare il nuovo campo quando serve ragionare su carte non più disponibili.
+3. [x] **Distinguere memoria pubblica da carte fuori gioco**:
+   - [x] campo `out_of_play_cards_onehot[40]` aggiunto a `PlayerObservation` (default 40 zeri, backward-compatible);
+   - [x] definizione: SOLO prese (di tutti) + tavolo; la briscola scoperta NON è fuori gioco finché è pescabile o in mano
+     (ci finisce solo quando viene catturata/giocata). Invariante: `out_of_play ⊆ seen`;
+   - [x] popolato sia nel dominio (`make_player_observation`) sia nel builder DTO (`build_observation_dto`);
+   - [x] DTO: `out_of_play_cards_onehot: list[int] = Field(default_factory=list)` (payload/dataset vecchi restano validi);
+     export passa l'observation come dict → additivo automatico, nessuna modifica a `export_dataset.py`;
+   - [x] encoder v1/v2 **non** modificati (leggono solo `seen`); il campo è preservato nei record per l'encoder v3 futuro;
+   - [x] `reconstruct_endgame_state` ora preferisce `out_of_play` (deduzione diretta: `opp = tutte − mia_mano − out_of_play`,
+     niente trucco sulla briscola) con **fallback** su `seen` quando il campo è assente/azzerato/incoerente → niente migrazione "tutto o niente";
+   - [x] test: semantica nei 5 casi briscola/tavolo/prese (`tests/test_out_of_play_observation.py`), DTO backward-compat
+     (`tests/test_dto.py`), ricostruzione via `out_of_play` con `seen` azzerato e fallback su `seen` con `out_of_play` azzerato
+     (`tests/test_hybrid_endgame_agent.py`).
+   - `seen_cards_onehot` resta invariato come "informazione pubblica vista".
 4. **Encoder v3 con feature strategiche aggregate**:
    - aggiungere feature compatte e leggibili invece di affidarsi solo ai 40 bit raw:
      - numero di briscole ignote;

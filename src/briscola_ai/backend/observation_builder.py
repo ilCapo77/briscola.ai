@@ -68,6 +68,14 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
         for card in p.captured_cards:
             seen[card_to_id(card)] = 1
 
+    # Carte fuori gioco (40): SOLO tavolo + prese (no briscola scoperta finché pescabile/in mano).
+    out_of_play = [0] * 40
+    for card, _ in state.table_cards:
+        out_of_play[card_to_id(card)] = 1
+    for p in state.players:
+        for card in p.captured_cards:
+            out_of_play[card_to_id(card)] = 1
+
     # Campi 4-player (None se 2-player)
     my_team = None
     teammate_index = None
@@ -104,6 +112,7 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
         is_team_game=state.is_team_game,
         players=players,
         seen_cards_onehot=seen,
+        out_of_play_cards_onehot=out_of_play,
         my_team=my_team,
         teammate_index=teammate_index,
         teammate_points=teammate_points,
