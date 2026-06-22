@@ -802,6 +802,15 @@ BEST_A2C_SPEC = AgentSpec(
 
 _BEST_A2C_DEFAULT_MODEL_ID = "best_a2c.npz"
 
+HYBRID_ENDGAME_BEST_A2C_SPEC = AgentSpec(
+    name="hybrid_endgame_best_a2c",
+    label="Hybrid Endgame (Best A2C)",
+    description_it=(
+        "Come Hybrid Endgame, ma usa il modello campione `best_a2c.npz` come policy in mid-game "
+        "e il solver esatto a mazzo vuoto. Unisce la forza mid-game di best_a2c al finale ottimo."
+    ),
+)
+
 AI_AGENTS_COMMON_NOTE_IT = (
     "Nota anti-cheat: tutte le IA ricevono solo un’osservazione parziale (PlayerObservation). "
     "Non possono leggere l’ordine del mazzo né le carte specifiche in mano all’avversario."
@@ -816,8 +825,37 @@ def list_agent_specs() -> list[AgentSpec]:
         HeuristicAgentV1.spec,
         HeuristicAgentV2.spec,
         HybridEndgameAgent.spec,
+        HYBRID_ENDGAME_BEST_A2C_SPEC,
         BC_MODEL_SPEC,
     ]
+
+
+def _load_best_a2c_agent() -> BCModelAgent:
+    """
+    Carica il modello campione `best_a2c.npz` dalla directory modelli e ne valida la compatibilità.
+
+    Estratto come helper perché serve sia all'agente `best_a2c` sia a `hybrid_endgame_best_a2c`
+    (che lo usa come policy mid-game), così la logica di risoluzione path/validazione resta unica.
+    """
+    models_dir = get_models_dir_from_env()
+    try:
+        path = resolve_model_path(models_dir=models_dir, model_id=_BEST_A2C_DEFAULT_MODEL_ID)
+    except FileNotFoundError as exc:
+        raise ValueError(
+            "Modello 'best_a2c' non disponibile: file non trovato. "
+            "Convenzione: salva (o copia) un modello `.npz` compatibile in "
+            f"{models_dir.resolve()!s}/{_BEST_A2C_DEFAULT_MODEL_ID}. "
+            "Puoi cambiare directory impostando `BRISCOLA_MODELS_DIR`."
+        ) from exc
+
+    agent = BCModelAgent.from_npz(path)
+    if int(agent.model.feature_dim) not in {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)}:
+        expected = f"{int(FEATURE_DIM_2P_V1)} (v1) or {int(FEATURE_DIM_2P_V2)} (v2)"
+        raise ValueError(
+            "Modello 'best_a2c' non compatibile: feature_dim non coerente con un encoder 2-player supportato. "
+            f"model={int(agent.model.feature_dim)} expected={expected} ({path})."
+        )
+    return agent
 
 
 def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
@@ -828,25 +866,12 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
     usiamo una mappa esplicita (no import dinamici) per semplicità e riproducibilità.
     """
     if name == "best_a2c":
-        models_dir = get_models_dir_from_env()
-        try:
-            path = resolve_model_path(models_dir=models_dir, model_id=_BEST_A2C_DEFAULT_MODEL_ID)
-        except FileNotFoundError as exc:
-            raise ValueError(
-                "Agente 'best_a2c' non disponibile: file modello non trovato. "
-                "Convenzione: salva (o copia) un modello `.npz` compatibile in "
-                f"{models_dir.resolve()!s}/{_BEST_A2C_DEFAULT_MODEL_ID}. "
-                "Puoi cambiare directory impostando `BRISCOLA_MODELS_DIR`."
-            ) from exc
+        return _load_best_a2c_agent()
 
-        agent = BCModelAgent.from_npz(path)
-        if int(agent.model.feature_dim) not in {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)}:
-            expected = f"{int(FEATURE_DIM_2P_V1)} (v1) or {int(FEATURE_DIM_2P_V2)} (v2)"
-            raise ValueError(
-                "Agente 'best_a2c' non compatibile: feature_dim non coerente con un encoder 2-player supportato. "
-                f"model={int(agent.model.feature_dim)} expected={expected} ({path})."
-            )
-        return agent
+    if name == "hybrid_endgame_best_a2c":
+        # Variante esplicita di hybrid_endgame con policy mid-game = best_a2c.
+        # `hybrid_endgame` resta invariato (fallback heuristic_v2) per stabilità dei benchmark.
+        return HybridEndgameAgent(fallback=_load_best_a2c_agent(), name="hybrid_endgame_best_a2c")
 
     if name == "bc_model":
         if model_path is None:

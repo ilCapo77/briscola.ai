@@ -863,9 +863,17 @@ Piano consigliato (ordine):
      - vs `heuristic_v2`: avg diff +4.03; trump_waste 0.1%, trump_overkill 4.1%, overkill low-lead 0.2%;
      - vs `best_a2c`: avg diff -9.21; trump_waste 0.1%, trump_overkill 3.9%, overkill low-lead 2.0%.
    - Output JSON locali (gitignored) in `benchmarks/experiments/hybrid_endgame_*medium.json`.
-   - **Conclusione**: il solver endgame migliora nettamente la baseline euristica (+4 vs `heuristic_v2`) ma non basta a colmare
-     il gap mid-game con `best_a2c`. Prossimo passo naturale: rendere il fallback dell'ibrido configurabile e usare `best_a2c`
-     come policy mid-game (atteso: combinare la forza mid-game di `best_a2c` con il finale esatto). `big` solo dopo, se serve consolidare.
+   - **Conclusione (fallback heuristic_v2)**: il solver endgame migliora nettamente la baseline euristica (+4 vs `heuristic_v2`)
+     ma non basta a colmare il gap mid-game con `best_a2c`: il collo di bottiglia è la policy mid-game.
+   - [x] variante `hybrid_endgame_best_a2c` (fallback = `best_a2c`, mid-game forte + finale esatto), catalogata a parte
+     per non toccare `hybrid_endgame`. Helper condiviso `_load_best_a2c_agent()`; test in `tests/test_hybrid_endgame_agent.py`.
+     Benchmark `medium` (engine `domain`, seed suite `medium`, commit successivo a `bbc6460`, modello `data/models/best_a2c.npz`):
+     - vs `best_a2c` puro: win 5124 / 4557 / 319 draw, **avg diff +1.83** (51.2% win) → il finale esatto aggiunge valore
+       anche sopra una policy mid-game forte;
+     - decision-quality vs `best_a2c`: avg diff +1.91; trump_waste 0.2%, trump_overkill 8.0%, overkill low-lead 6.0%
+       (l'overkill più alto riflette lo stile raw di `best_a2c` ora usato in mid-game, non il solver).
+   - Possibili next step: consolidare con `big` vs `best_a2c`/`heuristic_v1` se si vuole promuovere la variante; valutare se
+     l'overkill mid-game di `best_a2c` vada mitigato (guard/anchor) ora che è la policy dell'ibrido.
 3. **Distinguere memoria pubblica da carte fuori gioco**:
    - aggiungere a `PlayerObservation` un campo esplicito tipo `played_cards_onehot[40]` o `out_of_play_cards_onehot[40]`;
    - definizione: carte finite nelle prese + carte sul tavolo, escludendo la briscola scoperta se è ancora nel mazzo;

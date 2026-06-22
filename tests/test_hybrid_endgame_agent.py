@@ -13,12 +13,14 @@ import random
 from dataclasses import replace
 
 from briscola_ai.ai.agents import (
+    HeuristicAgentV2,
     HybridEndgameAgent,
     build_agent,
     can_solve_endgame_from_observation,
     list_agent_specs,
     reconstruct_endgame_state,
 )
+from briscola_ai.ai.bc_model_agent import BCModelAgent
 from briscola_ai.ai.endgame_solver import solve_endgame
 from briscola_ai.domain.card_id import card_to_id
 from briscola_ai.domain.engine import PlayCardAction, step
@@ -229,3 +231,33 @@ def test_hybrid_endgame_is_registered_in_agent_catalog() -> None:
     """Il nuovo agente deve essere costruibile e visibile nel catalogo server-side."""
     assert "hybrid_endgame" in {spec.name for spec in list_agent_specs()}
     assert isinstance(build_agent("hybrid_endgame"), HybridEndgameAgent)
+
+
+def test_default_hybrid_endgame_keeps_heuristic_v2_fallback() -> None:
+    """`hybrid_endgame` resta invariato (fallback heuristic_v2) per stabilità dei benchmark."""
+    agent = build_agent("hybrid_endgame")
+    assert isinstance(agent, HybridEndgameAgent)
+    assert agent.name == "hybrid_endgame"
+    assert isinstance(agent.fallback, HeuristicAgentV2)
+
+
+def test_hybrid_endgame_best_a2c_variant_uses_model_fallback() -> None:
+    """La variante esplicita usa best_a2c come policy mid-game ed è catalogata a parte."""
+    assert "hybrid_endgame_best_a2c" in {spec.name for spec in list_agent_specs()}
+
+    agent = build_agent("hybrid_endgame_best_a2c")
+    assert isinstance(agent, HybridEndgameAgent)
+    assert agent.name == "hybrid_endgame_best_a2c"
+    assert isinstance(agent.fallback, BCModelAgent)
+
+
+def test_hybrid_endgame_best_a2c_falls_back_to_model_before_endgame() -> None:
+    """A mazzo non vuoto la variante deve delegare al modello best_a2c (non al solver)."""
+    state = new_game_state(2, seed=42)
+    observation = make_player_observation(state, player_index=0)
+
+    agent = build_agent("hybrid_endgame_best_a2c")
+    model_choice = agent.fallback.choose_card_index(observation, rng=random.Random(7))
+    hybrid_choice = agent.choose_card_index(observation, rng=random.Random(7))
+
+    assert hybrid_choice == model_choice
