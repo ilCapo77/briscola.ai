@@ -855,8 +855,17 @@ Piano consigliato (ordine):
    - [x] fallback difensivo su osservazioni fuori scope/incoerenti;
    - [x] test (`tests/test_hybrid_endgame_agent.py`): base punti azzerata, briscola in mano avversaria, secondo di mano,
      fallback pre-endgame/incoerente, partita reale fino a endgame, registrazione catalogo agenti;
-   - [ ] benchmarkare contro `best_a2c` puro su `medium/big` e head-to-head seat-fair;
-   - [ ] misurare anche decision-quality per verificare che non migliori solo il punteggio medio ma anche lo stile.
+   - [x] benchmark seat-fair `medium` (engine `domain`, seed suite versionata `medium` = 5000 seed → 10000 partite,
+     commit `95d546c`, modello `data/models/best_a2c.npz` encoder v2 + overkill_guard on):
+     - vs `heuristic_v2` (proprio fallback): win 5508 / 4236 / 256 draw, **avg diff +4.06** → il solver endgame aggiunge forza reale;
+     - vs `best_a2c` (`bc_model`): win 3598 / 6121 / 281 draw, **avg diff -9.04** → il mid-game `heuristic_v2` resta il collo di bottiglia.
+   - [x] decision-quality `medium` (engine `domain`, stessa seed suite, metriche sul player A = hybrid):
+     - vs `heuristic_v2`: avg diff +4.03; trump_waste 0.1%, trump_overkill 4.1%, overkill low-lead 0.2%;
+     - vs `best_a2c`: avg diff -9.21; trump_waste 0.1%, trump_overkill 3.9%, overkill low-lead 2.0%.
+   - Output JSON locali (gitignored) in `benchmarks/experiments/hybrid_endgame_*medium.json`.
+   - **Conclusione**: il solver endgame migliora nettamente la baseline euristica (+4 vs `heuristic_v2`) ma non basta a colmare
+     il gap mid-game con `best_a2c`. Prossimo passo naturale: rendere il fallback dell'ibrido configurabile e usare `best_a2c`
+     come policy mid-game (atteso: combinare la forza mid-game di `best_a2c` con il finale esatto). `big` solo dopo, se serve consolidare.
 3. **Distinguere memoria pubblica da carte fuori gioco**:
    - aggiungere a `PlayerObservation` un campo esplicito tipo `played_cards_onehot[40]` o `out_of_play_cards_onehot[40]`;
    - definizione: carte finite nelle prese + carte sul tavolo, escludendo la briscola scoperta se è ancora nel mazzo;
