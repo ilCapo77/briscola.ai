@@ -875,8 +875,11 @@ Piano consigliato (ordine):
    - [x] consolidamento `big` (engine `domain`, seed suite `big` via range, 100000 partite seat-fair, ~3m35s):
      - vs `best_a2c` puro: win 51459 / 45431 / 3110 draw, **avg diff +1.90** (51.5% win) → segnale stabile, coerente col `medium`.
    - **Esito**: `hybrid_endgame_best_a2c` è una **candidata chiara** come nuova baseline UI/evaluation (positiva e stabile su 100k).
+   - [x] **promossa a baseline consigliata** per UI/evaluation (label "consigliato" + nota nel `description_it` esposto dal catalogo).
+     `best_a2c` resta disponibile. Il default server (`_DEFAULT_AI_AGENT_NAME`) resta `random` di proposito: cambiarlo a
+     `hybrid_endgame_best_a2c` lo renderebbe dipendente dalla presenza di `best_a2c.npz` → eventuale follow-up opzionale.
    - Possibili next step: eventuale mitigazione dell'overkill mid-game di `best_a2c` (guard/anchor) — non urgente, misura il fallback
-     non il solver; oppure promuovere la variante a baseline e procedere allo step 3.
+     non il solver.
 3. [x] **Distinguere memoria pubblica da carte fuori gioco**:
    - [x] campo `out_of_play_cards_onehot[40]` aggiunto a `PlayerObservation` (default 40 zeri, backward-compatible);
    - [x] definizione: SOLO prese (di tutti) + tavolo; la briscola scoperta NON è fuori gioco finché è pescabile o in mano
