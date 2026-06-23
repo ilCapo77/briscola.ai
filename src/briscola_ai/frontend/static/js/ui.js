@@ -77,7 +77,8 @@ const UI = (() => {
     const _isBestAiModel = (model) => {
         const id = model?.id || '';
         const filename = model?.filename || '';
-        return id === 'best_a2c.npz' || filename === 'best_a2c.npz';
+        // Campione consigliato: best_a2c_v3 (encoder v3). best_a2c (v2) resta selezionabile.
+        return id === 'best_a2c_v3.npz' || filename === 'best_a2c_v3.npz';
     };
 
     const _formatAiModelOptionLabel = (model) => {

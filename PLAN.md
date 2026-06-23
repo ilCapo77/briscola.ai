@@ -987,8 +987,13 @@ Piano consigliato (ordine):
      - con guard ON il candidato azzera l'overkill e resta in parità di forza; senza guard è più forte (+0.63 big) e meno
        aggressivo del best raw.
    - **conclusione**: il candidato è **≥ `best_a2c` su ogni asse** (forza head-to-head, holdout, overkill raw e guarded);
-     soddisfa tutti i criteri di promozione. Promozione consigliata (decisione finale maintainer); se promosso, salvare con
-     `inference_overkill_guard` come il best attuale (deploy guarded) e bump versione.
+     soddisfa tutti i criteri di promozione.
+   - [x] **PROMOSSO** (decisione maintainer: "nuovo id + baseline"): salvato come `data/models/best_a2c_v3.npz` con
+     `inference_overkill_guard=True` (deploy guarded) e metadata catalogo (`label="Best A2C v3 (consigliato)"`, encoder v3).
+     UI: marker "consigliato" spostato da `best_a2c.npz` a `best_a2c_v3.npz` (il vecchio `best_a2c` resta selezionabile).
+     Artefatto locale (gitignored); riproducibile con: dataset teacher 20k `hybrid_endgame_best_a2c` → BC v3 (`bc_v3.npz`,
+     MLP h128, 20 epoche) → A2C v3 `--rollout-engine fast --fast-rollout numba`, mix `best_a2c:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1`,
+     `--bc-anchor bc_v3.npz --bc-anchor-beta 0.01`, 1M, seed 300. Bump versione 0.4.0 → 0.5.0.
 6. **PPO/GAE solo dopo baseline ibrida**:
    - mantenere A2C come default, perché è già integrato con Numba, opponent mix, BC-anchor e evaluation matrix;
    - usare PPO/GAE come spike mirato se A2C v3/endgame-aware si stabilizza ma mostra ancora regressioni;
