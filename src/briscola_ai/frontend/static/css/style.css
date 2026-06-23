@@ -31,6 +31,15 @@ body {
     color: var(--text-color);
     line-height: 1.5;
     min-height: 100vh;
+    user-select: none;
+}
+
+input,
+select,
+textarea,
+.help-text,
+.anti-cheat-body {
+    user-select: text;
 }
 
 .container {
