@@ -957,6 +957,18 @@ Piano consigliato (ordine):
    - criterio non soddisfatto (gate "se positivo → big/promozione"): **stop**, niente `big`, niente promozione. `best_a2c` resta il best.
    - lettura: a parità di teacher/mix/encoder, 10× di scala (200k→1M) sposta pochissimo. Le leve da provare separatamente
      restano (b)/(c)/(d) — una variabile alla volta.
+
+5d. **Leva (d) — opponent-mix con `best_a2c`** (1M fast+numba, seed 200; **nessuna promozione**):
+   - unica variabile cambiata vs 5c: opponent-mix = `best_a2c:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1`
+     (stesso dataset/BC v3, encoder v3, 1M fast+numba). `best_a2c` come opponent `.npz` MLP nel mix è auto-risolto.
+   - head-to-head vs `best_a2c`: medium **+0.13**, big (100k) **-0.17** → **parità** (da -2.14 step 5 / -1.83 in 5c): il gap è chiuso.
+   - holdout vs `heuristic_v1` (range 500000): **+15.78** contro `best_a2c` **+16.56** → ancora sotto il best sull'holdout.
+   - decision-quality vs `heuristic_v1` (medium): avg diff +16.63; trump_waste 0.2%, **trump_overkill 14.1%** (da 8.6% in 5c,
+     vs ~4% di best_a2c), overkill low-lead 8.7%.
+   - **esito**: criteri di promozione non soddisfatti — head-to-head non *positivo* (parità), holdout sotto il best, e overkill
+     molto peggiore. Allenarsi contro `best_a2c` chiude il testa-a-testa ma rende il modello più aggressivo (overkill).
+   - **prossima leva**: (b) teacher `hybrid_endgame` (meno overkill) e/o (c) BC-anchor per controllare l'overkill, mantenendo
+     `best_a2c` nel mix (che ha dato la parità head-to-head). Cambiare una variabile alla volta.
 6. **PPO/GAE solo dopo baseline ibrida**:
    - mantenere A2C come default, perché è già integrato con Numba, opponent mix, BC-anchor e evaluation matrix;
    - usare PPO/GAE come spike mirato se A2C v3/endgame-aware si stabilizza ma mostra ancora regressioni;
