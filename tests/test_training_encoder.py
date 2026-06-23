@@ -162,12 +162,13 @@ def test_encode_fast_observation_matches_player_observation_encoder() -> None:
         current = canonical.current_turn
         obs = make_player_observation(canonical, current)
 
-        for version in ("v1", "v2"):
+        for version in ("v1", "v2", "v3"):
             direct = encode_player_observation_2p(obs, version=version)
             fast_encoded = encode_fast_observation_2p(
                 fast,
                 player_index=current,
                 seen_cards_onehot=obs.seen_cards_onehot,
+                out_of_play_cards_onehot=obs.out_of_play_cards_onehot,
                 version=version,
             )
             assert fast_encoded.action_mask == direct.action_mask

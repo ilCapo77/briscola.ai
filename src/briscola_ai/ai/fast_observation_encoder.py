@@ -9,7 +9,13 @@ di `Card`, `PlayerObservation` e DTO. È il pezzo che permette a un rollout neur
 from __future__ import annotations
 
 from .fast_2p import CARD_POINTS, CARD_STRENGTH, CARD_SUIT, Fast2PState
-from .training.observation_encoder import ACTION_DIM, EncodedObservation, EncoderVersion
+from .training.observation_encoder import (
+    ACTION_DIM,
+    EncodedObservation,
+    EncoderVersion,
+    _compute_v3_extra_features,
+    _onehot_to_id_set,
+)
 
 
 def _seen_cards_onehot_to_floats(raw: tuple[int, ...]) -> list[float]:
@@ -36,6 +42,7 @@ def encode_fast_observation_2p(
     *,
     player_index: int,
     seen_cards_onehot: tuple[int, ...],
+    out_of_play_cards_onehot: tuple[int, ...] | None = None,
     version: EncoderVersion = "v1",
 ) -> EncodedObservation:
     """
@@ -43,6 +50,10 @@ def encode_fast_observation_2p(
 
     `seen_cards_onehot` è fornito dal rollout perché `Fast2PState` non conserva le prese storiche.
     Nel loop fast lo aggiorniamo marcando la briscola iniziale e ogni carta giocata.
+
+    `out_of_play_cards_onehot` serve solo per l'encoder v3 (carte "fuori gioco" = prese + tavolo,
+    senza la briscola scoperta finché è pescabile/in mano). Anch'esso è fornito dal rollout
+    (Fast2PState non tiene la storia); per v1/v2 è ignorato.
     """
     if player_index not in (0, 1):
         raise ValueError(f"player_index fuori range: {player_index}")
@@ -86,10 +97,24 @@ def encode_fast_observation_2p(
 
     if version == "v1":
         return EncodedObservation(features=features, action_mask=mask)
+
+    seen_floats = _seen_cards_onehot_to_floats(seen_cards_onehot)
     if version == "v2":
-        return EncodedObservation(features=features + _seen_cards_onehot_to_floats(seen_cards_onehot), action_mask=mask)
+        return EncodedObservation(features=features + seen_floats, action_mask=mask)
     if version == "v3":
-        # Guard esplicito (domain-first): v3 cambia la semantica delle feature e per ora vive solo
-        # sul path domain. Falliamo invece di ripiegare su v2, che produrrebbe un encoding errato.
-        raise ValueError("Encoder v3 non supportato sul path fast: usa l'engine domain (parità fast/numba TODO).")
+        if out_of_play_cards_onehot is None:
+            raise ValueError("Encoder v3 (fast) richiede `out_of_play_cards_onehot`.")
+        # Riusiamo l'helper del path domain per garantire parità per costruzione del blocco v3.
+        # La definizione "ignota" usa `seen` (esclude la briscola scoperta); le feature
+        # `*_out_of_play` usano `out_of_play`.
+        extra = _compute_v3_extra_features(
+            my_hand_ids=set(int(card_id) for card_id in state.hands[player_index]),
+            seen_ids=_onehot_to_id_set(list(seen_cards_onehot)),
+            out_of_play_ids=_onehot_to_id_set(list(out_of_play_cards_onehot)),
+            trump_suit_index=int(CARD_SUIT[state.trump_card]),
+            table_action_ids=[int(card_id) for card_id in state.table_cards],
+            deck_size=len(state.deck),
+            my_hand_size=len(state.hands[player_index]),
+        )
+        return EncodedObservation(features=features + seen_floats + extra, action_mask=mask)
     raise ValueError(f"Encoder version non supportata: {version!r}")
