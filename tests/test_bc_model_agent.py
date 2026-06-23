@@ -183,13 +183,15 @@ def _write_linear_model(path: Path, *, bias_action: int = 0) -> None:
 
 
 def test_build_agent_caches_bc_model_by_path(tmp_path: Path) -> None:
-    """Lo stesso `.npz` non viene ricaricato: `build_agent` riusa l'istanza dalla cache in-process."""
+    """Lo stesso `.npz` non viene riletto: il modello caricato è condiviso dalla cache in-process."""
     model_path = tmp_path / "m.npz"
     _write_linear_model(model_path)
 
     a1 = build_agent("bc_model", model_path=model_path)
     a2 = build_agent("bc_model", model_path=model_path)
-    assert a1 is a2  # stessa istanza dalla cache (nessun ricaricamento)
+    # La cache è a livello di payload `.npz`: il modello caricato è la stessa istanza riusata
+    # (l'agente wrapper può essere ricreato, ma il file non viene riletto).
+    assert a1.model is a2.model
 
 
 def test_bc_model_cache_invalidated_when_file_changes(tmp_path: Path) -> None:
@@ -204,4 +206,18 @@ def test_bc_model_cache_invalidated_when_file_changes(tmp_path: Path) -> None:
     os.utime(model_path, ns=(bumped, bumped))
 
     a2 = build_agent("bc_model", model_path=model_path)
-    assert a2 is not a1  # file cambiato => ricaricato
+    assert a2.model is not a1.model  # file cambiato => riletto
+
+
+def test_validate_for_ui_shares_cache_with_from_npz(tmp_path: Path) -> None:
+    """La validazione UI e `from_npz` usano lo stesso `load_bc_model_npz` cacheato (no doppia lettura)."""
+    from briscola_ai.ai.bc_model_agent import load_bc_model_npz
+    from briscola_ai.ai.model_catalog import validate_model_compatible_for_ui
+
+    model_path = tmp_path / "m.npz"
+    _write_linear_model(model_path)
+
+    m1 = load_bc_model_npz(model_path)
+    validate_model_compatible_for_ui(model_path)  # non deve rileggere il file
+    agent = build_agent("bc_model", model_path=model_path)
+    assert agent.model is m1  # stesso payload condiviso tra validazione e costruzione agente

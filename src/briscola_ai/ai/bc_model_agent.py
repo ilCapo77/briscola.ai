@@ -275,9 +275,39 @@ def _apply_overkill_guard_second_hand(observation: PlayerObservation, *, chosen_
     return int(min_idx)
 
 
+# Cache in-process dei modelli `.npz` caricati, chiave (path assoluto, mtime_ns, size).
+# `load_bc_model_npz` e' l'unico choke point della lettura `.npz`: lo usano sia `BCModelAgent.from_npz`
+# sia `model_catalog.validate_model_compatible_for_ui` (chiamata a ogni `POST /api/games` con bc_model).
+# Senza cache, ogni creazione partita rileggerebbe il file (anche decine di MB). La chiave su
+# (mtime, size) invalida la cache se il file cambia (es. promozione di un nuovo best). Il modello
+# caricato e' read-only per l'inferenza, quindi condividerlo tra richieste e' sicuro.
+_BC_MODEL_NPZ_CACHE: dict[tuple[str, int, int], LoadedBCModel] = {}
+
+
 def load_bc_model_npz(path: Path) -> LoadedBCModel:
     """
-    Carica un modello BC da `.npz`.
+    Carica un modello BC da `.npz`, riusando la cache in-process quando il file non e' cambiato.
+
+    Argomenti:
+        path: path al file `.npz` salvato da `scripts/train_bc.py`.
+    """
+    try:
+        st = os.stat(path)
+    except OSError:
+        # Path non statabile (es. inesistente): deleghiamo all'uncached, che dara' l'errore appropriato.
+        return _load_bc_model_npz_uncached(path)
+    key = (os.path.abspath(str(path)), st.st_mtime_ns, int(st.st_size))
+    cached = _BC_MODEL_NPZ_CACHE.get(key)
+    if cached is not None:
+        return cached
+    model = _load_bc_model_npz_uncached(path)
+    _BC_MODEL_NPZ_CACHE[key] = model
+    return model
+
+
+def _load_bc_model_npz_uncached(path: Path) -> LoadedBCModel:
+    """
+    Carica un modello BC da `.npz` (senza cache).
 
     Argomenti:
         path: path al file `.npz` salvato da `scripts/train_bc.py`.

@@ -20,7 +20,6 @@ Questo evita che una IA possa barare leggendo l'ordine del mazzo o la mano avver
 
 from __future__ import annotations
 
-import os
 import random
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -913,33 +912,6 @@ def list_agent_specs() -> list[AgentSpec]:
     ]
 
 
-# Cache in-process dei modelli `.npz` caricati, chiave (path assoluto, mtime_ns, size).
-# Caricare un `.npz` (anche decine di MB) a ogni costruzione agente è costoso: il backend
-# costruisce un agente per partita, quindi senza cache ogni nuova partita rileggerebbe il file
-# (e sotto un game-store Redis, dove l'agente va ricostruito per azione, sarebbe ancora peggio).
-# La chiave su (mtime, size) invalida la cache se il file cambia (es. promozione di un nuovo best).
-# `BCModelAgent` è frozen e stateless per l'inferenza (l'rng è passato a ogni chiamata): condividerlo
-# tra partite è sicuro.
-_BC_MODEL_AGENT_CACHE: dict[tuple[str, int, int], BCModelAgent] = {}
-
-
-def _load_bc_model_agent_cached(path: Path) -> BCModelAgent:
-    """Carica un `.npz` come `BCModelAgent` riusando la cache in-process quando possibile."""
-    abspath = os.path.abspath(str(path))
-    try:
-        st = os.stat(abspath)
-    except OSError:
-        # Path non statabile: niente cache, deleghiamo a from_npz (che darà l'errore appropriato).
-        return BCModelAgent.from_npz(path)
-    key = (abspath, st.st_mtime_ns, int(st.st_size))
-    cached = _BC_MODEL_AGENT_CACHE.get(key)
-    if cached is not None:
-        return cached
-    agent = BCModelAgent.from_npz(path)
-    _BC_MODEL_AGENT_CACHE[key] = agent
-    return agent
-
-
 def _load_best_a2c_agent() -> BCModelAgent:
     """
     Carica il modello campione `best_a2c.npz` dalla directory modelli e ne valida la compatibilità.
@@ -958,7 +930,7 @@ def _load_best_a2c_agent() -> BCModelAgent:
             "Puoi cambiare directory impostando `BRISCOLA_MODELS_DIR`."
         ) from exc
 
-    agent = _load_bc_model_agent_cached(path)
+    agent = BCModelAgent.from_npz(path)
     supported = {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)}
     if int(agent.model.feature_dim) not in supported:
         expected = f"{int(FEATURE_DIM_2P_V1)} (v1), {int(FEATURE_DIM_2P_V2)} (v2) or {int(FEATURE_DIM_2P_V3)} (v3)"
@@ -987,7 +959,7 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
     if name == "bc_model":
         if model_path is None:
             raise ValueError("Agente 'bc_model' richiede `model_path` (file .npz)")
-        return _load_bc_model_agent_cached(model_path)
+        return BCModelAgent.from_npz(model_path)
 
     try:
         return _AGENT_BUILDERS[name]()
