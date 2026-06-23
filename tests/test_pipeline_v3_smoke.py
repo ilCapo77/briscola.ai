@@ -148,3 +148,42 @@ def test_train_bc_v3_cli_roundtrip(tmp_path: Path) -> None:
     agent = BCModelAgent.from_npz(out_path)
     assert agent.encoder_version == "v3"
     assert int(agent.model.feature_dim) == 310
+
+
+def test_train_a2c_v3_fast_numba_smoke(tmp_path: Path) -> None:
+    """Smoke: A2C v3 con rollout fast+numba gira e salva un modello v3 (310).
+
+    Esercita end-to-end il collector numba con encoder v3 (costruzione out_of_play nel kernel).
+    """
+    out_path = tmp_path / "a2c_v3_fastnumba.npz"
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_ROOT / "scripts" / "train_a2c.py"),
+            "--encoder-version",
+            "v3",
+            "--rollout-engine",
+            "fast",
+            "--fast-rollout",
+            "numba",
+            "--opponent",
+            "heuristic_v1",
+            "--num-games",
+            "200",
+            "--hidden-dim",
+            "16",
+            "--seed",
+            "0",
+            "--out",
+            str(out_path),
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(_ROOT),
+    )
+    assert result.returncode == 0, f"train_a2c v3 fast/numba fallito:\n{result.stdout}\n{result.stderr}"
+    assert out_path.exists()
+
+    agent = BCModelAgent.from_npz(out_path)
+    assert agent.encoder_version == "v3"
+    assert int(agent.model.feature_dim) == 310

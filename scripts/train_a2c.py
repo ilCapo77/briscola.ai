@@ -444,6 +444,8 @@ def _play_one_fast_game_2p_collect(
     # Storia pubblica per encoder v2: briscola scoperta + ogni carta giocata.
     seen = [0] * 40
     seen[state.trump_card] = 1
+    # Carte fuori gioco per encoder v3: SOLO carte giocate (no briscola iniziale).
+    out_of_play = [0] * 40
 
     safety = 5000
     while not state.game_over and safety > 0:
@@ -460,6 +462,7 @@ def _play_one_fast_game_2p_collect(
             )
             result = step_fast_2p(state, player_index=current, card_index=card_index)
             seen[result.played_card] = 1
+            out_of_play[result.played_card] = 1
 
         if state.game_over:
             break
@@ -470,6 +473,7 @@ def _play_one_fast_game_2p_collect(
                 state,
                 player_index=policy_seat,
                 seen_cards_onehot=tuple(seen),
+                out_of_play_cards_onehot=tuple(out_of_play),
                 version=encoder_version,
             )
         elif fast_encoder == "python":
@@ -477,6 +481,7 @@ def _play_one_fast_game_2p_collect(
                 state,
                 player_index=policy_seat,
                 seen_cards_onehot=tuple(seen),
+                out_of_play_cards_onehot=tuple(out_of_play),
                 version=encoder_version,
             )
         else:
@@ -503,6 +508,7 @@ def _play_one_fast_game_2p_collect(
 
         result = step_fast_2p(state, player_index=policy_seat, card_index=card_index)
         seen[result.played_card] = 1
+        out_of_play[result.played_card] = 1
 
         while not state.game_over and state.current_turn != policy_seat:
             current = state.current_turn
@@ -515,6 +521,7 @@ def _play_one_fast_game_2p_collect(
             )
             result = step_fast_2p(state, player_index=current, card_index=opp_card_index)
             seen[result.played_card] = 1
+            out_of_play[result.played_card] = 1
 
         diff_after = _points_diff_fast(state, policy_seat=policy_seat)
         reward = float(diff_after - diff_before) / 120.0
@@ -929,12 +936,6 @@ def main() -> int:
 
     out_path = Path(args.out)
     encoder_version: EncoderVersion = str(args.encoder_version)
-    # Guard domain-first: l'encoder v3 vive solo sul path domain. Falliamo subito con un messaggio
-    # chiaro invece di lasciare che il rollout fast/numba ripieghi o produca un encoding errato.
-    if encoder_version == "v3" and rollout_engine != "domain":
-        raise ValueError(
-            "`--encoder-version v3` è supportato solo con `--rollout-engine domain` (parità fast/numba TODO)."
-        )
     rng_action = np.random.default_rng(args.seed)
     rng_game = np.random.default_rng(args.seed ^ 0x9E3779B9)
     rng_opponent_select = np.random.default_rng(args.seed ^ 0xA5A5A5A5)

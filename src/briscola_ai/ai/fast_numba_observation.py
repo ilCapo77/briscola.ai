@@ -362,6 +362,7 @@ def _sample_mlp_policy_action_numba(
     trump_card: int,
     policy_seat: int,
     seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
 ) -> int:
     """Esegue encoder + forward MLP + sampling mascherato dentro Numba."""
     feature_dim = w1.shape[0]
@@ -377,8 +378,7 @@ def _sample_mlp_policy_action_numba(
         trump_card,
         policy_seat,
         seen_cards,
-        # out_of_play: placeholder (rollout MLP v1/v2; threading reale e v3 numba: commit successivo)
-        np.zeros(ACTION_DIM, dtype=np.int64),
+        out_of_play_cards,
         feature_dim,
     )
 
@@ -438,6 +438,7 @@ def _record_mlp_policy_decision_numba(
     trump_card: int,
     policy_seat: int,
     seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
     xs: np.ndarray,
     z1s: np.ndarray,
     hs: np.ndarray,
@@ -463,8 +464,7 @@ def _record_mlp_policy_decision_numba(
         trump_card,
         policy_seat,
         seen_cards,
-        # out_of_play: placeholder (rollout MLP v1/v2; threading reale e v3 numba: commit successivo)
-        np.zeros(ACTION_DIM, dtype=np.int64),
+        out_of_play_cards,
         feature_dim,
     )
 
@@ -541,6 +541,7 @@ def _argmax_mlp_policy_action_numba(
     trump_card: int,
     player_index: int,
     seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
 ) -> int:
     """Forward MLP deterministico: ritorna l'action_id valido con logit massimo."""
     feature_dim = w1.shape[0]
@@ -556,8 +557,7 @@ def _argmax_mlp_policy_action_numba(
         trump_card,
         player_index,
         seen_cards,
-        # out_of_play: placeholder (rollout MLP v1/v2; threading reale e v3 numba: commit successivo)
-        np.zeros(ACTION_DIM, dtype=np.int64),
+        out_of_play_cards,
         feature_dim,
     )
 
@@ -739,6 +739,7 @@ def _choose_opponent_card_index_numba(
     current_turn: int,
     trump_card: int,
     seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
 ) -> int:
     """Sceglie l'indice carta per opponent rule-based o MLP `.npz`."""
     if opponent_model_enabled:
@@ -757,6 +758,7 @@ def _choose_opponent_card_index_numba(
             trump_card,
             current_turn,
             seen_cards,
+            out_of_play_cards,
         )
         action_id = _apply_overkill_guard_numba(
             action_id,
@@ -836,6 +838,7 @@ def _play_mlp_policy_game_numba(
     current_turn = 0
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
+    out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
 
     safety = 5000
     while safety > 0:
@@ -860,6 +863,7 @@ def _play_mlp_policy_game_numba(
                     trump_card,
                     policy_seat,
                     seen_cards,
+                    out_of_play_cards,
                 )
             else:
                 action_id = _sample_mlp_policy_action_numba(
@@ -877,6 +881,7 @@ def _play_mlp_policy_game_numba(
                     trump_card,
                     policy_seat,
                     seen_cards,
+                    out_of_play_cards,
                 )
             action_id = _apply_overkill_guard_numba(
                 action_id,
@@ -909,6 +914,7 @@ def _play_mlp_policy_game_numba(
                 current_turn,
                 trump_card,
                 seen_cards,
+                out_of_play_cards,
             )
 
         played_card = hands[current_turn, card_index]
@@ -921,6 +927,7 @@ def _play_mlp_policy_game_numba(
         table_players[table_size] = current_turn
         table_size += 1
         seen_cards[played_card] = 1
+        out_of_play_cards[played_card] = 1
 
         if table_size == 1:
             current_turn = 1 - current_turn
@@ -1198,6 +1205,7 @@ def _play_mlp_policy_quality_game_numba(
     current_turn = 0
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
+    out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
 
     q_second = 0
     q_second_with_win = 0
@@ -1229,6 +1237,7 @@ def _play_mlp_policy_quality_game_numba(
                 trump_card,
                 policy_seat,
                 seen_cards,
+                out_of_play_cards,
             )
             action_id = _apply_overkill_guard_numba(
                 action_id,
@@ -1299,6 +1308,7 @@ def _play_mlp_policy_quality_game_numba(
                 current_turn,
                 trump_card,
                 seen_cards,
+                out_of_play_cards,
             )
 
         played_card = hands[current_turn, card_index]
@@ -1311,6 +1321,7 @@ def _play_mlp_policy_quality_game_numba(
         table_players[table_size] = current_turn
         table_size += 1
         seen_cards[played_card] = 1
+        out_of_play_cards[played_card] = 1
 
         if table_size == 1:
             current_turn = 1 - current_turn
@@ -1564,6 +1575,7 @@ def _apply_numba_card_index(
     trump_card: int,
     card_index: int,
     seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
 ) -> tuple[int, int, int]:
     """Applica una giocata mutando gli array e ritorna `(deck_size, table_size, current_turn)`."""
     played_card = hands[current_turn, card_index]
@@ -1576,6 +1588,7 @@ def _apply_numba_card_index(
     table_players[table_size] = current_turn
     table_size += 1
     seen_cards[played_card] = 1
+    out_of_play_cards[played_card] = 1
 
     if table_size == 1:
         return deck_size, table_size, 1 - current_turn
@@ -1661,6 +1674,7 @@ def _collect_mlp_policy_game_into_numba(
     current_turn = 0
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
+    out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
 
     step_count = 0
     entropy_sum = 0.0
@@ -1687,6 +1701,7 @@ def _collect_mlp_policy_game_into_numba(
                 current_turn,
                 trump_card,
                 seen_cards,
+                out_of_play_cards,
             )
             deck_size, table_size, current_turn = _apply_numba_card_index(
                 hands,
@@ -1701,6 +1716,7 @@ def _collect_mlp_policy_game_into_numba(
                 trump_card,
                 opp_card_index,
                 seen_cards,
+                out_of_play_cards,
             )
 
         if hand_sizes[0] == 0 and hand_sizes[1] == 0:
@@ -1724,6 +1740,7 @@ def _collect_mlp_policy_game_into_numba(
             trump_card,
             policy_seat,
             seen_cards,
+            out_of_play_cards,
             xs,
             z1s,
             hs,
@@ -1762,6 +1779,7 @@ def _collect_mlp_policy_game_into_numba(
             trump_card,
             policy_card_index,
             seen_cards,
+            out_of_play_cards,
         )
 
         while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
@@ -1783,6 +1801,7 @@ def _collect_mlp_policy_game_into_numba(
                 current_turn,
                 trump_card,
                 seen_cards,
+                out_of_play_cards,
             )
             deck_size, table_size, current_turn = _apply_numba_card_index(
                 hands,
@@ -1797,6 +1816,7 @@ def _collect_mlp_policy_game_into_numba(
                 trump_card,
                 opp_card_index,
                 seen_cards,
+                out_of_play_cards,
             )
 
         diff_after = points[policy_seat] - points[1 - policy_seat]
@@ -2157,8 +2177,11 @@ def _prepare_a2c_numba_inputs(
 
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
-        raise ValueError(f"w1 feature_dim={feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}")
+    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        raise ValueError(
+            f"w1 feature_dim={feature_dim}; "
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+        )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
     if w2_arr.shape != (hidden_dim, ACTION_DIM):
@@ -2180,9 +2203,10 @@ def _prepare_a2c_numba_inputs(
         opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
         opp_feature_dim = int(opponent_w1_arr.shape[0])
         opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
             raise ValueError(
-                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
+                f"opponent_w1 feature_dim={opp_feature_dim}; "
+                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
             )
         if opponent_b1_arr.shape != (opp_hidden_dim,):
             raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
@@ -2271,8 +2295,11 @@ def evaluate_mlp_policy_numba_2p(
     b2_arr = _as_float32_vector("b2", b2)
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
-        raise ValueError(f"w1 feature_dim={feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}")
+    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        raise ValueError(
+            f"w1 feature_dim={feature_dim}; "
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+        )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
     if w2_arr.shape != (hidden_dim, ACTION_DIM):
@@ -2292,9 +2319,10 @@ def evaluate_mlp_policy_numba_2p(
         opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
         opp_feature_dim = int(opponent_w1_arr.shape[0])
         opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
             raise ValueError(
-                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
+                f"opponent_w1 feature_dim={opp_feature_dim}; "
+                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
             )
         if opponent_b1_arr.shape != (opp_hidden_dim,):
             raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
@@ -2426,8 +2454,11 @@ def evaluate_mlp_policy_quality_numba_2p(
     b2_arr = _as_float32_vector("b2", b2)
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
-        raise ValueError(f"w1 feature_dim={feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}")
+    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        raise ValueError(
+            f"w1 feature_dim={feature_dim}; "
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+        )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
     if w2_arr.shape != (hidden_dim, ACTION_DIM):
@@ -2447,9 +2478,10 @@ def evaluate_mlp_policy_quality_numba_2p(
         opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
         opp_feature_dim = int(opponent_w1_arr.shape[0])
         opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
             raise ValueError(
-                f"opponent_w1 feature_dim={opp_feature_dim}; atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}"
+                f"opponent_w1 feature_dim={opp_feature_dim}; "
+                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
             )
         if opponent_b1_arr.shape != (opp_hidden_dim,):
             raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
