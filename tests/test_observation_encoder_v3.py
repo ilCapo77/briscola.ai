@@ -202,12 +202,12 @@ def test_fast_v3_requires_out_of_play() -> None:
         encode_fast_observation_2p(state, player_index=0, seen_cards_onehot=seen, version="v3")
 
 
-def test_numba_encoder_still_rejects_v3() -> None:
-    """Guard domain-first ancora attivo sul path numba (parità v3 numba: step successivo)."""
+def test_numba_v3_requires_out_of_play() -> None:
+    """Il numba encoder supporta v3, ma senza `out_of_play` deve fallire chiaro (no fallback)."""
     state = new_fast_2p_state(seed=1)
     seen = tuple(0 for _ in range(40))
 
-    with pytest.raises(ValueError, match="v3 non supportato sul path numba"):
+    with pytest.raises(ValueError, match="richiede `out_of_play_cards_onehot`"):
         encode_fast_observation_numba_2p(state, player_index=0, seen_cards_onehot=seen, version="v3")
 
 

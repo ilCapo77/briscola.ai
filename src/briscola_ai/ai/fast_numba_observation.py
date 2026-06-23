@@ -31,6 +31,7 @@ from .fast_numba import (
 from .training.observation_encoder import (
     FEATURE_DIM_2P_V1,
     FEATURE_DIM_2P_V2,
+    FEATURE_DIM_2P_V3,
     EncodedObservation,
     EncoderVersion,
 )
@@ -173,14 +174,18 @@ def encode_fast_observation_arrays_numba(
     trump_card: int,
     player_index: int,
     seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
     feature_dim: int,
 ) -> tuple[np.ndarray, np.ndarray]:
     """
     Encoda una osservazione fast partendo da array numerici.
 
     Ritorna `(features, action_mask)`:
-    - `features`: float32 con layout v1/v2 canonico;
+    - `features`: float32 con layout v1/v2/v3 canonico;
     - `action_mask`: bool[40], True per le carte presenti nella mano del player.
+
+    `out_of_play_cards` è usato solo da v3 (carte fuori gioco = prese + tavolo); per v1/v2 è ignorato.
+    Il blocco v3 replica `_compute_v3_extra_features` del path domain (parità verificata dai test).
     """
     features = np.zeros(feature_dim, dtype=np.float32)
     action_mask = np.zeros(ACTION_DIM, dtype=np.bool_)
@@ -210,10 +215,53 @@ def encode_fast_observation_arrays_numba(
     features[scalar_offset + 6] = float(points[opp_index]) / 120.0
     features[scalar_offset + 7] = is_second_in_trick
 
-    if feature_dim == int(FEATURE_DIM_2P_V2):
+    if feature_dim == int(FEATURE_DIM_2P_V2) or feature_dim == int(FEATURE_DIM_2P_V3):
         seen_offset = int(FEATURE_DIM_2P_V1)
         for card_id in range(ACTION_DIM):
             features[seen_offset + card_id] = float(seen_cards[card_id])
+
+    if feature_dim == int(FEATURE_DIM_2P_V3):
+        # Blocco v3 (22 feature) — stesso layout/normalizzazioni di `_compute_v3_extra_features`.
+        # "ignota" = non vista e non in mano (action_mask True = carta in mano).
+        v3 = int(FEATURE_DIM_2P_V2)
+        base = trump_suit * 10
+        unknown_trumps = 0
+        for off in range(10):
+            cid = base + off
+            if seen_cards[cid] == 0 and not action_mask[cid]:
+                unknown_trumps += 1
+        features[v3 + 0] = float(unknown_trumps) / 10.0
+        ace_t = base + 0
+        three_t = base + 2
+        king_t = base + 9
+        features[v3 + 1] = 1.0 if (seen_cards[ace_t] == 0 and not action_mask[ace_t]) else 0.0
+        features[v3 + 2] = 1.0 if (seen_cards[three_t] == 0 and not action_mask[three_t]) else 0.0
+        features[v3 + 3] = 1.0 if (seen_cards[king_t] == 0 and not action_mask[king_t]) else 0.0
+
+        for suit_index in range(4):
+            ace_id = suit_index * 10 + 0
+            three_id = suit_index * 10 + 2
+            features[v3 + 4 + suit_index * 3 + 0] = 1.0 if out_of_play_cards[ace_id] == 1 else 0.0
+            features[v3 + 4 + suit_index * 3 + 1] = 1.0 if out_of_play_cards[three_id] == 1 else 0.0
+            load_unknown = 0
+            if seen_cards[ace_id] == 0 and not action_mask[ace_id]:
+                load_unknown += 1
+            if seen_cards[three_id] == 0 and not action_mask[three_id]:
+                load_unknown += 1
+            features[v3 + 4 + suit_index * 3 + 2] = float(load_unknown) / 2.0
+
+        features[v3 + 16] = float(deck_size) / 40.0
+        features[v3 + 17] = float(hand_sizes[player_index]) / 3.0
+        features[v3 + 18] = 1.0 if deck_size == 0 else 0.0
+
+        if table_size > 0:
+            lead_card = table_cards[0]
+            trick_points = 0.0
+            for i in range(table_size):
+                trick_points += float(CARD_POINTS_NUMBA[table_cards[i]])
+            features[v3 + 19] = trick_points / 11.0
+            features[v3 + 20] = float(CARD_STRENGTH_NUMBA[lead_card]) / 10.0
+            features[v3 + 21] = 1.0 if CARD_SUIT_NUMBA[lead_card] == trump_suit else 0.0
 
     return features, action_mask
 
@@ -329,6 +377,8 @@ def _sample_mlp_policy_action_numba(
         trump_card,
         policy_seat,
         seen_cards,
+        # out_of_play: placeholder (rollout MLP v1/v2; threading reale e v3 numba: commit successivo)
+        np.zeros(ACTION_DIM, dtype=np.int64),
         feature_dim,
     )
 
@@ -413,6 +463,8 @@ def _record_mlp_policy_decision_numba(
         trump_card,
         policy_seat,
         seen_cards,
+        # out_of_play: placeholder (rollout MLP v1/v2; threading reale e v3 numba: commit successivo)
+        np.zeros(ACTION_DIM, dtype=np.int64),
         feature_dim,
     )
 
@@ -504,6 +556,8 @@ def _argmax_mlp_policy_action_numba(
         trump_card,
         player_index,
         seen_cards,
+        # out_of_play: placeholder (rollout MLP v1/v2; threading reale e v3 numba: commit successivo)
+        np.zeros(ACTION_DIM, dtype=np.int64),
         feature_dim,
     )
 
@@ -1991,6 +2045,7 @@ def encode_fast_observation_numba_2p(
     *,
     player_index: int,
     seen_cards_onehot: tuple[int, ...],
+    out_of_play_cards_onehot: tuple[int, ...] | None = None,
     version: EncoderVersion = "v1",
 ) -> EncodedObservation:
     """
@@ -1998,6 +2053,8 @@ def encode_fast_observation_numba_2p(
 
     Il wrapper valida input e converte liste Python in array; nel rollout JIT finale useremo
     direttamente `encode_fast_observation_arrays_numba`.
+
+    `out_of_play_cards_onehot` serve solo per v3 (carte fuori gioco); per v1/v2 è ignorato.
     """
     if player_index not in (0, 1):
         raise ValueError(f"player_index fuori range: {player_index}")
@@ -2008,14 +2065,24 @@ def encode_fast_observation_numba_2p(
     elif version == "v2":
         feature_dim = int(FEATURE_DIM_2P_V2)
     elif version == "v3":
-        # Guard esplicito (domain-first): v3 non è ancora portato sul path numba.
-        raise ValueError("Encoder v3 non supportato sul path numba: usa l'engine domain (parità fast/numba TODO).")
+        feature_dim = int(FEATURE_DIM_2P_V3)
+        if out_of_play_cards_onehot is None:
+            raise ValueError("Encoder v3 (numba) richiede `out_of_play_cards_onehot`.")
+        if len(out_of_play_cards_onehot) != ACTION_DIM:
+            raise ValueError(f"out_of_play_cards_onehot len={len(out_of_play_cards_onehot)} (atteso {ACTION_DIM})")
     else:
         raise ValueError(f"Encoder version non supportata: {version!r}")
 
     seen_cards = np.asarray(seen_cards_onehot, dtype=np.int64)
     if not np.all((seen_cards == 0) | (seen_cards == 1)):
         raise ValueError("seen_cards_onehot deve contenere solo 0/1")
+
+    if out_of_play_cards_onehot is None:
+        out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    else:
+        out_of_play_cards = np.asarray(out_of_play_cards_onehot, dtype=np.int64)
+        if not np.all((out_of_play_cards == 0) | (out_of_play_cards == 1)):
+            raise ValueError("out_of_play_cards_onehot deve contenere solo 0/1")
 
     hands, hand_sizes, points, table_cards = _state_to_numba_arrays(state)
     features, action_mask = encode_fast_observation_arrays_numba(
@@ -2029,6 +2096,7 @@ def encode_fast_observation_numba_2p(
         int(state.trump_card),
         int(player_index),
         seen_cards,
+        out_of_play_cards,
         feature_dim,
     )
     return EncodedObservation(features=features.astype(float).tolist(), action_mask=action_mask.astype(bool).tolist())
@@ -2722,6 +2790,8 @@ def warm_up_numba_observation() -> None:
     points = np.asarray([0, 0], dtype=np.int64)
     table_cards = np.full(2, -1, dtype=np.int64)
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    # Warm-up esteso a v3 per compilare anche il blocco aggregato.
     encode_fast_observation_arrays_numba(
         hands,
         hand_sizes,
@@ -2733,7 +2803,8 @@ def warm_up_numba_observation() -> None:
         20,
         0,
         seen_cards,
-        int(FEATURE_DIM_2P_V2),
+        out_of_play_cards,
+        int(FEATURE_DIM_2P_V3),
     )
 
 

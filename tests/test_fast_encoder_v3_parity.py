@@ -13,7 +13,10 @@ from __future__ import annotations
 
 import random
 
+import pytest
+
 from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.fast_numba_observation import encode_fast_observation_numba_2p
 from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.training.observation_encoder import encode_player_observation_2p
 from briscola_ai.domain.card_id import card_to_id
@@ -72,6 +75,31 @@ def test_out_of_play_increment_semantics_matches_canonical() -> None:
     # Garantiamo di aver davvero esercitato i casi interessanti.
     assert saw_partial_table
     assert saw_deck_empty_with_unplayed_trump
+
+
+def test_numba_v3_matches_domain_random_game() -> None:
+    """Parità domain==numba (v3) lungo una partita random; tolleranza per float32 del path numba."""
+    canonical = new_game_state(num_players=2, seed=23)
+    fast = new_fast_2p_state(seed=23)
+    rng = random.Random(5)
+
+    while not canonical.game_over:
+        current = canonical.current_turn
+        obs = make_player_observation(canonical, current)
+        direct = encode_player_observation_2p(obs, version="v3")
+        numba = encode_fast_observation_numba_2p(
+            fast,
+            player_index=current,
+            seen_cards_onehot=obs.seen_cards_onehot,
+            out_of_play_cards_onehot=obs.out_of_play_cards_onehot,
+            version="v3",
+        )
+        assert numba.action_mask == direct.action_mask
+        assert numba.features == pytest.approx(direct.features, abs=1e-5)
+
+        card_index = rng.randrange(len(canonical.players[current].hand))
+        canonical, _ = step(canonical, PlayCardAction(player_index=current, card_index=card_index))
+        step_fast_2p(fast, player_index=current, card_index=card_index)
 
 
 def test_fast_v3_parity_handbuilt_endgame() -> None:
