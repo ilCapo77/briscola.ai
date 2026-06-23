@@ -53,6 +53,11 @@ def ensure_model_available(
     - se esiste ma `sha256` non corrisponde → si riscarica (se c'è `url`), così l'hash funge da
       "pin di versione"; senza `url` si segnala l'incoerenza;
     - download con `timeout`, verifica `sha256`, scrittura atomica (tmp nella stessa dir + `os.replace`).
+
+    Limite noto: se un file con sha errato è già presente e il re-download non è possibile (nessun
+    `url` o download fallito), il file stale NON viene rimosso e ritorniamo `(False, ...)`. I layer
+    che si basano sulla sola esistenza del file (catalogo UI, `/version`) potrebbero quindi ancora
+    esporlo: l'integrità a serve-time non è garantita da questa funzione.
     """
     target = models_dir / model_id
 

@@ -122,3 +122,38 @@ def test_disallowed_url_scheme_is_rejected(tmp_path: Path) -> None:
     ok, msg = ensure_model_available(models_dir=models_dir, model_id="m.npz", url="ftp://example.com/m.npz")
     assert ok is False
     assert "schema URL non ammesso" in msg
+
+
+def test_download_passes_timeout_and_accepts_https(monkeypatch, tmp_path: Path) -> None:
+    """Il download passa il `timeout` a urlopen; lo schema https è ammesso (senza rete via monkeypatch)."""
+    import urllib.request
+
+    captured: dict[str, object] = {}
+
+    class _FakeResp:
+        def __enter__(self) -> "_FakeResp":
+            return self
+
+        def __exit__(self, *exc: object) -> bool:
+            return False
+
+        def read(self) -> bytes:
+            return b"downloaded-bytes"
+
+    def _fake_urlopen(url: object, timeout: object = None):  # type: ignore[no-untyped-def]
+        captured["url"] = url
+        captured["timeout"] = timeout
+        return _FakeResp()
+
+    monkeypatch.setattr(urllib.request, "urlopen", _fake_urlopen)
+
+    models_dir = tmp_path / "models"
+    ok, _ = ensure_model_available(
+        models_dir=models_dir,
+        model_id="m.npz",
+        url="https://example.com/best_a2c_v3.npz",
+        timeout=12.5,
+    )
+    assert ok is True
+    assert captured["timeout"] == 12.5
+    assert (models_dir / "m.npz").read_bytes() == b"downloaded-bytes"
