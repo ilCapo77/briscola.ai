@@ -130,6 +130,34 @@ async def favicon():
     return FileResponse(os.path.join(static_dir, "favicon.ico"))
 
 
+@app.get("/health", include_in_schema=False)
+async def health():
+    """Liveness check minimale (per piattaforme cloud / load balancer)."""
+    return {"status": "ok"}
+
+
+@app.get("/version")
+async def version_info():
+    """
+    Diagnostica deploy: versioni e presenza del modello consigliato.
+
+    Utile in cloud per verificare che `best_a2c_v3.npz` sia risolvibile nella directory modelli
+    effettiva (che dipende da `BRISCOLA_MODELS_DIR` o dalla working directory).
+    """
+    from .ai.model_catalog import get_models_dir_from_env
+    from .versioning import get_rules_version
+
+    models_dir = get_models_dir_from_env()
+    recommended_model = "best_a2c_v3.npz"
+    return {
+        "code_version": get_code_version(),
+        "rules_version": get_rules_version(),
+        "models_dir": str(models_dir),
+        "recommended_model": recommended_model,
+        "recommended_model_present": (models_dir / recommended_model).exists(),
+    }
+
+
 def run_server(host="0.0.0.0", port=8000, reload=False):
     """Avvia il server con uvicorn"""
     # Parsing argomenti CLI:

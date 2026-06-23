@@ -820,3 +820,24 @@ def test_create_game_allows_selecting_ai_agent_and_ai_turn_uses_observation(monk
             await server._execute_ai_turn_locked(game_id, human_player_index=0)
 
     asyncio.run(_run_ai_once())
+
+
+def test_health_endpoint() -> None:
+    """`/health` deve rispondere 200 con stato ok (liveness per cloud/load balancer)."""
+    with TestClient(main_app) as client:
+        resp = client.get("/health")
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok"}
+
+
+def test_version_endpoint_reports_versions_and_model_presence() -> None:
+    """`/version` espone code/rules version e diagnostica presenza del modello consigliato."""
+    with TestClient(main_app) as client:
+        resp = client.get("/version")
+        assert resp.status_code == 200
+        body = resp.json()
+        assert "code_version" in body
+        assert "rules_version" in body
+        assert body["recommended_model"] == "best_a2c_v3.npz"
+        assert isinstance(body["recommended_model_present"], bool)
+        assert "models_dir" in body

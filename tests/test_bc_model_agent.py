@@ -9,6 +9,7 @@ Obiettivo didattico:
 
 from __future__ import annotations
 
+import os
 import random
 from pathlib import Path
 
@@ -170,3 +171,37 @@ def test_build_agent_best_a2c_errors_if_missing(monkeypatch: pytest.MonkeyPatch,
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
     with pytest.raises(ValueError, match=r"best_a2c\.npz"):
         build_agent("best_a2c")
+
+
+def _write_linear_model(path: Path, *, bias_action: int = 0) -> None:
+    """Salva un modello lineare minimale (feature_dim v1) per test di cache."""
+    d = int(FEATURE_DIM_2P_V1)
+    w = np.zeros((d, 40), dtype=np.float32)
+    b = np.zeros((40,), dtype=np.float32)
+    b[bias_action] = 1.0
+    np.savez(path, w=w, b=b, metadata_json=f'{{"format":"linear_softmax_bc_v1","feature_dim":{d}}}')
+
+
+def test_build_agent_caches_bc_model_by_path(tmp_path: Path) -> None:
+    """Lo stesso `.npz` non viene ricaricato: `build_agent` riusa l'istanza dalla cache in-process."""
+    model_path = tmp_path / "m.npz"
+    _write_linear_model(model_path)
+
+    a1 = build_agent("bc_model", model_path=model_path)
+    a2 = build_agent("bc_model", model_path=model_path)
+    assert a1 is a2  # stessa istanza dalla cache (nessun ricaricamento)
+
+
+def test_bc_model_cache_invalidated_when_file_changes(tmp_path: Path) -> None:
+    """Se il file cambia (mtime/size), la cache si invalida e viene ricaricato."""
+    model_path = tmp_path / "m.npz"
+    _write_linear_model(model_path)
+    a1 = build_agent("bc_model", model_path=model_path)
+
+    # Forziamo un mtime diverso (simula una nuova promozione/sovrascrittura del modello).
+    st = os.stat(model_path)
+    bumped = st.st_mtime_ns + 1_000_000_000
+    os.utime(model_path, ns=(bumped, bumped))
+
+    a2 = build_agent("bc_model", model_path=model_path)
+    assert a2 is not a1  # file cambiato => ricaricato
