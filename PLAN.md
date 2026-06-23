@@ -978,9 +978,17 @@ Piano consigliato (ordine):
    - decision-quality vs `heuristic_v1` (medium): avg diff +17.27; trump_waste 0.1%, trump_overkill **11.4%** (da 14.1% in 5d),
      overkill **low-lead 1.6%** (da 8.7%): l'overkill "cattivo" crolla; il generico resta sopra il best guarded (~4%).
    - **esito**: primo v3 a battere `best_a2c` su entrambi i criteri di forza (head-to-head + holdout); l'anchor riduce
-     materialmente l'overkill low-lead mantenendo/superando la parità. Resta aperto solo il confronto overkill "raw" generico
-     (11.4% del candidato senza guard vs ~4% di best_a2c CON guard a inference). Promozione = decisione maintainer
-     (eventualmente abilitando l'inference-overkill-guard sul candidato, o un beta anchor più alto come 5f).
+     materialmente l'overkill low-lead mantenendo/superando la parità.
+   - **confronto overkill equo** (il dubbio "11.4% vs 4%" era raw-vs-guarded, impari): forzando lo stesso stato del guard
+     (copie temporanee con `inference_overkill_guard` invertito):
+     - **raw-vs-raw** (guard OFF su entrambi): candidato trump_overkill **11.4%** / low-lead **1.6%** vs `best_a2c` raw
+       **12.7%** / low-lead **4.8%** → il candidato ha overkill **più basso** del best;
+     - **guarded-vs-guarded** (guard ON su entrambi): candidato overkill **0.0%**; head-to-head medium **+0.09** (parità);
+     - con guard ON il candidato azzera l'overkill e resta in parità di forza; senza guard è più forte (+0.63 big) e meno
+       aggressivo del best raw.
+   - **conclusione**: il candidato è **≥ `best_a2c` su ogni asse** (forza head-to-head, holdout, overkill raw e guarded);
+     soddisfa tutti i criteri di promozione. Promozione consigliata (decisione finale maintainer); se promosso, salvare con
+     `inference_overkill_guard` come il best attuale (deploy guarded) e bump versione.
 6. **PPO/GAE solo dopo baseline ibrida**:
    - mantenere A2C come default, perché è già integrato con Numba, opponent mix, BC-anchor e evaluation matrix;
    - usare PPO/GAE come spike mirato se A2C v3/endgame-aware si stabilizza ma mostra ancora regressioni;
