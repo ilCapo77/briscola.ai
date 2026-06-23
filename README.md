@@ -10,853 +10,283 @@ La Briscola è un ottimo “laboratorio” perché obbliga a mettere insieme tut
 - una **UI** che rende leggibile la sequenza delle mani;
 - una **pipeline dati** per arrivare a dataset, baseline e training.
 
-Obiettivo finale: arrivare a un’IA (rete neurale) che impari a giocare in modo riproducibile, misurabile e spiegabile.
+Obiettivo: arrivare a un’IA (rete neurale) che impari a giocare in modo riproducibile, misurabile e spiegabile.
+
+> Questo README spiega *come* usare e *perché* è fatto così (parte didattica). Per lo stato corrente e le prossime
+> azioni vedi `PLAN.md`; il dettaglio operativo dei comandi è in `--help` di ogni script.
 
 ## Funzionalità
 
-- Implementazione completa delle regole della Briscola
-- Motore (`domain/`) con supporto **2 giocatori** e **4 giocatori** (a squadre)
-- Interfaccia utente web
-- Aggiornamenti in tempo reale via WebSocket
-- IA selezionabile (baseline + modelli locali) con modello "standard" server‑driven:
-  - Agenti baseline: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2` (metadati e descrizioni in italiano esposti dal backend)
-  - Modelli locali: `bc_model` carica un file `.npz` scelto dalla UI (catalogo server-side, no path arbitrari dal browser)
-  - Il backend avanza automaticamente la partita quando è il turno dell'IA
-  - Il backend non introduce delay di presentazione (niente `asyncio.sleep()` per animazioni)
-  - Il frontend controlla solo la presentazione (hold/animazioni) degli update ricevuti via WS
-- Base per raccolta dati (roadmap ML in `PLAN.md`)
+- Regole complete della Briscola; motore (`domain/`) con **2 giocatori** e **4 giocatori** (a squadre).
+- Interfaccia web con aggiornamenti in tempo reale via WebSocket.
+- IA selezionabile, server‑driven (il backend avanza la partita quando tocca all’IA):
+  - baseline: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`;
+  - ibridi endgame: `hybrid_endgame`, `hybrid_endgame_best_a2c` (euristica/modello + solver esatto nel finale);
+  - modelli locali `bc_model`: file `.npz` scelto dalla UI da un catalogo server‑side (no path arbitrari dal browser).
+- Encoder osservazione **v1 / v2 / v3** (vedi sotto) e fast path numerico Python/Numba per training ed evaluation veloci.
+- Pipeline dati completa: event log SQLite → export JSONL → self‑play → valutazione offline → training BC/RL.
 
 Nota didattica:
-- la UI attuale è pensata e testata soprattutto in **modalità 2 giocatori** (è la modalità “principale”);
-- il 4‑player è supportato dal motore e usato come supporto/regressione, ma **non è ancora pienamente supportato dal frontend**.
+- la UI è pensata e testata soprattutto in **2 giocatori** (modalità principale);
+- il 4‑player è supportato dal motore (usato per regressione) ma **non è ancora pienamente coperto dal frontend**.
 
 ## Quick start
 
-Questo progetto usa [uv](https://github.com/astral-sh/uv).
+Questo progetto usa [uv](https://github.com/astral-sh/uv). Requisiti: Python **3.14** e `uv`.
 
-Requisiti:
-- Python **3.14**
-- `uv`
-
-Comandi tipici:
-- Crea env: `uv venv -p python3.14`
-- Installa (editable): `uv pip install -e .`
-- Dev deps: `uv pip install -e ".[dev]"`
-- Avvia server: `briscola-server --reload`
-- Apri UI: `http://localhost:8000`
+```bash
+uv venv -p python3.14
+uv pip install -e ".[dev]"   # runtime + strumenti dev
+briscola-server --reload     # UI su http://localhost:8000
+```
 
 ## Come giocare
 
-1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita”
-   - La UI mostra una breve descrizione dell’IA selezionata (dai metadati del backend).
-2. Clicca su una carta in mano per giocarla
-3. L'IA risponderà automaticamente al suo turno
+1. Inserisci il tuo nome, scegli l’avversario (IA) e premi “Avvia partita” (la UI mostra una descrizione dell’IA dai metadati del backend).
+2. Clicca una carta in mano per giocarla.
+3. L’IA risponde automaticamente al suo turno.
 
-Nota: la UI attuale avvia una partita **2-player**. Per testare flussi 4-player (senza UI) usa gli script headless o le API.
+La UI avvia partite **2‑player**. Per flussi 4‑player (senza UI) usa gli script headless o le API.
 
 ### Giocare contro un modello locale (`.npz`)
 
-Se hai addestrato un modello (BC / PG / A2C) e lo hai salvato in un file `.npz`, puoi usarlo come avversario nella UI:
+Se hai addestrato un modello (BC / PG / A2C) salvato in `.npz`, puoi usarlo come avversario:
 
-1. Metti il file in una directory “whitelist” lato server:
-   - consigliato: `./data/models/` (creala se non esiste)
-   - alternativa: imposta `BRISCOLA_MODELS_DIR=/path/alla/tua/cartella`
-2. (Ri)avvia il server: `briscola-server --reload`
-3. Nella UI:
-   - scegli **“Modello locale (.npz)”** come avversario;
-   - seleziona il modello dal dropdown “Modello (file .npz)”.
+1. Metti il file in una directory whitelist lato server: consigliato `./data/models/` (oppure imposta `BRISCOLA_MODELS_DIR`).
+2. (Ri)avvia il server.
+3. Nella UI scegli **“Modello locale (.npz)”** e seleziona il file dal dropdown.
 
-Nota UI:
-- il dropdown mostra `metadata_json.label` e la descrizione mostra `metadata_json.description_it` (se presenti nel file `.npz`);
-- i trainer del progetto (`scripts/train_*.py`) salvano questi campi in automatico.
-- se un file `.npz` non è compatibile (chiavi mancanti o `feature_dim` diverso), il backend lo segnala nel catalogo e la UI ne disabilita la selezione.
+Note:
+- il dropdown mostra `metadata_json.label`/`description_it` del `.npz` (i trainer del progetto li salvano in automatico);
+- un `.npz` incompatibile (chiavi mancanti o `feature_dim` non supportata) viene segnalato dal catalogo e disabilitato nella UI;
+- **sicurezza**: il browser invia solo un `ai_model_id` (path relativo) tra quelli esposti da `GET /api/ai/models`; il backend rifiuta path traversal e carica solo dentro `BRISCOLA_MODELS_DIR`.
 
-Nota sicurezza:
-- il browser non invia path arbitrari: invia solo un `ai_model_id` (path relativo) scelto tra quelli esposti da `GET /api/ai/models`;
-- il backend rifiuta path traversal (`..`) e carica modelli solo dentro `BRISCOLA_MODELS_DIR`.
+## Approccio step‑by‑step (didattico)
 
-## Approccio step-by-step (didattico)
+L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 
-L'idea è costruire una pipeline ML “dal basso”, in modo verificabile:
-
-1. **Dominio/testabile**: regole e transizioni pure in `src/briscola_ai/domain/` + test su invarianti e casi limite.
+1. **Dominio testabile**: regole e transizioni pure in `domain/` + test su invarianti e casi limite.
 2. **Backend/UI**: FastAPI + WS per far giocare umani e rendere osservabile lo stato.
-3. **Raccolta dati**: event log SQLite (append-only) per debug e dataset.
-4. **Export dataset**: conversione SQLite → JSONL con schema versionato.
-5. **Self-play**: generazione rapida di partite dal dominio per produrre molti dati.
-6. **Valutazione**: match offline riproducibili (win-rate/punti medi) per confrontare agenti.
-7. **Training**: imitation/RL quando i contratti e la pipeline sono stabili.
+3. **Raccolta dati**: event log SQLite (append‑only).
+4. **Export dataset**: SQLite → JSONL con schema versionato.
+5. **Self‑play**: generazione rapida di partite dal dominio.
+6. **Valutazione**: match offline riproducibili (win‑rate/punti medi).
+7. **Training**: imitation/RL quando contratti e pipeline sono stabili.
 
 ## Struttura del progetto
 
-- `src/briscola_ai/domain/` – dominio canonico: **regole e stato** (puro, testabile)
-  - `models.py` – modelli `Card`, `Suit`, `Rank`
-  - `state.py` – stato completo (`GameState`)
-  - `engine.py` – transizione `step(state, action)` (deterministica dato seed/stato)
-  - `rules.py` – regole isolate (es. vincitore della mano)
-- `src/briscola_ai/backend/` – adattatore HTTP/WS (FastAPI)
-  - `dto.py` – DTO Pydantic v2 (contratto dati)
-  - `server.py` – endpoint REST + WebSocket, gestione partite in memoria
-- `src/briscola_ai/frontend/static/` – UI (HTML/CSS/JS)
-  - `assets/cards/` – immagini carte (front `{suit}_{rank}.png`, back `card_back.png`)
-- `src/briscola_ai/ai/` – baseline AI (in evoluzione)
-- `tests/` – test unitari + integrazione API/WS (pytest)
-- `scripts/` – utilità (simulazioni headless)
-  - `scripts/simulate_games.py` – simulazioni senza UI
-  - `scripts/self_play_to_db.py` – self-play dal dominio verso SQLite (no HTTP)
-  - `scripts/fast_self_play.py` – self-play veloce 2-player summary-only (no DB/event log completo)
-  - `scripts/export_dataset.py` – export SQLite → JSONL
-  - `scripts/evaluate_agents.py` – valutazione offline agenti (dominio di default, fast path sperimentale)
-  - `scripts/benchmark_perf.py` – benchmark locale throughput simulazioni/training
-- `PLAN.md` – roadmap didattica (fonte di verità su cosa fare dopo)
+- `src/briscola_ai/domain/` – dominio canonico, puro e testabile
+  - `models.py` (`Card`/`Suit`/`Rank`), `state.py` (`GameState`), `engine.py` (`step(state, action)`), `rules.py`, `observation.py`
+- `src/briscola_ai/backend/` – adattatore HTTP/WS (FastAPI): `dto.py` (Pydantic v2), `server.py`, `event_log.py`, `observation_builder.py`
+- `src/briscola_ai/ai/`
+  - `agents.py` – baseline, ibridi endgame, factory e catalogo agenti
+  - `endgame_solver.py` – solver esatto del finale 2‑player
+  - `training/observation_encoder.py` – encoder v1/v2/v3
+  - `fast_*` – fast path 2‑player (Python/Numba) per throughput, tenuto coerente col dominio dai test di parità
+- `src/briscola_ai/frontend/static/` – UI (HTML/CSS/JS), immagini carte in `assets/cards/`
+- `tests/` – unit + integrazione API/WS (pytest)
+- `scripts/` – simulazione, self‑play, export, training, evaluation, benchmark
+- `PLAN.md` – stato corrente e prossime azioni (fonte di verità). `data/` e `benchmarks/` sono artefatti locali (gitignored).
 
 ## Backend (FastAPI + WebSocket)
 
-Il sistema usa un'architettura ibrida HTTP + WebSocket:
+Architettura ibrida HTTP + WebSocket.
 
-### Perché ibrida?
-
-**Perché non solo REST (polling)?**
-- Il polling richiede chiamate continue al server → inefficiente e ad alta latenza
-- Non adatto a un gioco in tempo reale dove lo stato cambia frequentemente
-
-**Perché non solo WebSocket?**
-- Le azioni del giocatore (giocare carta, creare partita) sono operazioni puntuali
-- REST offre semantica chiara (POST = azione, GET = lettura)
-- Più facile da testare e debuggare con strumenti standard (curl, Postman)
-- Gestione errori più semplice (status code HTTP)
-
-**Scelta ibrida:**
-- **REST** per le *azioni* del client → semantica chiara, stateless, facile debug
-- **WebSocket** per gli *aggiornamenti* dal server → tempo reale, push, efficiente
+**Perché ibrida?** Il polling REST è inefficiente e ad alta latenza per un gioco real‑time; il solo WebSocket complica azioni puntuali, testing e gestione errori. Quindi:
+- **REST** per le *azioni* del client (semantica chiara, stateless, debug facile);
+- **WebSocket** per gli *aggiornamenti* dal server (push in tempo reale).
 
 ### Endpoint HTTP (REST)
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
 | `POST` | `/api/games` | Crea una nuova partita |
-| `GET` | `/api/games/{id}` | Ottiene lo stato completo della partita (DTO `type: "game_state"`, per debug/spettatori) |
-| `GET` | `/api/games/{id}?player_index={i}` | Ottiene la vista del giocatore `i` (stesso formato `type: "observation"` del WebSocket) |
+| `GET` | `/api/games/{id}` | Stato completo (DTO `type: "game_state"`, debug/spettatori) |
+| `GET` | `/api/games/{id}?player_index={i}` | Vista del giocatore `i` (`type: "observation"`) |
 | `POST` | `/api/games/{id}/actions` | Il giocatore gioca una carta |
-| `GET` | `/api/games/{id}/result` | Ottiene il risultato finale |
+| `GET` | `/api/games/{id}/result` | Risultato finale |
 
 ### WebSocket (tempo reale)
 
-Connessione: `ws://host/api/ws/{game_id}/{player_index}`
+Connessione: `ws://host/api/ws/{game_id}/{player_index}`. **Tutti i messaggi includono un campo `type`**:
 
-**Messaggi dal server:**
-
-Nota importante: **tutti i messaggi WebSocket includono un campo `type`**.
-
-- Lo **snapshot di gioco** (“observation”) ha `type: "observation"` e contiene campi come `my_hand`, `my_turn`, `table_cards`, ecc.
-- I messaggi evento (es. reveal IA, risultato mano, keepalive) hanno anch'essi `type`.
-
-| Messaggio | Formato | Descrizione |
+| Messaggio | `type` | Descrizione |
 |----------|---------|-------------|
-| Snapshot (observation) | `{ "type": "observation", ... }` | Stato completo della partita per il giocatore indicizzato dal WS |
-| Reveal IA | `{ "type": "ai_card_reveal", ... }` | L'IA mostra quale carta sta per giocare |
-| Risultato mano | `{ "type": "trick_result", ... }` | Risultato della mano (carte, vincitore, punti) |
-| Keepalive | `{ "type": "pong" }` | Risposta ai ping del client (non è uno snapshot) |
+| Snapshot (observation) | `observation` | Stato della partita per il giocatore del WS (`my_hand`, `my_turn`, `table_cards`, …) |
+| Reveal IA | `ai_card_reveal` | L’IA mostra la carta che sta per giocare |
+| Risultato mano | `trick_result` | Carte, vincitore, punti della mano |
+| Keepalive | `pong` | Risposta ai ping del client |
 
-Nota: gli snapshot includono `server_version` (intero monotono) come metadato debug‑friendly (incrementato ad ogni azione, umana o IA) per capire se lo stato sta avanzando e per diagnosticare problemi di ordering/reconnect.
+Gli snapshot includono `server_version` (intero monotono, incrementato a ogni azione) per diagnosticare ordering/reconnect. Regola client: `type === "observation"` → snapshot, altrimenti evento.
 
-Regola pratica lato client:
-- `payload.type === "observation"` → snapshot
-- altrimenti → messaggio evento
-
-### Flusso di gioco tipico
+### Flusso di gioco e modello server‑driven
 
 ```
-┌─────────────┐                              ┌─────────────┐
-│   Frontend  │                              │   Backend   │
-└──────┬──────┘                              └──────┬──────┘
-       │  POST /api/games                           │
-       │ ──────────────────────────────────────────>│
-       │                              game_id       │
-       │ <──────────────────────────────────────────│
-       │                                            │
-       │  WS connect /api/ws/{id}/0                 │
-       │ ──────────────────────────────────────────>│
-       │                              snapshot (WS) │
-       │ <──────────────────────────────────────────│
-       │                                            │
-       │  POST /api/games/{id}/actions (gioca carta)│
-       │ ──────────────────────────────────────────>│
-       │                              snapshot (WS) │
-       │ <──────────────────────────────────────────│
-       │                                            │
-       │                       ai_card_reveal (WS)  │
-       │ <──────────────────────────────────────────│
-       │                       trick_result (WS)    │
-       │ <──────────────────────────────────────────│
-       │                              snapshot (WS) │
-       │ <──────────────────────────────────────────│
-       │                                            │
+POST /api/games            -> game_id
+WS connect /api/ws/{id}/0  -> snapshot
+POST .../actions (gioca)   -> snapshot
+                           -> ai_card_reveal -> trick_result -> snapshot
 ```
 
-### Modello server‑driven per l'IA (scelta attuale)
-
-Il backend avanza automaticamente la partita quando è il turno dell'IA (pattern standard “server‑authoritative”):
-
-1. Il giocatore gioca → backend aggiorna stato → frontend riceve update
-2. Backend vede che tocca all'IA e gioca automaticamente:
-   - invia `ai_card_reveal`
-   - invia `trick_result` (quando la mano si completa)
-   - invia lo snapshot aggiornato
-3. Frontend gestisce la presentazione:
-   - mette in coda gli eventi ricevuti via WS
-   - applica gli snapshot solo dopo gli hold, per mostrare in modo leggibile: carta 1 → carta 2 → risultato
-
-Questa scelta mantiene separata la **logica di presentazione** (frontend) dalla **logica di gioco** (backend), evitando al contempo che la UI debba “pilotare” il dominio con chiamate dedicate.
+Il backend è “server‑authoritative”: dopo la mossa umana, se tocca all’IA gioca da solo ed emette `ai_card_reveal` → `trick_result` → snapshot. Il frontend gestisce solo la **presentazione** (mette in coda gli eventi e applica gli snapshot dopo gli hold), così la **logica di gioco** (backend) resta separata dalla **logica di presentazione** (frontend). Il backend non introduce delay di animazione (niente `asyncio.sleep()`).
 
 ## Frontend (UI web)
 
-### Smoke test UI (manuale)
+**Smoke test manuale** (2–3 min): avvia il server, apri `http://localhost:8000` con la Console DevTools aperta, gioca 3 mani complete e verifica che la sequenza sia sempre **reveal → seconda carta → risultato**, senza errori in console, freeze o carte duplicate sul tavolo.
 
-Obiettivo: una verifica rapida (2–3 minuti) per capire subito se una modifica ha rotto il flusso principale della UI.
-
-Setup:
-- Avvia server: `briscola-server --reload`
-- Apri UI: `http://localhost:8000`
-- Apri DevTools → tab **Console** (lascia aperto durante la partita)
-
-Checklist:
-1. Avvia una partita **2-player** inserendo un nome giocatore
-2. Gioca **3 mani complete** (tu giochi → IA gioca → appare il risultato della mano)
-3. Verifica che la sequenza visiva sia sempre: **reveal** → **seconda carta** → **risultato della mano**
-4. (Opzionale) Continua fino a fine partita e verifica che appaia **Partita terminata** + risultato finale
-
-Expected:
-- Nessun errore in console (ok log informativi; no eccezioni uncaught)
-- Nessun “freeze”: la UI resta interattiva e le carte non scompaiono in modo incoerente
-- Nessuna duplicazione sul tavolo (es. due carte attribuite allo stesso player nella stessa mano)
-
-### Debug UI (quando qualcosa “si blocca”)
-
-Se noti comportamenti strani (carte che spariscono, sequenza eventi incoerente, UI non cliccabile):
-
-- Apri DevTools → tab **Console** e copia eventuali warning/error (in particolare su `observation` e `server_version`).
-- Apri DevTools → tab **Network** → filtro **WS** e verifica:
-  - che la connessione a `/api/ws/{game_id}/{player_index}` resti attiva
-  - che arrivino messaggi con `type: "observation"` e (se presenti) eventi `ai_card_reveal` / `trick_result`
-- Controlla lo stato connessione in alto a destra:
-  - “Riconnessione…” indica che la UI sta facendo retry con backoff.
-- Modalità debug senza WebSocket (polling):
-  - apri la UI con `?polling=1` (es. `http://localhost:8000/?polling=1`)
-  - utile per capire se un bug dipende dal WS/reconnect o dalla logica UI.
+**Debug** quando “si blocca”: controlla la Console (warning su `observation`/`server_version`) e la tab Network → filtro **WS** (connessione attiva, messaggi `observation`/`ai_card_reveal`/`trick_result`). Modalità senza WebSocket (polling) per isolare i bug: apri `http://localhost:8000/?polling=1`.
 
 ## Sviluppo (test, lint, typecheck)
 
-Con il virtual environment attivo e le dipendenze dev installate (`uv pip install -e ".[dev]"`):
+Con le dev deps installate (`uv pip install -e ".[dev]"`):
 
-- Test: `pytest`
-- Coverage: `pytest --cov=briscola_ai --cov-report=term-missing`
-- Badge coverage (manuale): aggiorna la percentuale nel link in cima a questo README (Shields.io).
-- Lint: `ruff check src tests scripts`
-- Format: `ruff format src tests scripts`
-- Typecheck: `mypy src`
-
-## AI & ML (pipeline)
-
-### Event log (SQLite “da laboratorio”)
-
-Quando avvii il server con lo script `briscola-server`, per default viene scritto un event log su:
-- `./data/briscola_events.sqlite3`
-  - Nota: `data/` e i file `*.sqlite3*` sono ignorati da git (sono output runtime, non sorgenti).
-
-Per cambiare percorso (o disabilitare) puoi usare:
-- CLI: `briscola-server --event-db ./data/mio_log.sqlite3` oppure `briscola-server --event-db ''`
-- Env: `BRISCOLA_EVENT_DB_PATH=./data/mio_log.sqlite3 briscola-server`
-
-Per cambiare modalità di logging (consigliato `dataset` per raccolta umani):
-- CLI: `briscola-server --event-log-mode dataset`
-- Env: `BRISCOLA_EVENT_LOG_MODE=dataset briscola-server`
-
-Metadati salvati per partita:
-- `seed`
-- `code_version` (override possibile con `BRISCOLA_CODE_VERSION`)
-- `rules_version` (versione semantica del dominio)
-
-#### Modalità logging: `debug` vs `dataset` (raccolta dati umani)
-
-Per default il backend logga in modalità `debug` (completa, utile per troubleshooting).
-Per raccogliere partite giocate da umani e tenere il DB *piccolo*, usa:
-
-- `BRISCOLA_EVENT_LOG_MODE=dataset briscola-server`
-
-In modalità `dataset`:
-- il backend **non** salva `observation_sent` (che è il payload più grande e ridondante);
-- salva invece un evento `human_action` *self-contained* (observation → action → reward/done → next_observation);
-- salva un marker `game_finished` quando `game_over=true` (utile per esportare solo partite complete);
-- **non** salva `player_names` nel DB (privacy/igiene dati);
-- la UI invia un `client_id` pseudonimo (UUID in `localStorage`) per permettere split train/val per giocatore senza PII.
-- (opzionale) salva anche `client_decision_time_ms`: tempo stimato (ms) tra inizio turno umano e click (utile per filtri qualità/analisi).
-- consenso: la UI mostra una checkbox e il backend rifiuta `POST /api/games` se il consenso non è accettato.
-
-#### Deploy: CORS (minimo hardening)
-
-Se deployi la UI/API su un dominio pubblico, è consigliato restringere le origin CORS:
-
-- `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio.example briscola-server`
-
-Se non imposti nulla, per default è `*` (comodo in sviluppo, non consigliato in produzione).
-
-### Simulazioni (headless)
-
-Per simulare N partite senza UI (utile per debug e generazione dataset):
-
-```
-python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
+```bash
+ruff format src tests scripts
+ruff check src tests scripts
+mypy src
+pytest                       # test
+pytest --cov=briscola_ai --cov-report=term-missing   # coverage
 ```
 
-### Self-play (dominio → SQLite)
+Il badge coverage in cima è manuale (Shields.io): aggiornalo dopo `pytest --cov` se la variazione è materiale.
 
-Per generare molte partite velocemente (senza server/UI) e salvarle nel DB:
+## AI & ML
 
-```
-python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 100 --seed 42 --num-players 2
-```
+### Anti‑cheat: osservazione parziale (information set)
 
-Puoi scegliere gli agenti per ciascun player con `--agents` (CSV, uno per player):
+Nel dominio `GameState` contiene informazione **completa** (ordine del mazzo, mani di tutti). Se un agente la ricevesse, potrebbe “barare” leggendo informazione nascosta, rendendo i benchmark non significativi. Per questo:
 
-```
-# 2-player: heuristic vs random
-python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 100 --seed 42 --num-players 2 --agents heuristic_v1,random
-```
+- gli agenti ricevono una `PlayerObservation`, vista **parziale e lecita**, costruita con `make_player_observation(state, player_index)`;
+- contiene: mano del giocatore, carte sul tavolo, briscola scoperta, `deck_size`, punteggi e dimensioni mani, e due one‑hot pubbliche (sotto);
+- **non** contiene: il mazzo come sequenza (`state.deck`) né le carte specifiche degli avversari.
 
-Nota: se `--agents` è omesso, usa `random` per tutti i player.
+Riferimenti: `domain/observation.py`, test `tests/test_domain_observation.py`.
 
-### Fast self-play (summary-only)
+Due one‑hot pubbliche (entrambe lecite, derivate solo da informazione visibile):
+- `seen_cards_onehot[40]`: carte **viste** = briscola scoperta + tavolo + carte uscite nelle prese;
+- `out_of_play_cards_onehot[40]`: carte **non più disponibili** = prese + tavolo (la briscola scoperta NON è qui finché è pescabile/in mano). Invariante: `out_of_play ⊆ seen`.
 
-Per benchmark o roll-out leggeri 2-player puoi evitare SQLite/DTO e usare il motore numerico `fast_2p`:
+### Encoder: v1, v2, v3
 
-```
-python scripts/fast_self_play.py --num-games 100000 --seed 0 --agents greedy_points,random
-```
+Lo stesso stato lecito può essere codificato a livelli crescenti di “memoria/strategia”:
 
-Output opzionale JSONL minimale, una riga per partita:
+- **v1** (`feature_dim=248`): vista istantanea (mano, tavolo, briscola, scalari di stato).
+- **v2** (`288`): v1 + `seen_cards_onehot[40]` → card counting lecito (storia pubblica).
+- **v3** (`310`): v2 + 22 feature **strategiche aggregate**, leggibili: briscole/carichi ignoti, assi/tre usciti per seme, fase partita (`deck_size`, carte in mano, endgame flag), e info sulla presa corrente. Usa `out_of_play_cards_onehot` per distinguere “visto” da “fuori gioco”.
 
-```
-python scripts/fast_self_play.py --num-games 1000 --seed 0 --agents greedy_points,random --out-jsonl /tmp/fast_self_play.jsonl
-```
+L’encoder canonico vive in `ai/training/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast** (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, in fallback, dalla `feature_dim` (248/288/310).
 
-Nota: questo comando è volutamente “summary-only”: salva seed, agenti, punti finali e vincitore, ma non salva
-osservazioni/azioni step-by-step. Per dataset BC completo usa ancora `scripts/self_play_to_db.py` + export.
-Per ora supporta `random`, `greedy_points`, `heuristic_v1` e `heuristic_v2`.
+### Agenti disponibili
 
-### Benchmark performance
+- `random` – carta casuale (baseline “zero”).
+- `greedy_points` – gioca la carta con più punti in mano (spiegabile, spesso sub‑ottimale).
+- `heuristic_v1` – euristica 2‑player: prende “a basso costo” quando conviene, scarta in modo economico altrimenti.
+- `heuristic_v2` – come v1 ma usa la storia pubblica (`seen_cards_onehot`) per gestire meglio le briscole (buon teacher per BC).
+- `hybrid_endgame` – `heuristic_v2` nel mid‑game + **solver esatto** a mazzo vuoto.
+- `hybrid_endgame_best_a2c` – modello `best_a2c` nel mid‑game + solver nel finale.
+- `bc_model` – modello locale `.npz` (BC/PG/A2C), encoder dedotto dai metadati.
 
-Per misurare il throughput locale dei loop engine-only e delle policy fast-compatible:
+Il **solver endgame** (`ai/endgame_solver.py`) calcola la mossa ottima esatta con minimax a mazzo vuoto; l’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
 
-```
-python scripts/benchmark_perf.py --mode fast-random --games 100000 --repeat 3 --seed 0
-python scripts/benchmark_perf.py --mode numba-random --games 100000 --repeat 3 --seed 0
-python scripts/benchmark_perf.py --mode fast-eval --games 100000 --repeat 3 --seed 0 --agent-a heuristic_v2 --agent-b heuristic_v1
-python scripts/benchmark_perf.py --mode numba-eval --games 100000 --repeat 3 --seed 0 --agent-a heuristic_v2 --agent-b heuristic_v1
-python scripts/benchmark_perf.py --mode numba-mlp --games 20000 --repeat 3 --seed 0 --agent-b heuristic_v1 --hidden-dim 128
-```
+### Raccolta dati ed export
 
-Nota: `numba-random` e `numba-eval` misurano il core JIT in `fast_numba`; non misurano ancora il training
-A2C completo. `numba-mlp` misura invece un rollout inference full-JIT con policy MLP zero-inizializzata.
-Risultati locali indicativi dopo warm-up:
-- random-vs-random: `fast-random` ~21.3k games/sec, `numba-random` ~445k games/sec (`~20.9x`);
-- `heuristic_v2` vs `heuristic_v1`: `fast-eval` ~13.3k games/sec, `numba-eval` ~300k games/sec (`~22.6x`).
-- MLP hidden=128 vs `heuristic_v1`: `numba-mlp` ~2.84k games/sec.
+Avviando `briscola-server` viene scritto un event log su `./data/briscola_events.sqlite3` (gitignored). Path/modalità configurabili via CLI (`--event-db`, `--event-log-mode`) o env (`BRISCOLA_EVENT_DB_PATH`, `BRISCOLA_EVENT_LOG_MODE`). Per ogni partita si salvano `seed`, `code_version`, `rules_version`.
 
-### Valutazione agenti
+Due modalità di logging:
+- `debug` (default): completa, utile per troubleshooting;
+- `dataset`: pensata per raccogliere partite **umane** tenendo il DB piccolo — salva un evento `human_action` self‑contained (observation → action → reward/done → next_observation) + marker `game_finished`, **non** salva `player_names` (privacy), usa un `client_id` pseudonimo per split per‑giocatore, ed esige il **consenso** (checkbox UI; il backend rifiuta `POST /api/games` senza consenso).
 
-Per confrontare agenti in modo riproducibile (senza UI/server):
+Export in JSONL (schema v1, pensato per il 2‑player):
 
-```
-python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 random --agent1 random
-python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 greedy_points --agent1 random
-python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random
-```
-
-Per default la valutazione usa il dominio canonico (`--engine domain`), che supporta tutti gli agenti
-e costruisce `PlayerObservation` anti-cheat. Esiste anche un path sperimentale più veloce:
-
-```
-python scripts/evaluate_agents.py --engine fast --seat-fair --num-games 10000 --seed 42 --agent0 greedy_points --agent1 random
-```
-
-Nota: `--engine fast` supporta `random`, `greedy_points`, `heuristic_v1` e `heuristic_v2`. Serve per benchmark
-del motore `fast_2p`; non supporta ancora modelli `.npz` come agenti.
-
-Agenti disponibili (baseline):
-- `random`: sceglie una carta casuale tra quelle in mano (baseline “zero”).
-- `greedy_points`: gioca la carta con più punti in mano (euristica minimale e spiegabile).
-- `heuristic_v1`: euristica 2-player che prova a prendere “a basso costo” quando conviene e scarta in modo economico quando non conviene.
-- `heuristic_v2`: euristica 2-player che usa anche la “storia pubblica” (`seen_cards_onehot`) per una gestione briscole più strategica (teacher utile per BC).
-
-#### Anti-cheat: osservazione parziale (information set)
-
-Perché serve:
-- nel dominio `GameState` contiene informazione **completa** (es. ordine del mazzo e mani di tutti);
-- se un agente/una rete riceve `GameState`, può “barare” leggendo informazione nascosta (anche involontariamente), rendendo i benchmark non significativi.
-
-Cosa facciamo:
-- gli agenti ricevono una `PlayerObservation`, cioè una vista **parziale e lecita** dello stato;
-- l’osservazione è costruita con `make_player_observation(state, player_index)` e poi passata a `Agent.choose_card_index(observation, rng=...)`.
-
-Cosa contiene (alta-level):
-- la mano del giocatore osservante, carte sul tavolo, briscola scoperta, `deck_size`, punteggi e dimensioni delle mani.
-
-Cosa NON contiene:
-- il mazzo come sequenza di carte (`state.deck`) e le carte specifiche in mano agli avversari.
-
-Riferimenti utili:
-- implementazione: `src/briscola_ai/domain/observation.py`
-- test anti-regressione: `tests/test_domain_observation.py`
-
-Nota importante (bias “chi inizia”):
-- nel dominio attuale il player 0 inizia sempre la partita;
-- per confronti più corretti **usa** la modalità **seat-fair**, che gioca due partite per seed scambiando i posti:
-
-```
-python scripts/evaluate_agents.py --seat-fair --num-games 10000 --seed 42 --agent0 random --agent1 random
-```
-
-Nota: `--seat-fair` richiede `--num-games` pari (si gioca a coppie).
-
-Seed suite (regressioni confrontabili nel tempo):
-- suite versionate nel repo: `--seed-suite small` (1000 seed) oppure `--seed-suite medium` (5000 seed)
-- suite custom: `--seed-suite-file path/to/seeds.txt`
-- per benchmark “big” senza file enorme: `--seed-suite-range-start 0` (genera i seed con `range()`)
-- preset benchmark: `--benchmark small|medium|big` (imposta `--num-games` + una seed suite coerente, ed è sempre seat-fair)
-- export risultati: `--out-json /path/to/out.json`
-
-Taglie consigliate (benchmark):
-- `small=2000` (feedback veloce)
-- `medium=10000` (numero “standard” per confronti)
-- `big=100000` (misura stabile, più lenta)
-
-#### Evaluation matrix (consigliata)
-
-Quando alleni molti modelli (`.npz`) conviene standardizzare i confronti per evitare errori manuali
-e misurare robustezza (anche su holdout).
-
-Lo script `scripts/evaluate_matrix.py` valuta un modello contro una lista di avversari su due suite:
-- `standard` (seed generate con `range(start=0)`)
-- `holdout` (seed generate con `range(start=1_000_000)`)
-
-Esempio (veloce, `medium`):
-
-```
-python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark medium --out-json benchmarks/matrix_medium.json
-```
-
-Output “pretty” (tabella colorata) se il terminale è interattivo:
-- default: `--format auto` (già il default)
-- forzare: `--format rich`
-- fallback CSV-like (utile per redirect/log): `--format csv`
-
-Esempio (robusto, `big`):
-
-```
-python scripts/evaluate_matrix.py --model ./data/MODEL.npz --benchmark big --out-json benchmarks/matrix_big.json
-```
-
-#### Metriche “qualità decisionale” (diagnosi stile di gioco)
-
-Win-rate e punti medi misurano la *forza* di un modello, ma non sempre spiegano *perché* fa certe mosse.
-Per diagnosticare comportamenti miopi (es. “spreca briscole alte per prendere scarti”) usiamo una metrica semplice:
-
-- `trump_waste_rate` (2-player, solo “secondo di mano”): quante volte l’agente gioca una briscola
-  **pur avendo** almeno una risposta vincente **non-briscola**.
-- `trump_overkill_rate` (2-player, solo “secondo di mano”): quando l’agente **vince** giocando una briscola,
-  quante volte usa una briscola “più costosa del necessario” rispetto alla briscola vincente minima disponibile.
-  Utile per misurare il caso “butta briscole alte per prendere scarti”.
-
-Se vuoi eliminare **senza retrain** gran parte dell’“overkill”:
-- abilita il post-processing `inference_overkill_guard` (solo `bc_model`, 2-player, secondo di mano):
-  se stai per vincere con una briscola, gioca automaticamente la **briscola vincente minima** in mano.
-- come attivarlo:
-  - (consigliato) salva il flag nei metadati quando alleni: `scripts/train_a2c.py --inference-overkill-guard` (o `train_bc.py`, `train_pg.py`)
-  - (A/B veloce) imposta `BRISCOLA_BC_OVERKILL_GUARD=1` quando lanci server/valutazioni
-- nota: essendo un post-processing deterministico, può cambiare *leggermente* la forza complessiva.
-  Verifica sempre con `scripts/evaluate_matrix.py` e `scripts/evaluate_decision_quality.py`.
-
-Se invece vuoi che il modello **lo impari davvero** (senza guard):
-- Usa un *teacher* che non faccia overkill (es. `heuristic_v2`) e fai Behavior Cloning (BC) su encoder v2.
-- Valuta sempre con guard OFF (non impostare `BRISCOLA_BC_OVERKILL_GUARD` e non salvare `inference_overkill_guard` nel `.npz`).
-
-Workflow consigliato (BC → RL):
-
-```
-# 1) Self-play del teacher (DB temporaneo)
-python scripts/self_play_to_db.py --db /tmp/selfplay.sqlite3 --num-games 5000 --seed 42 --num-players 2 --agents heuristic_v2,heuristic_v2
-
-# 2) Export esempi per BC (solo observation->action, più leggero)
-python scripts/export_dataset.py --db /tmp/selfplay.sqlite3 --out /tmp/dataset.jsonl --all-players --include-ai --no-next-state
-
-# 3) BC v2 (teacher distillato in una rete)
-python scripts/train_bc.py --encoder-version v2 --model mlp --hidden-dim 128 --epochs 10 --lr 0.001 --seed 42 \
-  --data /tmp/dataset.jsonl --out ./data/models/bc_teacher_v2.npz
-
-# 4) Verifica stile (guard OFF)
-python scripts/evaluate_decision_quality.py --agent-a bc_model --agent-a-model ./data/models/bc_teacher_v2.npz --agent-b heuristic_v1 --benchmark medium
-
-# Variante veloce Numba (modello MLP come A, baseline fast-compatible come B)
-python scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model ./data/models/bc_teacher_v2.npz --agent-b heuristic_v1 --benchmark medium
-# Il path Numba usa kernel paralleli: benchmark locale 10k game `3.253s -> 0.533s` vs seriale.
-
-# Variante head-to-head Numba (stile di A contro un altro modello MLP)
-python scripts/evaluate_decision_quality.py --engine numba --agent-a bc_model --agent-a-model ./data/NEW_MODEL.npz --agent-b bc_model --agent-b-model ./data/models/best_a2c.npz --benchmark medium
-
-# 5) (Opzionale) Fine-tuning A2C partendo dal BC
-python scripts/run_experiment.py --algo a2c --init ./data/models/bc_teacher_v2.npz --benchmarks medium --num-games 200000 --train-seed 6 --seat-fair \
-  --opponent-mix heuristic_v2:0.4,heuristic_v1:0.3,random:0.2,greedy_points:0.1 --no-update-best --minimal-data -- \
-  --encoder-version v2
-```
-
-Nota: il fine-tuning RL può “allontanarsi” dallo stile del teacher (es. reintrodurre un po’ di overkill).
-Se vuoi preservare lo stile *senza* usare il guard, puoi attivare una regolarizzazione verso un anchor BC fisso:
-
-```
-python scripts/train_a2c.py \
-  --init ./data/models/bc_teacher_v2.npz \
-  --bc-anchor ./data/models/bc_teacher_v2.npz \
-  --bc-anchor-beta 0.02 \
-  --encoder-version v2 \
-  --opponent-mix heuristic_v2:0.4,heuristic_v1:0.3,random:0.2,greedy_points:0.1 \
-  --num-games 200000 --seat-fair --seed 6 \
-  --out ./data/models/a2c_from_bc_anchor.npz
-```
-
-Se vuoi *ridurre* questo comportamento durante training A2C, puoi provare un shaping soft:
-- `scripts/train_a2c.py --overkill-penalty-mode flat --overkill-penalty-beta <beta>` (default: 0, disattivato)
-- `--overkill-low-lead-points-max 2` (default) per colpire soprattutto gli “scarti o quasi”.
-
-Oppure una variante più informativa:
-- `--overkill-penalty-mode gap` (penalità proporzionale al “gap” tra briscola scelta e briscola vincente minima).
-
-Esempio:
-
-```
-python scripts/evaluate_decision_quality.py \
-  --agent-a bc_model --agent-a-model ./data/models/best_a2c.npz \
-  --agent-b heuristic_v1 \
-  --benchmark medium
-```
-
-#### Encoder v2: “storia pubblica” (card counting lecito, anti-cheat)
-
-Molti comportamenti “miopi” (es. usare briscole alte per prendere scarti) emergono quando lo stato
-che diamo al modello è troppo “istantaneo”: vede mano+tavolo+briscola+punti, ma non *il corso* della partita.
-
-Per abilitare strategia senza barare, introduciamo un encoder **v2** che aggiunge una feature:
-
-- `seen_cards_onehot[40]`: one-hot delle carte **già viste** (briscola scoperta + tavolo + carte già uscite).
-
-Perché è anti-cheat?
-- Sono informazioni pubbliche. In una partita reale il giocatore le vede e può ricordarle.
-- Non include mai: ordine del mazzo, mano avversaria, o altre informazioni nascoste.
-
-Uso pratico:
-- Training BC (supervised) su dataset esportato:
-
-```
-python scripts/train_bc.py --data ./data/dataset.jsonl --out ./data/models/bc_v2.npz --encoder-version v2
-```
-
-- Training RL (PG/A2C):
-  - da zero: `--encoder-version v2`
-  - warm-start da un modello v1: `--upgrade-init-v1-to-v2` (aggiunge 40 righe a zero in `w1` e poi il training le “riempie”)
-
-Esempio A2C:
-
-```
-python scripts/train_a2c.py \
-  --out ./data/models/a2c_v2.npz \
-  --init ./data/models/best_a2c.npz \
-  --encoder-version v2 \
-  --upgrade-init-v1-to-v2 \
-  --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 \
-  --num-games 200000 --seat-fair --seed 0
-```
-
-Nota: in partita (`ai_agent=bc_model`) il backend sceglie automaticamente l’encoder corretto
-in base ai metadati del modello (`metadata.encoder`) o, in fallback, dalla `feature_dim`
-(248=v1, 288=v2).
-
-#### Pipeline esperimenti (training + eval) (consigliata)
-
-Per iterare velocemente sui modelli senza perdere traccia dei risultati, usa:
-- `scripts/run_experiment.py` (un comando unico: training → evaluation matrix → manifest → best model locale).
-
-Output (convenzione):
-- modello: `./data/models/<name>.npz`
-- risultati: `./benchmarks/experiments/<name>/matrix_medium.json`, `matrix_big.json`, `manifest.json`
-- best model (locale): `./data/models/best_<algo>.npz` + `best_<algo>.json` con lo score
-
-Note pratiche:
-- log “live”: la pipeline forza `PYTHONUNBUFFERED=1` sui trainer, così vedi le metriche mentre l’esperimento gira (utile per capire se sta imparando o diverge).
-- coerenza directory modelli: la pipeline imposta `BRISCOLA_MODELS_DIR=<models-dir>` per i processi figli, così alias come `best_a2c` risolvono sempre nella stessa cartella.
-- performance: `--rollout-engine fast --fast-rollout numba` accelera il training A2C; `--eval-engine numba`
-  accelera la evaluation matrix per modelli MLP contro opponent fast-compatible. Anche
-  `scripts/evaluate_agents.py --engine numba` usa kernel paralleli per i rollout MLP.
-  Se usi `--eval-engine numba`, la pipeline registra `requested_workers` ma forza `workers=1` per evitare
-  oversubscription: il parallelismo reale è nei thread Numba.
-- modalità “data minimale”: se vuoi mantenere `data/models/` pulita, usa `--minimal-data`.
-  - se `--update-best` è attivo (default), conserva solo `best_*` e copia il modello finale in `benchmarks/experiments/<name>/model.npz`.
-  - se fai screening con `--no-update-best`, mantiene comunque `data/models/` minimale (conserva i best se esistono; altrimenti conserva il modello run-specific).
-
-Esempio A2C (da zero, opponent mix, poi eval medium+big):
-
-```
-python scripts/run_experiment.py \
-  --algo a2c \
-  --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 \
-  --num-games 200000 \
-  --train-seed 5 \
-  --seat-fair
-```
-
-Per usare il rollout A2C full-JIT con Numba anche dalla pipeline (consigliato per run lunghi):
-
-```
-python scripts/run_experiment.py \
-  --algo a2c \
-  --opponent-mix best_a2c:0.5,heuristic_v1:0.3,random:0.2 \
-  --num-games 1000000 \
-  --train-seed 17 \
-  --seat-fair \
-  --rollout-engine fast \
-  --fast-rollout numba \
-  --eval-engine numba \
-  --minimal-data
-```
-
-Warm-start (opzionale):
-- se hai già un best locale, puoi ripartire da `--init ./data/models/best_a2c.npz` (stesso schema pesi/encoder).
-
-#### Curriculum (easy → standard → hard)
-
-Se vuoi un percorso di apprendimento più stabile, puoi usare un **curriculum a stage**:
-lo stesso run viene spezzato in più blocchi consecutivi, passando il modello come `--init` tra gli stage.
-
-Preset supportato:
-- `--curriculum easy_standard_hard` (split 20% / 50% / 30%)
-  - `easy`: `random:0.7,greedy_points:0.3`
-  - `standard`: `heuristic_v1:0.7,random:0.2,greedy_points:0.1`
-  - `hard`: `best_a2c:0.6,heuristic_v1:0.3,random:0.1`
-
-Nota:
-- se imposti `--curriculum`, la pipeline **ignora** `--opponent` e `--opponent-mix` (usa i preset).
-- log per stage: in `benchmarks/experiments/<name>/train_stage_*.log` (utile per capire dove il training migliora o satura).
-
-Esempio (A2C, seed 6, curriculum + eval medium+big, data minimale):
-
-```
-python scripts/run_experiment.py \
-  --algo a2c \
-  --curriculum easy_standard_hard \
-  --num-games 200000 \
-  --train-seed 6 \
-  --seat-fair \
-  --minimal-data
-```
-
-#### League training (avversario “best” congelato) — `best_a2c`
-
-Quando inizi a ottenere modelli RL forti, allenare “sempre contro lo stesso baseline” può diventare limitante.
-Una tecnica pratica è la **league**: continui ad allenare un nuovo modello, ma lo fai giocare spesso contro
-un avversario “campione” **congelato** (non cambia durante quel run).
-
-Per supportare questo in modo riproducibile esiste l’alias agente:
-- `best_a2c` → carica un file locale `best_a2c.npz` dalla *directory modelli* (`BRISCOLA_MODELS_DIR`, oppure `./data/models`, fallback `./data`).
-
-Da dove arriva `best_a2c.npz`?
-- la pipeline `scripts/run_experiment.py` (default `--update-best`) aggiorna `./data/models/best_a2c.npz` quando trova un modello migliore.
-
-Esempio: allenare A2C contro un mix che include il best congelato:
-
-```
-python scripts/train_a2c.py \
-  --out ./data/models/a2c_vs_best_mix.npz \
-  --opponent-mix best_a2c:0.5,heuristic_v1:0.3,random:0.2 \
-  --num-games 200000 \
-  --seed 6 \
-  --seat-fair
-```
-
-Nota:
-- se `best_a2c.npz` manca (o è incompatibile con l’encoder 2-player v1), il trainer fallisce subito con un errore esplicativo.
-
-Nota metrica “best model”:
-- per default usiamo `avg_diff` su suite `holdout` vs `heuristic_v1` (preferibilmente benchmark `big`).
-- per run “di prova” puoi disabilitare l’aggiornamento del best: `--no-update-best`.
-
-### Export dataset (JSONL)
-
-Quando hai raccolto partite nel DB SQLite (event log), puoi esportare un dataset in JSONL:
-
-```
+```bash
 python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl
 ```
 
-Default didattico (coerente con la UI attuale):
-- la UI attuale avvia e testa principalmente partite **2-player** (tu vs IA);
-- esporta solo le azioni del `player_index=0`;
-- esclude le azioni dell'IA.
-- esporta **solo partite complete** (`game_over=true`) per avere un dataset più pulito.
+Default: solo azioni del `player_index=0`, escluse quelle IA, solo partite complete. Opzioni utili: `--all-players`, `--include-ai`, `--no-next-state` (supervised), `--include-incomplete`. In modalità `dataset` l’exporter usa preferibilmente `human_action`.
 
-Opzioni utili:
-- tutti i player: `--all-players`
-- includi anche IA: `--include-ai`
-- export “supervised only” (senza `next_observation`): `--no-next-state`
-- includi anche partite incomplete (sconsigliato per dataset principale): `--include-incomplete`
+**Deploy/CORS**: per un dominio pubblico restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio briscola-server` (default `*`, solo per sviluppo).
 
-Nota su modalità `dataset`:
-- se il backend gira con `BRISCOLA_EVENT_LOG_MODE=dataset`, l'exporter usa preferibilmente l'evento `human_action`
-  (record già self-contained) e non dipende da `observation_sent`.
+### Simulazioni e self‑play (headless)
 
-Nota: lo schema export v1 è pensato soprattutto per il 2-player. In 4-player (a squadre) la nozione di reward
-e l'interpretazione del “vincitore della mano” vanno adattate a livello di team (vedi `PLAN.md`).
+```bash
+# Simulazione semplice (dominio)
+python scripts/simulate_games.py --num-games 100 --seed 42 --num-players 2
 
-### Primo modello (Behavior Cloning)
+# Self-play verso SQLite (scegli gli agenti per seat con --agents)
+python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 100 --seed 42 --agents heuristic_v1,random
 
-Scopo didattico: partire con un modello supervisionato semplice che imita un “teacher”
-(es. `heuristic_v1` o `heuristic_v2`) invece di partire subito con RL.
+# Fast self-play "summary-only" (no DB/DTO): seed/agenti/punti/vincitore, una riga per partita
+python scripts/fast_self_play.py --num-games 100000 --seed 0 --agents greedy_points,random --out-jsonl /tmp/fast.jsonl
+```
 
-Scelta chiave: spazio azioni fisso “**40 carte + action mask**”.
-- Il modello predice una carta tra 40 classi (ogni carta del mazzo).
-- Una **mask** abilita solo le carte realmente in mano (evita azioni impossibili).
+### Valutazione
 
-Workflow minimo:
-1. Genera un DB con self-play (es. teacher vs random):
-   - `python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 200 --seed 42 --num-players 2 --agents heuristic_v1,random`
-   - variante (teacher più “strategico”): `python scripts/self_play_to_db.py --db ./data/briscola_events.sqlite3 --num-games 200 --seed 42 --num-players 2 --agents heuristic_v2,random`
-2. Esporta un JSONL di esempi:
-   - `python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl --all-players --include-ai`
-3. Allena il primo modello (baseline lineare):
-   - `python scripts/train_bc.py --data ./data/dataset.jsonl --out ./data/bc_model.npz --epochs 10 --lr 0.5`
-   - Variante più espressiva (MLP 1-hidden-layer):
-     - `python scripts/train_bc.py --model mlp --hidden-dim 128 --data ./data/dataset.jsonl --out ./data/bc_model_mlp.npz --epochs 20 --lr 0.001`
-4. Valuta il modello vs una baseline (seed suite riproducibile):
-   - `python scripts/evaluate_agents.py --seat-fair --num-games 2000 --seed-suite small --agent0 bc_model --agent0-model ./data/bc_model.npz --agent1 heuristic_v1`
+Confronti riproducibili senza UI/server:
 
-Nota:
-- `bc_model.npz` è un artefatto locale (non va versionato nel repo).
-- Puoi usare due modelli diversi con `--agent0-model` e `--agent1-model`.
+```bash
+python scripts/evaluate_agents.py --benchmark medium --engine domain \
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v3.npz --agent1 heuristic_v1
+```
 
-### Superare `heuristic_v1` (RL)
+Concetti chiave:
+- **engine**: `domain` (canonico, supporta tutti gli agenti), `fast`/`numba` (più veloci; `numba` supporta modelli MLP vs baseline fast‑compatible).
+- **seat‑fair** (`--seat-fair`): per ogni seed gioca due partite scambiando i posti (rimuove il bias “il player 0 inizia sempre”). Richiede `--num-games` pari.
+- **seed suite** riproducibili: `--seed-suite small|medium`, `--seed-suite-file`, oppure `--seed-suite-range-start N` (utile per **holdout**, es. `--seed-suite-range-start 1000000`).
+- **preset**: `--benchmark small|medium|big` (= 2000/10000/100000 game, sempre seat‑fair) e `--out-json` per salvare.
 
-Il Behavior Cloning (BC) tende a *eguagliare* il teacher, non a superarlo.
-Per superare `heuristic_v1` puoi fare fine-tuning con Reinforcement Learning ottimizzando direttamente il return finale.
+Strumenti aggiuntivi:
+- `scripts/evaluate_matrix.py` – valuta un modello contro una lista di avversari su due suite (`standard` e `holdout`).
+- `scripts/evaluate_decision_quality.py` – metriche di **stile**, non solo forza:
+  - `trump_waste_rate`: gioca briscola pur avendo una risposta vincente **non‑briscola**;
+  - `trump_overkill_rate`: quando vince con briscola, usa una briscola più costosa del necessario.
+- **Guard anti‑overkill** (`inference_overkill_guard`): post‑processing che, da secondo di mano, gioca la briscola vincente **minima**. Attivabile dai metadati del modello (i trainer lo salvano con `--inference-overkill-guard`) o, per A/B, con `BRISCOLA_BC_OVERKILL_GUARD=1`. È deterministico: verifica sempre l’impatto con le metriche.
 
-#### REINFORCE (policy gradient) + opponent mix
+### Performance (fast path Python/Numba)
 
-Workflow consigliato (warm-start da BC MLP teacher-only):
-1. Allena BC MLP su dataset teacher-only (vedi sopra) → `./data/bc_model_teacher_mlp.npz`
-2. Fine-tuning RL contro `heuristic_v1`:
-   - `python scripts/train_pg.py --init ./data/bc_model_teacher_mlp.npz --out ./data/rl_vs_heuristic_v1.npz --opponent heuristic_v1 --num-games 20000 --seat-fair --seed 0`
-   - se stampa troppo, aggiungi `--log-every 50`
-   - per robustezza (consigliato): usa un opponent mix
-     - `python scripts/train_pg.py --init ./data/bc_model_teacher_mlp.npz --out ./data/rl_mix.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 20000 --seat-fair --seed 0`
+Il dominio canonico è la fonte di verità; il fast path 2‑player (`ai/fast_*`) replica la stessa logica su interi/array per alzare il throughput, con kernel Numba JIT. È tenuto coerente dai test di parità. Misure con `scripts/benchmark_perf.py` (modi `*-random`, `fast-eval`, `numba-eval`, `numba-mlp`).
 
-Mini-grid (esempio) per scegliere il mix:
-- setup: warm-start da `bc_model_teacher_mlp.npz`, training 100k game, benchmark `medium` (10k) + holdout `medium` via `--seed-suite-range-start 1000000`.
-- metrica: **diff punti media** (A−B) in seat-fair.
+Esempio dell’ordine di grandezza: il **training A2C v3** su 20k partite passa da ~419 games/sec (`--rollout-engine domain`) a ~5900 games/sec (`--rollout-engine fast --fast-rollout numba`), ~14×; questo rende fattibili run da 1M partite in pochi minuti.
 
-| setup | vs heuristic_v1 | holdout vs heuristic_v1 | vs random | vs greedy_points |
-|---|---:|---:|---:|---:|
-| single (solo heuristic_v1) | +3.36 | +3.57 | +31.64 | +30.19 |
-| mix 85/10/05 | +3.33 | +3.23 | +32.19 | +30.39 |
-| mix 70/20/10 | **+3.66** | **+3.78** | **+33.28** | **+31.52** |
-| mix 60/20/20 | +2.15 | +2.79 | +32.70 | +31.18 |
+### Pipeline di training (BC → RL)
 
-Nota interpretativa:
-- aumentare la quota “easy opponents” tende a rendere la policy più robusta (margini più alti vs random/greedy),
-  ma può ridurre la performance vs `heuristic_v1` se la quota di `heuristic_v1` scende troppo.
-  Per questo conviene scegliere il mix guardando una piccola “evaluation matrix” (almeno vs `heuristic_v1`, `random`, `greedy_points`) e fare anche un holdout di seed.
-3. Valuta:
-   - `python scripts/evaluate_agents.py --benchmark small --agent0 bc_model --agent0-model ./data/rl_vs_heuristic_v1.npz --agent1 heuristic_v1`
+Idea didattica: prima un modello supervisionato che **imita** un teacher (Behavior Cloning), poi RL per **superarlo**.
 
-#### A2C (actor-critic) + reward shaping “trick delta” (consigliato)
+**Spazio azioni**: “40 carte + action mask” (il modello sceglie tra 40 classi; la mask abilita solo le carte in mano).
 
-REINFORCE funziona, ma è più rumoroso. Un passo successivo “ad alto ROI” è A2C:
-- aggiungiamo un *critic* `V(s)` (value head) e usiamo l’**advantage** `A = G - V(s)` come baseline appresa;
-- usiamo un reward più denso (senza barare): ogni step è un **turno della policy**, e il reward è il delta di
-  `(punti_policy - punti_opp)` accumulato fino al turno successivo (include la chiusura della mano).
+**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3` (v3 richiede dataset con `out_of_play` popolato).
 
-Script:
-- training: `scripts/train_a2c.py`
+**Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
+- **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.
+- **A2C** (`scripts/train_a2c.py`, consigliato): aggiunge un *critic* `V(s)` e usa l’**advantage** `A = G − V(s)` come baseline appresa, con un reward più denso (delta `punti_policy − punti_opp` per turno della policy, senza barare).
 
-Esempio (warm-start + opponent mix):
-- `python scripts/train_a2c.py --init ./data/bc_model_teacher_mlp.npz --out ./data/a2c_shaped.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 200000 --seat-fair --seed 0`
+Tecniche utili (tutte come flag, vedi `--help`):
+- **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
+- **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
+- **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
+- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v3. Per allenare contro il best v3 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v3.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
+- **curriculum** (`--curriculum easy_standard_hard`) per stage easy→standard→hard.
 
-Rollout fast sperimentale (avversari fast-compatible):
-- `python scripts/train_a2c.py --rollout-engine fast --out ./data/a2c_fast_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
-- `python scripts/train_a2c.py --rollout-engine fast --fast-encoder numba --out ./data/a2c_fast_numba_encoder_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
-- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_rollout_hv2.npz --opponent heuristic_v2 --num-games 20000 --seat-fair --seed 0`
-- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_mix.npz --opponent-mix heuristic_v1:0.7,random:0.2,greedy_points:0.1 --num-games 20000 --seat-fair --seed 0`
-- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_best_mix.npz --opponent-mix best_a2c:0.5,random:0.5 --num-games 20000 --seat-fair --seed 0`
-- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_numba_bc_mix.npz --opponent-mix bc_model:0.5,random:0.5 --opponent-model ./data/models/OPPONENT.npz --num-games 20000 --seat-fair --seed 0`
-- `python scripts/train_a2c.py --rollout-engine fast --fast-rollout numba --out ./data/a2c_fast_vs_best.npz --opponent best_a2c --num-games 20000 --seat-fair --seed 0`
+**Pipeline riproducibile** (`scripts/run_experiment.py`): un comando unico fa training → evaluation matrix → manifest → aggiorna il best locale. Supporta `--rollout-engine fast --fast-rollout numba` e `--eval-engine numba` per i run lunghi. Output in `data/models/` e `benchmarks/experiments/<name>/`.
 
-Nota: `--rollout-engine fast` usa `fast_2p` e feature numeriche equivalenti all’encoder canonico. Il fast rollout
-Python supporta gli avversari rule-based (`random`/`greedy_points`/`heuristic_v1`/`heuristic_v2`); il fast rollout
-Numba supporta anche opponent `.npz` MLP come `best_a2c` e mix ibridi rule-based + `best_a2c`.
-`--overkill-penalty-beta > 0` è supportato nel fast rollout Numba, non nel fast rollout Python.
-`--fast-encoder numba` valida il wrapper JIT dell’encoder osservazione; non è ancora il rollout A2C full-JIT, perché
-lo stato viene ancora convertito da liste Python durante il training.
-`--fast-rollout numba` usa invece un collector full-JIT per stato, encoder, forward MLP, sampling, opponent e reward;
-il backprop/Adam restano NumPy, ma il ramo Numba raccoglie batch paralleli con `prange` e accumula i gradienti su
-array batch invece di usare `np.outer` per ogni step. Benchmark locale 5k game vs `random`: hidden=32
-`~5.06s -> ~0.48s` (`~10.5x`), hidden=128 `~6.83s -> ~0.72s` (`~9.5x`).
-Con opponent mix rule-based (`heuristic_v1:0.7,random:0.2,greedy_points:0.1`), 5k game hidden=128: `~0.74s`.
-Con lo stesso mix e shaping overkill gap attivo (`--overkill-penalty-beta 0.01 --overkill-penalty-mode gap`):
-`~0.76s`.
-Con opponent `.npz` MLP locale: `--opponent best_a2c` funziona nel rollout Numba; benchmark locale 5k game,
-hidden=32: `~4.31s -> ~0.82s` (`~5.3x`). Anche `best_a2c` dentro `--opponent-mix` è supportato; mix
-`best_a2c:0.5,random:0.5`, 5k game hidden=32: `~0.89s`. Anche `bc_model` esplicito è supportato nel mix
-se passi `--opponent-model`; nello stesso mix Numba puoi usare al massimo un tipo di opponent modello.
+> I dettagli (decine di varianti di comando e numeri di benchmark) vivono in `--help` degli script e nei commit:
+> qui teniamo solo i concetti. La cronologia degli esperimenti e i risultati promossi sono in `PLAN.md`.
 
-Esempio di risultato (indicativo, dipende da seed/iperparametri/dati):
-- con 200k game e mix 70/20/10, A2C + shaping ha superato `heuristic_v1` anche su `big` + holdout con un margine ~`+7` punti medi.
+### Baseline AI ufficiale
 
-Validazione robusta (consigliata):
-- benchmark “big” (più stabile, più lento):
-  - `python scripts/evaluate_agents.py --benchmark big --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big.json`
-- singola valutazione Numba (modello MLP vs baseline):
-  - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_medium_numba.json`
-  - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.261s -> 0.550s` (`~5.9x`)
-- decision-quality Numba (stesse metriche, kernel parallelo):
-  - `python scripts/evaluate_decision_quality.py --engine numba --benchmark medium --agent-a bc_model --agent-a-model ./data/MODEL.npz --agent-b heuristic_v1 --out-json benchmarks/model_quality_medium_numba.json`
-  - benchmark locale `best_a2c.npz` vs `heuristic_v1`, 10k game seat-fair: `3.253s -> 0.533s` (`~6.1x`)
-- head-to-head Numba (nuovo modello vs best/precedente):
-  - `python scripts/evaluate_agents.py --engine numba --benchmark medium --agent0 bc_model --agent0-model ./data/NEW_MODEL.npz --agent1 bc_model --agent1-model ./data/models/best_a2c.npz --out-json benchmarks/new_vs_best_medium_numba.json`
-- evaluation matrix Numba (più veloce per modelli MLP):
-  - `python scripts/evaluate_matrix.py --engine numba --model ./data/MODEL.npz --benchmark big --out-json benchmarks/model_matrix_big_numba.json`
-  - `python scripts/evaluate_matrix.py --engine numba --model ./data/NEW_MODEL.npz --opponents bc_model --opponent-model ./data/models/best_a2c.npz --benchmark medium --out-json benchmarks/new_vs_best_matrix_medium_numba.json`
-  - nota: con `--engine numba`, `--workers` viene ignorato per evitare processi × thread Numba; usa i thread interni Numba.
-- holdout di seed (evita “overfitting” su una sola suite):
-  - `python scripts/evaluate_agents.py --benchmark big --seed-suite-range-start 1000000 --agent0 bc_model --agent0-model ./data/MODEL.npz --agent1 heuristic_v1 --out-json benchmarks/model_vs_heuristic_v1_big_holdout_1M.json`
+Il modello consigliato è **`data/models/best_a2c_v3.npz`** (encoder v3, guard anti‑overkill ON), promosso perché ≥ del precedente `best_a2c` (encoder v2) su forza head‑to‑head, holdout vs `heuristic_v1` e overkill (confronto equo). Il vecchio `best_a2c.npz` resta selezionabile per regressioni/confronto. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v3 è in `PLAN.md`.
 
-Nota:
-- `scripts/train_pg.py` e `scripts/train_a2c.py` salvano un `.npz` con `w1/b1/w2/b2` (MLP). L’agente `bc_model` lo supporta, come per i modelli BC MLP.
-- I file in `data/` (DB SQLite, dataset JSONL, modelli `.npz`) sono artefatti locali: non vanno versionati nel repo.
+Esempio di confronto testa‑a‑testa tra due modelli:
 
-## Stato e prossimi step
+```bash
+python scripts/evaluate_agents.py --benchmark medium --engine domain \
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v3.npz \
+  --agent1 bc_model --agent1-model ./data/models/best_a2c.npz
+```
 
-Dettaglio completo e roadmap: vedi `PLAN.md`.
+## Stato e roadmap
 
-Direzioni consigliate (ML):
-- Actor‑Critic (A2C minimale) per ridurre varianza rispetto a REINFORCE puro.
-- Opponent mix per robustezza (evitare overfitting su un singolo avversario).
-- Reward shaping leggero (delta punti per mano) mantenendo osservazioni anti‑cheat.
-- Dati umani (opzionale): raccolta con consenso UI + export “human-only”.
-
-## Sviluppi futuri
-
-- Implementare un’IA basata su rete neurale usando i dati raccolti
-- Aggiungere statistiche e analisi più avanzate
-- Migliorare l’interfaccia con animazioni ed effetti sonori
-- Aggiungere supporto multiplayer contro altri umani
-- Implementare diversi livelli di difficoltà dell’IA
+Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
 
 ## Licenza
 
-Questo progetto è rilasciato con licenza MIT – vedi il file `LICENSE` per i dettagli.
+Progetto rilasciato con licenza MIT – vedi `LICENSE`.
