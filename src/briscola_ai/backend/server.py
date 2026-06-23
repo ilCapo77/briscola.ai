@@ -359,6 +359,7 @@ game_action_rngs: Dict[str, random.Random] = {}
 connected_clients: Dict[str, Dict[int, WebSocket]] = {}
 
 _DEFAULT_AI_AGENT_NAME = "random"
+_AI_PLAYER_DISPLAY_NAME = "Giocatore AI"
 
 
 def _is_ai_controlled_player(game_id: str, player_index: int) -> bool:
@@ -371,6 +372,21 @@ def _is_ai_controlled_player(game_id: str, player_index: int) -> bool:
     del player controllato dall'IA.
     """
     return player_index in game_ai_agents.get(game_id, {})
+
+
+def _display_name_for_player(game_id: str, state: DomainGameState, player_index: int) -> str:
+    """
+    Nome pubblico breve per messaggi UI.
+
+    I nomi dei player sono parte dello stato di dominio e possono contenere dettagli lunghi
+    (es. label del modello selezionato in versioni vecchie della UI). Nei messaggi di partita
+    mostriamo invece un'etichetta stabile e leggibile per i seat controllati dall'IA.
+    """
+    if _is_ai_controlled_player(game_id, player_index):
+        return _AI_PLAYER_DISPLAY_NAME
+    if 0 <= player_index < len(state.players):
+        return state.players[player_index].name
+    return f"Giocatore {player_index + 1}"
 
 
 def _remove_websocket_if_current(game_id: str, player_index: int, websocket: WebSocket) -> None:
@@ -1086,10 +1102,7 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
         return
 
     state = active_games[game_id]
-    if winner_index < len(state.players):
-        winner_name = state.players[winner_index].name
-    else:
-        winner_name = f"Giocatore {winner_index + 1}"
+    winner_name = _display_name_for_player(game_id, state, winner_index)
 
     # Costruisci DTO per il risultato della mano
     trick_cards_dto = [TableCardDTO.from_domain(card, idx) for card, idx in trick_cards]

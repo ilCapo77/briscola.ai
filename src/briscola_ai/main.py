@@ -14,6 +14,7 @@ Per avviare in locale:
 import asyncio
 import os
 from contextlib import asynccontextmanager
+from urllib.parse import quote
 
 import uvicorn
 from fastapi import FastAPI
@@ -100,11 +101,26 @@ static_dir = os.path.join(current_dir, "frontend", "static")
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
+def _asset_version() -> str:
+    """
+    Versione usata per il cache busting degli asset statici.
+
+    Di default segue la versione del pacchetto; `BRISCOLA_ASSET_VERSION` permette di forzare
+    un valore diverso in deploy senza dover fare necessariamente un bump applicativo.
+    """
+    raw = os.getenv("BRISCOLA_ASSET_VERSION", get_code_version()).strip() or get_code_version()
+    return quote(raw, safe="")
+
+
 # Serve il file HTML principale
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
     """Serve la pagina HTML principale (single-page UI)."""
-    return FileResponse(os.path.join(static_dir, "index.html"))
+    index_path = os.path.join(static_dir, "index.html")
+    with open(index_path, encoding="utf-8") as f:
+        html = f.read()
+    html = html.replace("__BRISCOLA_ASSET_VERSION__", _asset_version())
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
 
 
 # Serve la favicon

@@ -395,6 +395,10 @@ def test_main_app_serves_ui_and_mounts_api() -> None:
     root = client.get("/")
     assert root.status_code == 200
     assert "text/html" in root.headers.get("content-type", "")
+    assert root.headers.get("cache-control") == "no-cache"
+    assert "__BRISCOLA_ASSET_VERSION__" not in root.text
+    assert "/static/css/style.css?v=" in root.text
+    assert "/static/js/game.js?v=" in root.text
 
     card_asset = client.get("/static/assets/cards/clubs_1.png")
     assert card_asset.status_code == 200

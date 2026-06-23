@@ -142,6 +142,37 @@ document.addEventListener('DOMContentLoaded', () => {
     let pendingEvents = [];
     let flushTimeoutId = null;
 
+    const _displayNameForPlayer = (playerIndex, fallbackName = null) => {
+        if (playerIndex === getState().playerIndex) return 'Tu';
+        if (playerIndex === getState().opponentIndex) return AI_PLAYER_DISPLAY_NAME;
+        return fallbackName || `Giocatore ${playerIndex + 1}`;
+    };
+
+    const _normalizeResultDisplayNames = (result) => {
+        if (!result || typeof result !== 'object' || result.is_team_game) return result;
+
+        const state = getState();
+        const obsPlayers = state.observation?.players || [];
+        const humanName = obsPlayers.find(p => p.index === state.playerIndex)?.name || state.playerName || 'Tu';
+        const aiBackendName = obsPlayers.find(p => p.index === state.opponentIndex)?.name || null;
+        const normalized = { ...result };
+
+        if (result.winner_index === state.opponentIndex) {
+            normalized.winner = AI_PLAYER_DISPLAY_NAME;
+        } else if (result.winner_index === state.playerIndex) {
+            normalized.winner = humanName;
+        }
+
+        if (result.points && typeof result.points === 'object') {
+            normalized.points = {};
+            for (const [name, points] of Object.entries(result.points)) {
+                const label = name === aiBackendName ? AI_PLAYER_DISPLAY_NAME : name;
+                normalized.points[label] = points;
+            }
+        }
+        return normalized;
+    };
+
     /**
      * Modalità debug: fallback polling al posto del WebSocket.
      *
@@ -316,7 +347,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const opponent = (obs.players || []).find(p => p.index === state.opponentIndex);
         const opponentHandSize = opponent?.hand_size || 0;
         const opponentPoints = opponent?.points || 0;
-        const opponentName = opponent?.name || 'Avversario IA';
+        const opponentName = _displayNameForPlayer(state.opponentIndex, opponent?.name || 'Avversario IA');
         UI.renderOpponentHand(opponentHandSize);
 
         // Points
@@ -399,7 +430,8 @@ document.addEventListener('DOMContentLoaded', () => {
         UI.removeRevealedCard();
 
         // Show winner message
-        const winnerLabel = data.winner_index === state.playerIndex ? 'Tu vinci!' : `${data.winner_name} vince!`;
+        const winnerName = _displayNameForPlayer(data.winner_index, data.winner_name);
+        const winnerLabel = data.winner_index === state.playerIndex ? 'Tu vinci!' : `${winnerName} vince!`;
         const pointsText = data.points > 0 ? ` (+${data.points} punti)` : '';
         UI.showTurnMessage(`${winnerLabel}${pointsText}`, false);
 
@@ -545,7 +577,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
         try {
             const result = await API.getGameResult(state.gameId);
-            UI.displayGameResult(result);
+            UI.displayGameResult(_normalizeResultDisplayNames(result));
         } catch (error) {
             console.error('Failed to get result:', error);
             UI.displayGameResult({
