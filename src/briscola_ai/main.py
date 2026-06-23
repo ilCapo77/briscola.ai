@@ -69,6 +69,22 @@ async def lifespan(app: FastAPI):
             print("Event log SQLite: inizializzazione fallita, feature disabilitata.")
             backend_server.app.state.event_log = None
 
+    # Provisioning modello (best-effort): se manca e `BRISCOLA_MODEL_URL` è impostata, scarica il
+    # campione consigliato nella directory modelli. Non blocca l'avvio in caso di errore.
+    try:
+        from .ai.model_catalog import get_models_dir_from_env
+        from .ai.model_provisioning import DEFAULT_MODEL_ID, ensure_model_available
+
+        _, provisioning_msg = ensure_model_available(
+            models_dir=get_models_dir_from_env(),
+            model_id=os.getenv("BRISCOLA_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID),
+            url=os.getenv("BRISCOLA_MODEL_URL"),
+            sha256=os.getenv("BRISCOLA_MODEL_SHA256"),
+        )
+        print(f"Model provisioning: {provisioning_msg}")
+    except Exception as exc:  # difesa extra: il provisioning non deve impedire l'avvio
+        print(f"Model provisioning: errore inatteso, ignorato ({exc!r}).")
+
     cleanup_task = asyncio.create_task(backend_server.cleanup_inactive_games())
     try:
         yield
