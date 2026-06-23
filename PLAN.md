@@ -916,10 +916,24 @@ Piano consigliato (ordine):
    - [ ] (prerequisito training v3 BC) re-export dataset con `out_of_play` popolato (dataset vecchi → feature degradate).
    - [ ] confrontare v3 vs v2 con la pipeline (`run_experiment.py`, `evaluate_*`) — quando si addestra un modello v3.
    - [ ] (follow-up) parità v3 su path fast/numba per training/eval ad alto throughput.
-5. **Teacher endgame-aware per BC/RL**:
-   - generare un dataset in cui `heuristic_v2` delega al solver nel finale;
-   - allenare BC encoder v3 e poi fare fine-tuning A2C;
-   - criterio: migliorare forza raw e ridurre overkill raw senza peggiorare `trump_waste_rate`.
+5. **Teacher endgame-aware per BC/RL** (primo ciclo eseguito; **nessuna promozione**):
+   - teacher = `hybrid_endgame_best_a2c` (mid-game best_a2c + solver esatto nel finale).
+   - smoke test pipeline v3 (`tests/test_pipeline_v3_smoke.py`): export preserva `out_of_play` (endgame non banale),
+     data path BC v3 = 310 feature, `train_bc --encoder-version v3` → `.npz` caricabile come v3.
+   - **Nota dataset**: generato **teacher-vs-teacher** (stesso agente in entrambi i seat), quindi è clonazione del teacher,
+     **non** un mix di avversari. Export con `player_index=0` (un seat; entrambi sono comunque il teacher).
+   - run di validazione (1k dataset, BC mini, A2C 20k, eval small): metadata/catalogo/load/eval/metriche OK (`encoder=v3`, 310).
+   - run serio (engine `domain`, seed=0): dataset 20k partite (800k azioni) → BC v3 MLP h128 20 epoche (val acc ~0.92)
+     → fine-tuning A2C v3 200k partite, opponent-mix `heuristic_v1:0.6,heuristic_v2:0.3,random:0.1`, warm-start dal BC.
+   - risultati eval (medium/holdout, domain):
+     - vs `best_a2c` head-to-head (medium): **avg diff -2.14** (5126/4593/281) → non supera il best;
+     - vs `heuristic_v1` (holdout range-start 500000): **+15.82**, contro `best_a2c` **+16.56** sulla stessa suite → leggermente sotto;
+     - decision-quality vs `heuristic_v1` (medium): avg diff +16.55; trump_waste 0.2%, **trump_overkill 8.6%** (ereditato dallo stile di best_a2c).
+   - **decisione**: criteri di promozione non soddisfatti (head-to-head negativo, holdout sotto il best, overkill più alto).
+     `best_a2c` resta il best ufficiale. Atteso: best_a2c viene da training a scala molto maggiore (1M+); 200k domain non colmano il gap.
+   - prossimi tentativi possibili: (a) scala maggiore del fine-tuning A2C (richiede parità v3 fast/numba per throughput);
+     (b) teacher `hybrid_endgame` (heuristic_v2) per ridurre l'overkill ereditato; (c) BC-anchor nel fine-tuning per restare
+     vicino al teacher; (d) opponent mix con `best_a2c` per allenarsi contro il best.
 6. **PPO/GAE solo dopo baseline ibrida**:
    - mantenere A2C come default, perché è già integrato con Numba, opponent mix, BC-anchor e evaluation matrix;
    - usare PPO/GAE come spike mirato se A2C v3/endgame-aware si stabilizza ma mostra ancora regressioni;
