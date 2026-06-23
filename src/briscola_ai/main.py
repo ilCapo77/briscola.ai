@@ -161,10 +161,12 @@ async def version_info():
     effettiva (che dipende da `BRISCOLA_MODELS_DIR` o dalla working directory).
     """
     from .ai.model_catalog import get_models_dir_from_env
+    from .ai.model_provisioning import DEFAULT_MODEL_ID
     from .versioning import get_rules_version
 
     models_dir = get_models_dir_from_env()
-    recommended_model = "best_a2c_v3.npz"
+    # Coerente col provisioning: stesso `BRISCOLA_DEFAULT_MODEL_ID` usato allo startup.
+    recommended_model = os.getenv("BRISCOLA_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
     return {
         "code_version": get_code_version(),
         "rules_version": get_rules_version(),

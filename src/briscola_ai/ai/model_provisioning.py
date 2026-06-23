@@ -17,9 +17,20 @@ import os
 import tempfile
 import urllib.request
 from pathlib import Path
+from urllib.parse import urlparse
 
 # Id del modello consigliato (coerente con la baseline ufficiale e con `/version`).
 DEFAULT_MODEL_ID = "best_a2c_v3.npz"
+
+# Timeout (s) per il download: evita che un endpoint lento/appeso blocchi lo startup dell'app.
+_DEFAULT_DOWNLOAD_TIMEOUT_S = 30.0
+
+# Schemi URL ammessi: `https`/`http` per i Release asset, `file` per test/uso locale.
+_ALLOWED_URL_SCHEMES = {"https", "http", "file"}
+
+
+def _sha256_matches(data: bytes, expected: str) -> bool:
+    return hashlib.sha256(data).hexdigest().lower() == expected.strip().lower()
 
 
 def ensure_model_available(
@@ -28,33 +39,51 @@ def ensure_model_available(
     model_id: str,
     url: str | None,
     sha256: str | None = None,
+    timeout: float = _DEFAULT_DOWNLOAD_TIMEOUT_S,
 ) -> tuple[bool, str]:
     """
-    Garantisce che `models_dir/model_id` esista, scaricandolo da `url` se assente.
+    Garantisce che `models_dir/model_id` esista (e, se `sha256` è dato, che corrisponda),
+    scaricandolo da `url` quando assente o non più valido.
 
     Ritorna `(disponibile, messaggio)`. Non solleva mai: ogni errore è catturato e riportato nel
     messaggio, così l'avvio dell'app non viene interrotto da un problema di provisioning.
 
-    Se `sha256` è impostato, il file scaricato viene verificato e installato solo se l'hash coincide.
-    La scrittura è atomica (file temporaneo nella stessa directory + `os.replace`).
+    Comportamento:
+    - se il file esiste e non è dato `sha256` → ok (fiducia sul file locale);
+    - se esiste ma `sha256` non corrisponde → si riscarica (se c'è `url`), così l'hash funge da
+      "pin di versione"; senza `url` si segnala l'incoerenza;
+    - download con `timeout`, verifica `sha256`, scrittura atomica (tmp nella stessa dir + `os.replace`).
     """
     target = models_dir / model_id
+
     if target.exists():
-        return True, f"modello già presente: {target}"
-    if not url:
+        if not sha256:
+            return True, f"modello già presente: {target}"
+        try:
+            if _sha256_matches(target.read_bytes(), sha256):
+                return True, f"modello già presente e verificato: {target}"
+        except OSError as exc:
+            return False, f"modello presente ma illeggibile: {exc!r}"
+        if not url:
+            return False, f"modello presente ma sha256 non corrisponde e nessun URL per riscaricare: {target}"
+        # hash diverso + url disponibile → procediamo a riscaricare (sovrascrittura atomica).
+    elif not url:
         return False, "modello assente e nessun BRISCOLA_MODEL_URL impostato"
+
+    scheme = urlparse(url or "").scheme.lower()
+    if scheme not in _ALLOWED_URL_SCHEMES:
+        return False, f"schema URL non ammesso: {scheme!r} (ammessi: {sorted(_ALLOWED_URL_SCHEMES)})"
 
     try:
         models_dir.mkdir(parents=True, exist_ok=True)
-        with urllib.request.urlopen(url) as resp:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 - URL operatore-trusted
             data = resp.read()
     except Exception as exc:  # provisioning best-effort: non deve crashare l'avvio
         return False, f"download fallito: {exc!r}"
 
-    if sha256:
+    if sha256 and not _sha256_matches(data, sha256):
         digest = hashlib.sha256(data).hexdigest()
-        if digest.lower() != sha256.strip().lower():
-            return False, f"sha256 non corrispondente (atteso {sha256.strip()}, ottenuto {digest})"
+        return False, f"sha256 non corrispondente (atteso {sha256.strip()}, ottenuto {digest})"
 
     try:
         fd, tmp_name = tempfile.mkstemp(dir=str(models_dir), suffix=".part")

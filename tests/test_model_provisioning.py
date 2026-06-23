@@ -79,3 +79,46 @@ def test_download_failure_is_non_fatal(tmp_path: Path) -> None:
     assert ok is False
     assert "download fallito" in msg
     assert not (models_dir / "m.npz").exists()
+
+
+def test_existing_file_with_matching_sha_is_verified(tmp_path: Path) -> None:
+    content = b"pinned-model"
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "m.npz").write_bytes(content)
+    digest = hashlib.sha256(content).hexdigest()
+
+    ok, msg = ensure_model_available(models_dir=models_dir, model_id="m.npz", url=None, sha256=digest)
+    assert ok is True
+    assert "verificato" in msg
+
+
+def test_existing_file_sha_mismatch_redownloads_when_url(tmp_path: Path) -> None:
+    """Se il file locale ha sha diverso e c'e' un URL, viene riscaricato (sha = pin di versione)."""
+    new_content = b"new-version-bytes"
+    src, url = _make_source(tmp_path, new_content)
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "m.npz").write_bytes(b"old-stale-bytes")
+    digest = hashlib.sha256(new_content).hexdigest()
+
+    ok, _ = ensure_model_available(models_dir=models_dir, model_id="m.npz", url=url, sha256=digest)
+    assert ok is True
+    assert (models_dir / "m.npz").read_bytes() == new_content
+
+
+def test_existing_file_sha_mismatch_no_url_fails(tmp_path: Path) -> None:
+    models_dir = tmp_path / "models"
+    models_dir.mkdir()
+    (models_dir / "m.npz").write_bytes(b"stale")
+
+    ok, msg = ensure_model_available(models_dir=models_dir, model_id="m.npz", url=None, sha256="abc123")
+    assert ok is False
+    assert "non corrisponde" in msg
+
+
+def test_disallowed_url_scheme_is_rejected(tmp_path: Path) -> None:
+    models_dir = tmp_path / "models"
+    ok, msg = ensure_model_available(models_dir=models_dir, model_id="m.npz", url="ftp://example.com/m.npz")
+    assert ok is False
+    assert "schema URL non ammesso" in msg

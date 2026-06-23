@@ -841,3 +841,11 @@ def test_version_endpoint_reports_versions_and_model_presence() -> None:
         assert body["recommended_model"] == "best_a2c_v3.npz"
         assert isinstance(body["recommended_model_present"], bool)
         assert "models_dir" in body
+
+
+def test_version_recommended_model_respects_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`/version` deve riflettere `BRISCOLA_DEFAULT_MODEL_ID` (coerente col provisioning)."""
+    monkeypatch.setenv("BRISCOLA_DEFAULT_MODEL_ID", "custom_model.npz")
+    with TestClient(main_app) as client:
+        body = client.get("/version").json()
+        assert body["recommended_model"] == "custom_model.npz"
