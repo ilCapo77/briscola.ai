@@ -20,6 +20,7 @@ document.addEventListener('DOMContentLoaded', () => {
      * Nota: la vera sorgente di verità resta il backend; qui "tratteniamo" solo il rendering.
      */
     const REVEAL_DURATION_MS = 1400;
+    const AI_PLAYER_DISPLAY_NAME = 'Giocatore AI';
 
     /**
      * Durata (ms) di visualizzazione del risultato della mano (chi vince + punti).
@@ -413,17 +414,15 @@ document.addEventListener('DOMContentLoaded', () => {
     const startGame = async (config) => {
         try {
             const aiAgent = config.aiAgent || 'random';
-            const aiAgentLabel = config.aiAgentLabel || aiAgent;
             const aiModelId = config.aiModelId || null;
-            const aiModelLabel = config.aiModelLabel || null;
             const aiModelCompatible = config.aiModelCompatible === true;
             const aiModelCompatibilityReasonIt = config.aiModelCompatibilityReasonIt || null;
 
-            const opponentLabel = aiAgent === 'bc_model'
-                ? (aiModelLabel ? `Modello: ${aiModelLabel}` : 'Modello locale')
-                : aiAgentLabel;
-
-            const playerNames = [config.playerName, `IA (${opponentLabel})`];
+            // Il nome del player entra negli snapshot e nei messaggi di partita
+            // (es. "X vince!"): teniamolo corto anche quando il modello selezionato
+            // ha una label descrittiva molto lunga. La scelta dell'agente/modello resta
+            // tracciata da `ai_agent` e `ai_model_id` nel payload.
+            const playerNames = [config.playerName, AI_PLAYER_DISPLAY_NAME];
 
             if (serverMeta?.dataset_requires_consent === true && config.consentToDataCollection !== true) {
                 throw new Error('Devi accettare la raccolta dati (anonima) per avviare la partita.');
