@@ -934,6 +934,29 @@ Piano consigliato (ordine):
    - prossimi tentativi possibili: (a) scala maggiore del fine-tuning A2C (richiede parità v3 fast/numba per throughput);
      (b) teacher `hybrid_endgame` (heuristic_v2) per ridurre l'overkill ereditato; (c) BC-anchor nel fine-tuning per restare
      vicino al teacher; (d) opponent mix con `best_a2c` per allenarsi contro il best.
+
+5a. **Follow-up (a) — parità encoder v3 su fast/numba** (commit `e99684a`, `19b19d2`, `1413b12`): COMPLETATO.
+   - fast Python e numba ora supportano v3; parità encoder domain==fast (esatta) e domain==numba (30 partite, 1200 stati,
+     max diff feature 2.8e-08); rollout fast-Python e collector numba costruiscono `out_of_play` (marca alla giocata, no
+     briscola iniziale); guard rimossi per-path solo dopo i test di parità. Smoke: `train_a2c v3 --rollout-engine fast
+     --fast-rollout numba` → modello v3/310.
+
+5b. **Benchmark throughput v3** (commit `1413b12`, Mac locale):
+   - **A2C training** (20k partite, init BC v3, opponent-mix step 5): `--rollout-engine domain` **~419 games/sec** (47.8s)
+     vs `--rollout-engine fast --fast-rollout numba` **~5900 games/sec** (3.4s) → **~14× speedup** (sblocca run ≥1M).
+   - **Evaluation domain** (`benchmark_perf.py --mode eval`, 10k×2): encoder v2 (`best_a2c`) **~871 games/sec**
+     vs encoder v3 (`a2c_v3`) **~721 games/sec** (v3 ~17% più lento: 22 feature in più + costruzione `out_of_play`).
+   - nota: `benchmark_perf.py --mode numba-eval` non supporta `bc_model` (solo rule-based), quindi il throughput numba dei
+     modelli è misurato sul training A2C sopra.
+
+5c. **Run sperimentale v3 scalato** (commit `1413b12`; **nessuna promozione**):
+   - setup identico allo step 5 tranne scala+engine: stesso dataset teacher 20k → stesso BC v3 (`bc_v3.npz`), fine-tuning A2C v3
+     `--rollout-engine fast --fast-rollout numba`, opponent-mix invariato, **1M partite**, seed nuovo 100 (~2m25s).
+   - head-to-head vs `best_a2c` (medium, domain): **avg diff -1.83** (5108/4620/272) → migliora il -2.14 dello step 5 di +0.31,
+     ma **non diventa positivo**.
+   - criterio non soddisfatto (gate "se positivo → big/promozione"): **stop**, niente `big`, niente promozione. `best_a2c` resta il best.
+   - lettura: a parità di teacher/mix/encoder, 10× di scala (200k→1M) sposta pochissimo. Le leve da provare separatamente
+     restano (b)/(c)/(d) — una variabile alla volta.
 6. **PPO/GAE solo dopo baseline ibrida**:
    - mantenere A2C come default, perché è già integrato con Numba, opponent mix, BC-anchor e evaluation matrix;
    - usare PPO/GAE come spike mirato se A2C v3/endgame-aware si stabilizza ma mostra ancora regressioni;
