@@ -118,8 +118,27 @@ def _asset_version() -> str:
     Di default segue la versione del pacchetto; `BRISCOLA_ASSET_VERSION` permette di forzare
     un valore diverso in deploy senza dover fare necessariamente un bump applicativo.
     """
-    raw = os.getenv("BRISCOLA_ASSET_VERSION", get_code_version()).strip() or get_code_version()
-    return quote(raw, safe="")
+    # Override esplicito (utile in deploy se si vuole forzare un valore preciso).
+    override = os.getenv("BRISCOLA_ASSET_VERSION", "").strip()
+    if override:
+        return quote(override, safe="")
+
+    # Altrimenti deriviamo la versione dal CONTENUTO statico: il `mtime` massimo tra i file CSS/JS.
+    # Così ogni modifica a CSS/JS invalida automaticamente la cache del browser, sia in locale
+    # (senza dover reinstallare il pacchetto o bumpare la versione) sia tra un deploy e l'altro.
+    # Manteniamo `get_code_version()` come prefisso leggibile.
+    try:
+        latest_mtime_ns = 0
+        for root, _dirs, files in os.walk(static_dir):
+            for filename in files:
+                if filename.endswith((".css", ".js")):
+                    mtime_ns = os.stat(os.path.join(root, filename)).st_mtime_ns
+                    latest_mtime_ns = max(latest_mtime_ns, mtime_ns)
+        if latest_mtime_ns:
+            return quote(f"{get_code_version()}-{latest_mtime_ns:x}", safe="-")
+    except OSError:
+        pass
+    return quote(get_code_version(), safe="")
 
 
 def _realtime_mode() -> str:
