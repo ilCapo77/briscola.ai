@@ -23,7 +23,7 @@ import json
 import os
 import random
 import uuid
-from contextlib import aclosing, asynccontextmanager
+from contextlib import aclosing, asynccontextmanager, suppress
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -52,7 +52,7 @@ from .dto import (
     TableCardDTO,
     TrickResultDTO,
 )
-from .event_log import EventLog, EventLogConfig, parse_event_db_path
+from .event_log import EventLogProtocol, build_event_log, parse_event_db_path, resolve_database_url
 from .game_store import (
     AiSeatConfig,
     GameSession,
@@ -96,7 +96,7 @@ class GameState(BaseModel):
     player_index: Optional[int] = None
 
 
-def _get_event_log() -> Optional[EventLog]:
+def _get_event_log() -> Optional[EventLogProtocol]:
     """
     Helper per accedere al logger dalla app FastAPI.
 
@@ -267,36 +267,29 @@ async def lifespan(app: FastAPI):
     # - se `app.state.event_log` esiste già, non lo tocchiamo (né lo chiudiamo).
     # - altrimenti, proviamo a crearlo da env.
     event_log_created_here = False
-    raw_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
+    # Backend event log: Postgres se `DATABASE_URL` è impostata (cloud multi-replica), altrimenti
+    # SQLite locale se è dato un path, altrimenti disabilitato. `desired` = identità del backend
+    # voluto (per ricreare la connessione se la config cambia tra due startup, tipico nei test).
+    database_url = resolve_database_url()
+    sqlite_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
+    desired = database_url or sqlite_path
 
     existing_event_log = getattr(app.state, "event_log", None)
-    event_log: Optional[EventLog] = existing_event_log
+    event_log: Optional[EventLogProtocol] = existing_event_log
 
-    # Se il path cambia tra due startup (tipico nei test), ricreiamo la connessione.
-    # Se il path è disabilitato, chiudiamo e azzeriamo.
-    if event_log is not None:
-        if raw_path is None:
-            try:
-                event_log.close()
-            except Exception:
-                pass
-            event_log = None
-            app.state.event_log = None
-        elif event_log.path != raw_path:
-            try:
-                event_log.close()
-            except Exception:
-                pass
-            event_log = None
-            app.state.event_log = None
+    if event_log is not None and (desired is None or event_log.path != desired):
+        with suppress(Exception):
+            event_log.close()
+        event_log = None
+        app.state.event_log = None
 
-    if event_log is None and raw_path is not None:
+    if event_log is None and desired is not None:
         try:
-            event_log = EventLog(EventLogConfig(path=raw_path))
-            event_log_created_here = True
-        except Exception:
+            event_log = build_event_log(sqlite_path=sqlite_path, database_url=database_url)
+            event_log_created_here = event_log is not None
+        except Exception as exc:
             # Il logger è un "optional feature": se fallisce non vogliamo bloccare il server.
-            print("Event log SQLite: inizializzazione fallita, feature disabilitata.")
+            print(f"Event log: inizializzazione fallita, feature disabilitata ({exc!r}).")
             event_log = None
         app.state.event_log = event_log
 

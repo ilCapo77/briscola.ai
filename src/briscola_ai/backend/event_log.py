@@ -21,13 +21,14 @@ Se non viene fornito alcun path, la feature può restare disabilitata.
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional
+from typing import Any, Optional, Protocol, runtime_checkable
 
 
 @dataclass(frozen=True)
@@ -40,6 +41,50 @@ class EventLogConfig:
     """
 
     path: str
+
+
+@runtime_checkable
+class EventLogProtocol(Protocol):
+    """
+    Interfaccia comune dei backend event log (SQLite locale, Postgres in cloud).
+
+    Permette al resto dell'app di non dipendere dall'implementazione concreta:
+    `main.py` sceglie il backend (factory) e `server.py` usa solo questi metodi.
+    """
+
+    @property
+    def path(self) -> str: ...
+
+    def close(self) -> None: ...
+
+    def ensure_game(
+        self,
+        game_id: str,
+        *,
+        num_players: int,
+        seed: Optional[int] = None,
+        code_version: Optional[str] = None,
+        rules_version: Optional[str] = None,
+    ) -> None: ...
+
+    def set_client_id(self, game_id: str, *, client_id: str) -> None: ...
+
+    def try_mark_game_finished(self, game_id: str, *, finished_at: Optional[float] = None) -> bool: ...
+
+    def try_mark_game_aborted(
+        self, game_id: str, *, aborted_reason: str, aborted_at: Optional[float] = None
+    ) -> bool: ...
+
+    def log_event(
+        self,
+        game_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        server_version: Optional[int] = None,
+        player_index: Optional[int] = None,
+        created_at: Optional[float] = None,
+    ) -> None: ...
 
 
 class EventLog:
@@ -282,6 +327,177 @@ class EventLog:
                 (game_id, ts, server_version, player_index, event_type, payload_json),
             )
             self._conn.commit()
+
+
+class PostgresEventLog:
+    """
+    Event log append-only su **Postgres** (deploy multi-replica, es. Neon).
+
+    Stessa interfaccia di `EventLog` (vedi `EventLogProtocol`), ma persistente e condiviso tra
+    repliche (a differenza dell'SQLite locale, che in cloud è per-replica ed effimero).
+
+    Note implementative
+    -------------------
+    - `psycopg` (v3) è importato lazy: la dipendenza è installata, ma il modulo si carica solo se
+      si usa davvero Postgres (cioè se è impostata `DATABASE_URL`).
+    - Connessione in `autocommit` + `threading.Lock`: scritture best-effort, serializzate (come
+      l'SQLite locale). Per il traffico hobby di un event log append-only è adeguato.
+    - Le operazioni "mark finished/aborted" sono UPDATE atomici con guardia in `WHERE` e usano
+      `rowcount` per l'idempotenza (nessun SELECT-then-UPDATE).
+    - Il client può essere iniettato (`conn=`) per i test senza un Postgres reale.
+    """
+
+    def __init__(self, dsn: Optional[str] = None, *, conn: Any = None) -> None:
+        self._lock = threading.Lock()
+        self._dsn = dsn
+        if conn is not None:
+            self._conn = conn
+        elif dsn is not None:
+            import psycopg  # import lazy: solo se si usa Postgres
+
+            self._conn = psycopg.connect(dsn, autocommit=True)
+        else:
+            raise ValueError("PostgresEventLog richiede `dsn` oppure `conn`.")
+        self._init_schema()
+
+    @property
+    def path(self) -> str:
+        """Identità del backend (per il confronto di ricreazione nel lifespan)."""
+        return self._dsn or "postgres"
+
+    def close(self) -> None:
+        with self._lock, contextlib.suppress(Exception):
+            self._conn.close()
+
+    def _execute(self, sql: str, params: tuple = ()) -> int:
+        """Esegue una statement e ritorna `rowcount` (per l'idempotenza)."""
+        with self._lock, self._conn.cursor() as cur:
+            cur.execute(sql, params)
+            return int(cur.rowcount)
+
+    def _init_schema(self) -> None:
+        """Crea tabelle e indici se non esistono (schema completo: niente migrazioni)."""
+        with self._lock, self._conn.cursor() as cur:
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS games (
+                    game_id TEXT PRIMARY KEY,
+                    created_at DOUBLE PRECISION NOT NULL,
+                    num_players INTEGER NOT NULL,
+                    seed BIGINT,
+                    code_version TEXT,
+                    rules_version TEXT,
+                    client_id TEXT,
+                    finished_at DOUBLE PRECISION,
+                    aborted_at DOUBLE PRECISION,
+                    aborted_reason TEXT
+                );
+                """
+            )
+            cur.execute(
+                """
+                CREATE TABLE IF NOT EXISTS events (
+                    id BIGSERIAL PRIMARY KEY,
+                    game_id TEXT NOT NULL REFERENCES games(game_id),
+                    created_at DOUBLE PRECISION NOT NULL,
+                    server_version INTEGER,
+                    player_index INTEGER,
+                    event_type TEXT NOT NULL,
+                    payload_json TEXT NOT NULL
+                );
+                """
+            )
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_events_game_id ON events(game_id);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_events_type ON events(event_type);")
+
+    def ensure_game(
+        self,
+        game_id: str,
+        *,
+        num_players: int,
+        seed: Optional[int] = None,
+        code_version: Optional[str] = None,
+        rules_version: Optional[str] = None,
+    ) -> None:
+        self._execute(
+            """
+            INSERT INTO games(game_id, created_at, num_players, seed, code_version, rules_version)
+            VALUES(%s, %s, %s, %s, %s, %s)
+            ON CONFLICT (game_id) DO NOTHING;
+            """,
+            (game_id, time.time(), num_players, seed, code_version, rules_version),
+        )
+
+    def set_client_id(self, game_id: str, *, client_id: str) -> None:
+        cleaned = str(client_id).strip()
+        if not cleaned:
+            return
+        self._execute(
+            "UPDATE games SET client_id = COALESCE(client_id, %s) WHERE game_id = %s;",
+            (cleaned, game_id),
+        )
+
+    def try_mark_game_finished(self, game_id: str, *, finished_at: Optional[float] = None) -> bool:
+        ts = time.time() if finished_at is None else float(finished_at)
+        rc = self._execute(
+            "UPDATE games SET finished_at = %s WHERE game_id = %s AND finished_at IS NULL;",
+            (ts, game_id),
+        )
+        return rc == 1
+
+    def try_mark_game_aborted(self, game_id: str, *, aborted_reason: str, aborted_at: Optional[float] = None) -> bool:
+        ts = time.time() if aborted_at is None else float(aborted_at)
+        reason = (str(aborted_reason).strip() or "unknown")[:200]
+        rc = self._execute(
+            """
+            UPDATE games SET aborted_at = %s, aborted_reason = %s
+            WHERE game_id = %s AND finished_at IS NULL AND aborted_at IS NULL;
+            """,
+            (ts, reason, game_id),
+        )
+        return rc == 1
+
+    def log_event(
+        self,
+        game_id: str,
+        event_type: str,
+        payload: dict[str, Any],
+        *,
+        server_version: Optional[int] = None,
+        player_index: Optional[int] = None,
+        created_at: Optional[float] = None,
+    ) -> None:
+        ts = created_at if created_at is not None else time.time()
+        payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
+        self._execute(
+            """
+            INSERT INTO events(game_id, created_at, server_version, player_index, event_type, payload_json)
+            VALUES(%s, %s, %s, %s, %s, %s);
+            """,
+            (game_id, ts, server_version, player_index, event_type, payload_json),
+        )
+
+
+def resolve_database_url() -> Optional[str]:
+    """URL Postgres dalle env candidate (override esplicito prima), o None."""
+    for name in ("BRISCOLA_DATABASE_URL", "DATABASE_URL"):
+        value = os.getenv(name, "").strip()
+        if value:
+            return value
+    return None
+
+
+def build_event_log(*, sqlite_path: Optional[str], database_url: Optional[str]) -> Optional[EventLogProtocol]:
+    """
+    Crea il backend event log: Postgres se `database_url` è presente, altrimenti SQLite se è dato un
+    path, altrimenti `None` (feature disabilitata). In cloud multi-replica usare sempre Postgres:
+    l'SQLite locale è per-replica ed effimero.
+    """
+    if database_url:
+        return PostgresEventLog(database_url)
+    if sqlite_path:
+        return EventLog(EventLogConfig(path=sqlite_path))
+    return None
 
 
 def parse_event_db_path(raw: Optional[str]) -> Optional[str]:
