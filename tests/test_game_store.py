@@ -162,3 +162,48 @@ def test_redis_lock_raises_if_not_acquired() -> None:
         assert entered is False  # il blocco protetto NON deve essere eseguito
 
     asyncio.run(scenario())
+
+
+def test_inmemory_pubsub_delivers_messages() -> None:
+    store = InMemoryGameSessionStore()
+
+    async def scenario() -> None:
+        received: list[str] = []
+
+        async def reader() -> None:
+            async for m in store.subscribe("g1"):
+                received.append(m)
+                if len(received) >= 2:
+                    break
+
+        task = asyncio.create_task(reader())
+        await asyncio.sleep(0.05)  # lascia registrare il subscriber
+        await store.publish("g1", "a")
+        await store.publish("g1", "b")
+        await asyncio.wait_for(task, timeout=2)
+        assert received == ["a", "b"]
+
+    asyncio.run(scenario())
+
+
+def test_redis_pubsub_across_replicas() -> None:
+    """Pub/sub Redis: un evento pubblicato da una replica raggiunge il subscriber su un'altra."""
+    c1, c2 = _fake_redis_pair()
+    publisher = RedisGameSessionStore(client=c1)
+    subscriber = RedisGameSessionStore(client=c2)
+
+    async def scenario() -> None:
+        received: list[str] = []
+
+        async def reader() -> None:
+            async for m in subscriber.subscribe("g1"):
+                received.append(m)
+                break
+
+        task = asyncio.create_task(reader())
+        await asyncio.sleep(0.1)  # lascia completare il subscribe
+        await publisher.publish("g1", "hello")
+        await asyncio.wait_for(task, timeout=3)
+        assert received == ["hello"]
+
+    asyncio.run(scenario())

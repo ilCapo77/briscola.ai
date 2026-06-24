@@ -102,6 +102,14 @@ class GameSessionStore(Protocol):
 
     def lock(self, game_id: str) -> "contextlib.AbstractAsyncContextManager[None]": ...
 
+    async def publish(self, game_id: str, message: str) -> None:
+        """Pubblica un messaggio sul canale eventi della partita (per fan-out WebSocket multi-replica)."""
+        ...
+
+    def subscribe(self, game_id: str) -> AsyncIterator[str]:
+        """Async generator che produce i messaggi pubblicati sul canale eventi della partita."""
+        ...
+
 
 class InMemoryGameSessionStore:
     """Store in-memory (default dev/test). Serializza come Redis per avere identica semantica."""
@@ -109,6 +117,8 @@ class InMemoryGameSessionStore:
     def __init__(self) -> None:
         self._data: dict[str, str] = {}
         self._locks: dict[str, asyncio.Lock] = {}
+        # Pub/sub locale: per ogni partita, l'insieme delle code dei subscriber attivi.
+        self._subscribers: dict[str, set[asyncio.Queue[str]]] = {}
 
     async def get(self, game_id: str) -> Optional[GameSession]:
         raw = self._data.get(game_id)
@@ -127,6 +137,23 @@ class InMemoryGameSessionStore:
         async with lk:
             yield
 
+    async def publish(self, game_id: str, message: str) -> None:
+        for queue in list(self._subscribers.get(game_id, ())):
+            queue.put_nowait(message)
+
+    async def subscribe(self, game_id: str) -> AsyncIterator[str]:
+        queue: asyncio.Queue[str] = asyncio.Queue()
+        self._subscribers.setdefault(game_id, set()).add(queue)
+        try:
+            while True:
+                yield await queue.get()
+        finally:
+            subs = self._subscribers.get(game_id)
+            if subs is not None:
+                subs.discard(queue)
+                if not subs:
+                    self._subscribers.pop(game_id, None)
+
 
 class RedisGameSessionStore:
     """Store su Redis (prod). `redis` è importato lazy; il client può essere iniettato per i test."""
@@ -144,6 +171,10 @@ class RedisGameSessionStore:
     @staticmethod
     def _key(game_id: str) -> str:
         return f"game:{game_id}"
+
+    @staticmethod
+    def _channel(game_id: str) -> str:
+        return f"game:{game_id}:events"
 
     async def get(self, game_id: str) -> Optional[GameSession]:
         raw = await self._redis.get(self._key(game_id))
@@ -170,6 +201,23 @@ class RedisGameSessionStore:
         finally:
             with contextlib.suppress(Exception):
                 await redis_lock.release()
+
+    async def publish(self, game_id: str, message: str) -> None:
+        await self._redis.publish(self._channel(game_id), message)
+
+    async def subscribe(self, game_id: str) -> AsyncIterator[str]:
+        pubsub = self._redis.pubsub()
+        await pubsub.subscribe(self._channel(game_id))
+        try:
+            async for msg in pubsub.listen():
+                # `listen()` emette anche messaggi di servizio (subscribe/unsubscribe): filtriamo.
+                if msg.get("type") == "message":
+                    yield msg["data"]
+        finally:
+            with contextlib.suppress(Exception):
+                await pubsub.unsubscribe(self._channel(game_id))
+            with contextlib.suppress(Exception):
+                await pubsub.aclose()
 
 
 def resolve_redis_url() -> Optional[str]:
