@@ -130,6 +130,8 @@ POST .../actions (gioca)   -> snapshot
 
 Il backend è “server‑authoritative”: dopo la mossa umana, se tocca all’IA gioca da solo ed emette `ai_card_reveal` → `trick_result` → snapshot. Il frontend gestisce solo la **presentazione** (mette in coda gli eventi e applica gli snapshot dopo gli hold), così la **logica di gioco** (backend) resta separata dalla **logica di presentazione** (frontend). Il backend non introduce delay di animazione (niente `asyncio.sleep()`).
 
+**Stato e scalabilità (multi‑replica).** Lo stato delle partite vive in un `GameSessionStore` (`backend/game_store.py`): **in memoria** in locale, **Redis** in cloud quando è impostata `REDIS_URL`. In deploy con più repliche questo evita il “partita non trovata” (azioni/WS che colpiscono repliche diverse). L'architettura REST+WebSocket resta invariata: il fan‑out degli eventi WS passa per il **pub/sub** dello store, così ogni client riceve `ai_card_reveal`/`trick_result`/`observation` da qualsiasi replica. Gli `observation` per‑giocatore sono ricostruiti dal subscriber (anti‑cheat: mai lo stato completo).
+
 ## Frontend (UI web)
 
 **Smoke test manuale** (2–3 min): avvia il server, apri `http://localhost:8000` con la Console DevTools aperta, gioca 3 mani complete e verifica che la sequenza sia sempre **reveal → seconda carta → risultato**, senza errori in console, freeze o carte duplicate sul tavolo.
