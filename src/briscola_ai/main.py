@@ -128,6 +128,23 @@ def _asset_version() -> str:
     return quote(raw, safe="")
 
 
+def _realtime_mode() -> str:
+    """
+    Modalità realtime suggerita al frontend.
+
+    In cloud multi-replica (Redis configurato) il push WebSocket è per-replica e può non
+    raggiungere il client: usiamo il **polling** (che rilegge lo stato dallo store, coerente
+    da qualsiasi replica). In locale (niente Redis) usiamo il WebSocket. Override via `?polling=1`
+    / `?ws=1` nell'URL. Forzabile con `BRISCOLA_REALTIME_MODE`.
+    """
+    from .backend.game_store import resolve_redis_url
+
+    forced = os.getenv("BRISCOLA_REALTIME_MODE", "").strip().lower()
+    if forced in {"polling", "ws"}:
+        return forced
+    return "polling" if resolve_redis_url() else "ws"
+
+
 # Serve il file HTML principale
 @app.get("/", response_class=HTMLResponse)
 async def read_root():
@@ -136,6 +153,7 @@ async def read_root():
     with open(index_path, encoding="utf-8") as f:
         html = f.read()
     html = html.replace("__BRISCOLA_ASSET_VERSION__", _asset_version())
+    html = html.replace("__BRISCOLA_REALTIME_MODE_VALUE__", _realtime_mode())
     return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
 
 

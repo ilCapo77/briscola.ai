@@ -183,10 +183,16 @@ document.addEventListener('DOMContentLoaded', () => {
      * - utile quando stai debuggando problemi di rete/reconnect e vuoi un flusso più "semplice"
      * - non è pensato come modalità principale (il WS resta il path normale)
      */
-    const _pollingEnabledByUrl = () => {
+    const _shouldUsePolling = () => {
         const params = new URLSearchParams(window.location.search);
-        const value = params.get('polling');
-        return value === '1' || value === 'true';
+        const polling = (params.get('polling') || '').toLowerCase();
+        if (polling === '1' || polling === 'true') return true;
+        if (polling === '0' || polling === 'false') return false;
+        // Override esplicito verso WebSocket.
+        const ws = (params.get('ws') || '').toLowerCase();
+        if (ws === '1' || ws === 'true') return false;
+        // Default deciso dal server: "polling" in cloud multi-replica, "ws" in locale.
+        return (window.__BRISCOLA_REALTIME_MODE__ || 'ws') === 'polling';
     };
 
     const _stopPolling = () => {
@@ -199,7 +205,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const _startPolling = (gameId, playerIndex) => {
         _stopPolling();
-        UI.updateGameInfo({ connected: false, statusText: 'Polling (debug)', statusClass: 'connecting' });
+        UI.updateGameInfo({ connected: false, statusText: 'Polling', statusClass: 'connecting' });
 
         const pollOnce = async () => {
             if (pollingInFlight) return;
@@ -499,8 +505,8 @@ document.addEventListener('DOMContentLoaded', () => {
             UI.updateGameInfo({ gameId: result.game_id, connected: false, statusText: 'Connessione...', statusClass: 'connecting' });
             UI.showGameBoard();
 
-            if (_pollingEnabledByUrl()) {
-                // Modalità debug: niente WS, solo polling.
+            if (_shouldUsePolling()) {
+                // Niente WS: solo polling (default in cloud multi-replica, o forzato via ?polling=1).
                 _startPolling(result.game_id, 0);
             } else {
                 // Connect WebSocket (path normale)
@@ -587,6 +593,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         API.disconnectWebSocket();
+        _stopPolling();  // a partita finita ferma anche il polling (default cloud): niente GET inutili
         store.setState({ connected: false });
         UI.updateGameInfo({ connected: false });
     };

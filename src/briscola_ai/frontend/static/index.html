@@ -109,6 +109,11 @@
         </footer>
     </div>
 
+    <script>
+        // Modalità realtime decisa dal server: "polling" in cloud multi-replica (Redis attivo),
+        // "ws" in locale. Il default e' sovrascrivibile con ?polling=1 / ?ws=1 nell'URL.
+        window.__BRISCOLA_REALTIME_MODE__ = "__BRISCOLA_REALTIME_MODE_VALUE__";
+    </script>
     <script src="/static/js/store.js?v=__BRISCOLA_ASSET_VERSION__"></script>
     <script src="/static/js/api.js?v=__BRISCOLA_ASSET_VERSION__"></script>
     <script src="/static/js/ui.js?v=__BRISCOLA_ASSET_VERSION__"></script>

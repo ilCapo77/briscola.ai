@@ -936,3 +936,15 @@ def test_create_game_rejects_invalid_ai_agent() -> None:
         json={"num_players": 2, "player_names": ["A", "B"], "ai_agent": "agente_inesistente"},
     )
     assert r.status_code == 400
+
+
+def test_root_injects_realtime_mode(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`/` deve iniettare la modalità realtime risolta (placeholder sostituito; default ws senza Redis)."""
+    monkeypatch.delenv("REDIS_URL", raising=False)
+    monkeypatch.delenv("BRISCOLA_REDIS_URL", raising=False)
+    monkeypatch.delenv("REDISCLOUD_URL", raising=False)
+    monkeypatch.delenv("BRISCOLA_REALTIME_MODE", raising=False)
+    with TestClient(main_app) as client:
+        html = client.get("/").text
+    assert "__BRISCOLA_REALTIME_MODE_VALUE__" not in html  # placeholder valore sostituito
+    assert 'window.__BRISCOLA_REALTIME_MODE__ = "ws"' in html  # nome variabile intatto + valore risolto
