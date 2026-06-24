@@ -100,4 +100,10 @@ Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Aggi
   - `0.1.x` (patch): fix/refactor/test/doc/performance senza cambiare contratti pubblici.
   - `0.(n+1).0` (minor): nuove feature visibili o cambi rilevanti a componenti/pipeline; anche per cambi **breaking** ai contratti pubblici (API/WS/DTO o schema dataset/export), con nota esplicita.
   - L'agente segnala quando un change merita un bump e propone la versione; la decisione finale resta al maintainer.
+  - **Tag git per ogni bump**: dopo aver bumpato `pyproject.toml`, crea il tag annotato corrispondente e pushalo, così la serie `vX.Y.Z` su GitHub resta completa e allineata alla history:
+    ```bash
+    git tag -a vX.Y.Z -m "Versione X.Y.Z"
+    git push <remote> vX.Y.Z
+    ```
+    Nota: `get_code_version()` (footer UI, `/version`, cache-busting) legge la versione da `pyproject.toml` anche in editable, quindi non serve reinstallare per vederla aggiornata.
 - PR: descrivi il change, includi passi di riproduzione per i bug, e screenshot per cambi UI (`src/briscola_ai/frontend/static/`).
