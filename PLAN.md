@@ -4,10 +4,10 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.5.0` (`pyproject.toml`).
-- Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`.
+- Versione progetto: `0.7.3` (`pyproject.toml`).
+- Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
-- Backend/UI: HTTP + WebSocket, stato partita in memoria, UI statica servita dal backend.
+- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>.
 - Anti-cheat: agenti e modelli ricevono `PlayerObservation`, non `GameState` completo.
 - Fast path: 2-player numerico Python/Numba per training/evaluation ad alto throughput.
 - Encoder supportati: v1, v2, v3.
@@ -17,7 +17,7 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
   - v3: `FEATURE_DIM_2P_V3 = 310`
 - Modello consigliato: `data/models/best_a2c_v3.npz` (encoder v3, guard anti-overkill ON).
 - Modello precedente ancora disponibile: `data/models/best_a2c.npz` (encoder v2).
-- Default server: `random`. Non cambiarlo a un modello `.npz` senza gestire il caso file assente.
+- Default UI: avversario = modello migliore (`bc_model` + `best_a2c_v3`); `GET /api/ai/agents` espone `available`/`requires_model_id` e la UI disabilita gli avversari il cui modello bundle manca (es. `hybrid_endgame_best_a2c` senza `best_a2c.npz`). Il default lato API resta `random` se non specificato.
 - Coverage badge README: manuale via Shields.io.
 
 Comandi quality gate:
@@ -37,8 +37,8 @@ pytest --cov=briscola_ai --cov-report=term-missing
 
 ## Architettura Da Mantenere
 
-- `domain/`: regole pure, modelli, stato, osservazioni, mapping carte.
-- `backend/`: FastAPI, DTO, server, event log.
+- `domain/`: regole pure, modelli, stato, osservazioni, mapping carte, serializzazione (`serialization.py`).
+- `backend/`: FastAPI, DTO, server, `game_store.py` (GameSessionStore in-memory/Redis + pub/sub), event log (`event_log.py`: SQLite/Postgres).
 - `ai/agents.py`: agenti baseline, ibridi, factory e catalogo agenti.
 - `ai/training/observation_encoder.py`: encoder v1/v2/v3 canonici.
 - `ai/fast_*`: fast path 2-player; deve restare coerente col dominio tramite test di parità.
@@ -53,6 +53,8 @@ Invarianti importanti:
 - `out_of_play_cards_onehot`: carte non più disponibili, cioè prese + tavolo; non include la sola briscola scoperta.
 - Modelli `.npz` devono dichiarare metadata coerenti (`encoder_version`, `feature_dim`, label/descrizione quando utile).
 - UI/catalogo non devono accettare path arbitrari dal browser.
+- Lo stato partita vive solo nel `GameSessionStore`: non reintrodurre dict globali di stato nel server; l'`Agent` non è serializzato (config in sessione, ricostruito con `build_agent`).
+- Gli eventi realtime passano per il pub/sub dello store: mantenere la consegna WS indipendente dalla replica (no `connected_clients` globali).
 
 ## Baseline AI Ufficiale
 
@@ -95,6 +97,17 @@ Decisione: `best_a2c_v3.npz` è la baseline consigliata. `best_a2c.npz` resta se
 - Self-play verso DB.
 - Evaluation offline seat-fair.
 
+### Deploy E Infrastruttura (Fase 1)
+
+- Stato partita su `GameSessionStore` (in-memory/Redis) + lock per partita → risolve "partita non trovata" su deploy multi-replica.
+- Realtime via **Redis pub/sub**: fan-out WS cross-replica (`ai_card_reveal`/`trick_result`/refresh point-in-time); mantiene REST+WS; `?polling=1` resta fallback.
+- Event log **Postgres** opzionale (`PostgresEventLog`, factory `build_event_log` su `DATABASE_URL`); stesso schema dell'SQLite.
+- Provisioning modello allo startup (`BRISCOLA_MODEL_URL` + sha256); endpoint `/health` e `/version`; shim `main:app` per `fastapi run`.
+- Cache-busting asset automatico (versione + mtime degli static).
+- Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone.
+- Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
+- **Deployato** su FastAPI Cloud con Redis collegato; Postgres/Neon da attivare quando si vuole la raccolta dati.
+
 ### Endgame E Strategia
 
 - Solver endgame esatto 2-player a mazzo vuoto.
@@ -119,7 +132,7 @@ Decisione: `best_a2c_v3.npz` è la baseline consigliata. `best_a2c.npz` resta se
 
 ### 1. Consolidamento Del Nuovo Best
 
-Priorità alta, piccolo rischio.
+Priorità alta, piccolo rischio. Stato: **in gran parte FATTO** — best v3 in produzione, default UI = best model, opzioni con modello mancante disabilitate. L'evaluation matrix leggera resta utile come check periodico.
 
 - Verificare UI/API con `best_a2c_v3.npz` presente e selezionato.
 - Verificare comportamento UI/API quando `best_a2c_v3.npz` manca: non deve rompere creazione partita o catalogo.
@@ -134,7 +147,15 @@ Priorità alta, piccolo rischio.
 - Salvare JSON locali in `benchmarks/experiments/` e riportare solo sintesi stabile qui, se emergono regressioni.
 - Aggiornare README se serve una nota utente sul modello consigliato v3.
 
-### 2. Self-Improvement V3 In Stile League
+### 2. Raccolta Dati In Produzione (Postgres)
+
+Priorità media; serve solo se si vuole costruire il dataset da partite umane reali.
+
+- Collegare Neon all'app (→ `DATABASE_URL`) e impostare `BRISCOLA_EVENT_LOG_MODE=dataset` (il consenso è già gestito: checkbox UI + enforcement backend).
+- Aggiornare `scripts/export_dataset.py` per leggere anche da **Postgres** (oggi legge solo SQLite) → export JSONL del dataset umano.
+- Verificare privacy: niente PII, `client_id` pseudonimo, solo partite consenzienti/complete.
+
+### 3. Self-Improvement V3 In Stile League
 
 Priorità media, dopo consolidamento.
 
@@ -155,7 +176,7 @@ Criteri di promozione:
 - `trump_waste_rate` e `trump_overkill_rate` non peggiorano materialmente;
 - niente promozione se il vantaggio è solo rumore statistico.
 
-### 3. PPO/GAE Solo Se A2C Si Blocca
+### 4. PPO/GAE Solo Se A2C Si Blocca
 
 Priorità bassa per ora.
 
@@ -168,7 +189,7 @@ PPO/GAE ha senso solo se:
 
 Non introdurre DQN per ora: action mask, parziale osservabilità e self-play rendono più coerente continuare con policy-gradient.
 
-### 4. Igiene
+### 5. Igiene
 
 - Aggiornare badge coverage README solo dopo `pytest --cov=briscola_ai` se la variazione è materiale.
 - Tenere `PLAN.md` breve: risultati intermedi e tentativi falliti vanno rimossi o sintetizzati.

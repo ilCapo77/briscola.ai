@@ -18,11 +18,16 @@ Briscola end-to-end: motore di regole puro → backend HTTP/WS → UI → pipeli
 
 **Anti-cheat (invariante centrale):** gli agenti non ricevono mai `GameState` completo, solo `PlayerObservation`. Vale per le baseline (`ai/agents.py`), i modelli (`ai/bc_model_agent.py`) e il reward shaping (`ai/training/reward_shaping.py` usa solo informazione pubblica + mano del giocatore). Non introdurre scorciatoie che leggano carte nascoste o l'ordine del mazzo.
 
-**Backend** (`src/briscola_ai/backend/`): FastAPI montato sotto `/api` da `main.py`; stato partite **in memoria** (`active_games`, non persistente). `dto.py` = contratto Pydantic v2; `server.py` = REST + WebSocket (architettura ibrida: REST per le azioni, WS per push degli aggiornamenti). Il backend **avanza automaticamente** quando è il turno dell'IA e **non** introduce delay di presentazione (niente `asyncio.sleep` per animazioni — quello è compito del frontend). `event_log.py` scrive un event log SQLite append-only (`data/briscola_events.sqlite3`) usato come base dataset.
+**Backend** (`src/briscola_ai/backend/`): FastAPI montato sotto `/api` da `main.py` (che serve anche la UI e gli statici ed espone `/health` e `/version`). `dto.py` = contratto Pydantic v2; `server.py` = REST + WebSocket (architettura ibrida: REST per le azioni, WS per gli aggiornamenti). Il backend **avanza automaticamente** quando è il turno dell'IA e **non** introduce delay di presentazione (quello è compito del frontend). Punti chiave del runtime (pensati per il deploy cloud multi-replica):
+
+- **Stato partita**: vive in un `GameSessionStore` (`game_store.py`) — `InMemoryGameSessionStore` in locale, `RedisGameSessionStore` se è impostata `REDIS_URL`. Salva `GameState` (serializzato via `domain/serialization.py`) + la config IA per posto; l'oggetto `Agent` **non** è serializzato (si ricostruisce con `build_agent`, con cache). Lock per partita (asyncio in-memory / lock Redis distribuito) per serializzare le azioni concorrenti. Evita di reintrodurre dict globali di stato (`active_games` & co. sono stati rimossi).
+- **Realtime**: il fan-out degli eventi WebSocket passa per il **pub/sub** dello store (Redis in prod, fan-out asyncio in dev), così `ai_card_reveal`/`trick_result`/snapshot raggiungono il client su QUALSIASI replica. Gli snapshot per-giocatore sono ricostruiti dal subscriber (anti-cheat). `?polling=1` resta come fallback di debug.
+- **Event log** (`event_log.py`): append-only per dataset. `EventLog` su SQLite (default locale) **oppure** `PostgresEventLog` se è impostata `DATABASE_URL` (deploy persistente/condiviso); il backend è scelto da `build_event_log`. Stesso schema `games`/`events`. Attivo solo se configurato (`BRISCOLA_EVENT_DB_PATH` o `DATABASE_URL`); con modalità `dataset` richiede il consenso utente.
+- **Provisioning modello** (`ai/model_provisioning.py`): allo startup, se manca, scarica il modello consigliato da `BRISCOLA_MODEL_URL` (verifica `BRISCOLA_MODEL_SHA256`). Best-effort: non blocca l'avvio.
 
 **Modelli locali (`.npz`)**: la UI seleziona un avversario `bc_model` da un catalogo server-side (`ai/model_catalog.py`). Il browser invia solo un `ai_model_id` (path relativo) tra quelli di `GET /api/ai/models`; il backend rifiuta path traversal e carica solo da `BRISCOLA_MODELS_DIR` (default `./data/models/`). I trainer salvano nei `.npz` i metadati (`label`, `description_it`, `feature_dim`).
 
-**Pipeline ML** (vedi `README.md` e `PLAN.md` per il dettaglio): dominio testabile → backend/UI → event log SQLite → export JSONL versionato (`export_dataset.py`) → self-play → valutazione offline riproducibile → training (BC/PG/A2C). `PLAN.md` è la **fonte di verità su cosa fare dopo** ed è enorme: leggine la coda per lo stato corrente.
+**Pipeline ML** (vedi `README.md` e `PLAN.md` per il dettaglio): dominio testabile → backend/UI → event log (SQLite in locale, **Postgres** in cloud) → export JSONL versionato (`export_dataset.py`, oggi legge da SQLite) → self-play → valutazione offline riproducibile → training (BC/PG/A2C). `PLAN.md` è la **fonte di verità su cosa fare dopo** ed è enorme: leggine la coda per lo stato corrente.
 
 ## Setup, Build, and Run
 
@@ -33,6 +38,19 @@ Richiede **Python 3.14** e [`uv`](https://github.com/astral-sh/uv).
 - Dev deps: `uv pip install -e ".[dev]"`
 - Avvia server: `briscola-server --reload` (UI su `http://localhost:8000`; `--host`/`--port` supportati)
 - Simulazioni headless: `python scripts/simulate_games.py --num-games 100 --seed 42`
+
+Deps di runtime per il cloud: `redis` (game store) e `psycopg` (event log Postgres) sono già in `dependencies`, ma importate **lazy** — usate solo se `REDIS_URL`/`DATABASE_URL` sono impostate (in locale tutto gira in-memory + SQLite). Dev-only: `fakeredis` (test dello store Redis) e `playwright` (ispezione UI/layout; richiede `python -m playwright install chromium`).
+
+### Runtime & deploy (variabili d'ambiente)
+
+Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-replica) servono Redis + i provisioning. Il sito è live su `https://briscolaai.fastapicloud.dev`; l'entrypoint per `fastapi run` è lo shim `main:app` nella root.
+
+- `REDIS_URL` (o `BRISCOLA_REDIS_URL`): attiva `RedisGameSessionStore` + pub/sub realtime. Se assente → in-memory + WebSocket diretto.
+- `DATABASE_URL` (o `BRISCOLA_DATABASE_URL`): attiva l'event log su Postgres. Se assente → SQLite (`BRISCOLA_EVENT_DB_PATH`) o disabilitato.
+- `BRISCOLA_EVENT_LOG_MODE`: `debug` (default) | `dataset` (minimale, richiede consenso) | `off`.
+- `BRISCOLA_MODEL_URL` + `BRISCOLA_MODEL_SHA256` (+ `BRISCOLA_DEFAULT_MODEL_ID`): provisioning del modello consigliato allo startup.
+- `BRISCOLA_MODELS_DIR` (default `./data/models/`); `BRISCOLA_CORS_ALLOW_ORIGINS` (default `*`, restringere in prod).
+- `BRISCOLA_REALTIME_MODE` (`ws`|`polling`, override; default `ws`); `BRISCOLA_ASSET_VERSION` (override del cache-busting, che di default deriva da versione + mtime degli static).
 
 ### Pipeline AI (script in `scripts/`)
 
@@ -72,7 +90,7 @@ Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Aggi
 
 ## Testing
 
-`pytest` (dev dep); test in `tests/` come `test_*.py`. Coprono invarianti di dominio, casi limite endgame, parità fast/numba vs dominio, encoder osservazioni, reward shaping, e integrazione API/WS.
+`pytest` (dev dep); test in `tests/` come `test_*.py`. Coprono invarianti di dominio, casi limite endgame, parità fast/numba vs dominio, encoder osservazioni, reward shaping, integrazione API/WS, game store (in-memory/Redis via `fakeredis`, incl. pub/sub) e backend event log (SQLite + Postgres con connessione fake). Un fixture autouse in `tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL` per ogni test, così la suite resta **ermetica** (non contatta servizi reali anche se quelle env sono presenti nell'ambiente).
 
 ## Commits & Pull Requests
 

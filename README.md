@@ -192,7 +192,7 @@ Il **solver endgame** (`ai/endgame_solver.py`) calcola la mossa ottima esatta co
 
 ### Raccolta dati ed export
 
-Avviando `briscola-server` viene scritto un event log su `./data/briscola_events.sqlite3` (gitignored). Path/modalità configurabili via CLI (`--event-db`, `--event-log-mode`) o env (`BRISCOLA_EVENT_DB_PATH`, `BRISCOLA_EVENT_LOG_MODE`). Per ogni partita si salvano `seed`, `code_version`, `rules_version`.
+Avviando `briscola-server` viene scritto un event log su `./data/briscola_events.sqlite3` (gitignored). Path/modalità configurabili via CLI (`--event-db`, `--event-log-mode`) o env (`BRISCOLA_EVENT_DB_PATH`, `BRISCOLA_EVENT_LOG_MODE`). Per ogni partita si salvano `seed`, `code_version`, `rules_version`. In cloud multi‑replica l'SQLite locale è per‑replica ed effimero: imposta `DATABASE_URL` per usare un event log **Postgres** (Neon) persistente e condiviso (`PostgresEventLog`, stesso schema `games`/`events`).
 
 Due modalità di logging:
 - `debug` (default): completa, utile per troubleshooting;
@@ -206,7 +206,7 @@ python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./dat
 
 Default: solo azioni del `player_index=0`, escluse quelle IA, solo partite complete. Opzioni utili: `--all-players`, `--include-ai`, `--no-next-state` (supervised), `--include-incomplete`. In modalità `dataset` l’exporter usa preferibilmente `human_action`.
 
-**Deploy/CORS**: per un dominio pubblico restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio briscola-server` (default `*`, solo per sviluppo).
+**Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://briscolaai.fastapicloud.dev>.
 
 ### Simulazioni e self‑play (headless)
 
@@ -287,7 +287,7 @@ python scripts/evaluate_agents.py --benchmark medium --engine domain \
 
 ## Stato e roadmap
 
-Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
+Il gioco è **online** su <https://briscolaai.fastapicloud.dev> (deploy su FastAPI Cloud: stato partita su Redis, realtime via pub/sub, event log Postgres opzionale). Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
 
 ## Licenza
 
