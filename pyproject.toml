@@ -27,6 +27,9 @@ dev = [
     "ruff>=0.9.0",
     "mypy>=1.14.0",
     "fakeredis>=2.21.0",
+    # Solo per ispezione UI in locale (es. verifica layout/overlap). NON usato in prod.
+    # Richiede anche `python -m playwright install chromium` per scaricare il browser.
+    "playwright>=1.60.0",
 ]
 
 [project.scripts]
