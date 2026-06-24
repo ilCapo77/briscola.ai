@@ -11,6 +11,7 @@ interferenze tra casi di test.
 import asyncio
 import json
 from collections.abc import Generator
+from datetime import datetime
 from pathlib import Path
 
 import numpy as np
@@ -19,9 +20,52 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from briscola_ai.backend import server
+from briscola_ai.backend.game_store import GameSession, InMemoryGameSessionStore
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.state import GameState, PlayerState
 from briscola_ai.main import app as main_app
+
+
+def _reset_server_state() -> None:
+    """Resetta lo store sessioni (in-memory) e i buffer per-replica in `server`."""
+    server.game_store = InMemoryGameSessionStore()
+    server.game_timestamps.clear()
+    server.game_data.clear()
+    server.connected_clients.clear()
+
+
+def _get_session(game_id: str) -> GameSession | None:
+    """Helper sincrono per leggere una sessione dallo store (per i test)."""
+    return asyncio.run(server.game_store.get(game_id))
+
+
+def _put_state(game_id: str, state: GameState, *, version: int = 0) -> None:
+    """
+    Helper per i test che forzano uno stato finale: legge la sessione esistente (per riusarne
+    `ai_seats`/`action_seed`) e la riscrive con lo stato/versione forniti.
+    """
+
+    async def _do() -> None:
+        existing = await server.game_store.get(game_id)
+        if existing is not None:
+            existing.state = state
+            existing.version = version
+            await server.game_store.set(existing)
+        else:
+            now = datetime.now().isoformat()
+            await server.game_store.set(
+                GameSession(
+                    game_id=game_id,
+                    state=state,
+                    version=version,
+                    ai_seats={},
+                    action_seed=0,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    asyncio.run(_do())
 
 
 @pytest.fixture(autouse=True)
@@ -29,26 +73,12 @@ def _clean_server_state() -> Generator[None, None, None]:
     """
     I test d'integrazione usano stato globale in `briscola_ai.backend.server`.
 
-    Per evitare interferenze tra test, puliamo le strutture in memoria
+    Per evitare interferenze tra test, resettiamo lo store sessioni e i buffer in memoria
     prima/dopo ogni test.
     """
-    server.active_games.clear()
-    server.game_timestamps.clear()
-    server.game_data.clear()
-    server.game_locks.clear()
-    server.game_versions.clear()
-    server.game_ai_agents.clear()
-    server.game_action_rngs.clear()
-    server.connected_clients.clear()
+    _reset_server_state()
     yield
-    server.active_games.clear()
-    server.game_timestamps.clear()
-    server.game_data.clear()
-    server.game_locks.clear()
-    server.game_versions.clear()
-    server.game_ai_agents.clear()
-    server.game_action_rngs.clear()
-    server.connected_clients.clear()
+    _reset_server_state()
 
 
 def _write_dummy_bc_model_npz(path: Path) -> None:
@@ -488,24 +518,27 @@ def test_get_game_result_2p_finished_returns_stable_dto() -> None:
     game_id = create.json()["game_id"]
 
     # Forziamo uno stato finale coerente.
-    server.active_games[game_id] = GameState(
-        num_players=2,
-        is_team_game=False,
-        teams=None,
-        players=(
-            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=70),
-            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=50),
+    _put_state(
+        game_id,
+        GameState(
+            num_players=2,
+            is_team_game=False,
+            teams=None,
+            players=(
+                PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=70),
+                PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=50),
+            ),
+            deck=tuple(),
+            trump_card=Card(Suit.CUPS, Rank.TWO),
+            table_cards=tuple(),
+            current_turn=0,
+            first_player=0,
+            game_over=True,
+            winner_index=0,
+            winning_team=None,
         ),
-        deck=tuple(),
-        trump_card=Card(Suit.CUPS, Rank.TWO),
-        table_cards=tuple(),
-        current_turn=0,
-        first_player=0,
-        game_over=True,
-        winner_index=0,
-        winning_team=None,
+        version=123,
     )
-    server.game_versions[game_id] = 123
 
     r = client.get(f"/games/{game_id}/result")
     assert r.status_code == 200
@@ -528,22 +561,25 @@ def test_get_game_result_2p_tie_omits_winner_index() -> None:
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
 
-    server.active_games[game_id] = GameState(
-        num_players=2,
-        is_team_game=False,
-        teams=None,
-        players=(
-            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=60),
-            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=60),
+    _put_state(
+        game_id,
+        GameState(
+            num_players=2,
+            is_team_game=False,
+            teams=None,
+            players=(
+                PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=60),
+                PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=60),
+            ),
+            deck=tuple(),
+            trump_card=Card(Suit.CUPS, Rank.TWO),
+            table_cards=tuple(),
+            current_turn=0,
+            first_player=0,
+            game_over=True,
+            winner_index=None,
+            winning_team=None,
         ),
-        deck=tuple(),
-        trump_card=Card(Suit.CUPS, Rank.TWO),
-        table_cards=tuple(),
-        current_turn=0,
-        first_player=0,
-        game_over=True,
-        winner_index=None,
-        winning_team=None,
     )
 
     r = client.get(f"/games/{game_id}/result")
@@ -560,24 +596,27 @@ def test_get_game_result_4p_finished_returns_team_fields() -> None:
     create = client.post("/games", json={"num_players": 4, "player_names": ["A", "B", "C", "D"]})
     game_id = create.json()["game_id"]
 
-    server.active_games[game_id] = GameState(
-        num_players=4,
-        is_team_game=True,
-        teams=((0, 2), (1, 3)),
-        players=(
-            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=40),
-            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=20),
-            PlayerState(name="C", hand=tuple(), captured_cards=tuple(), points=30),
-            PlayerState(name="D", hand=tuple(), captured_cards=tuple(), points=30),
+    _put_state(
+        game_id,
+        GameState(
+            num_players=4,
+            is_team_game=True,
+            teams=((0, 2), (1, 3)),
+            players=(
+                PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=40),
+                PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=20),
+                PlayerState(name="C", hand=tuple(), captured_cards=tuple(), points=30),
+                PlayerState(name="D", hand=tuple(), captured_cards=tuple(), points=30),
+            ),
+            deck=tuple(),
+            trump_card=Card(Suit.CUPS, Rank.TWO),
+            table_cards=tuple(),
+            current_turn=0,
+            first_player=0,
+            game_over=True,
+            winner_index=None,
+            winning_team=0,
         ),
-        deck=tuple(),
-        trump_card=Card(Suit.CUPS, Rank.TWO),
-        table_cards=tuple(),
-        current_turn=0,
-        first_player=0,
-        game_over=True,
-        winner_index=None,
-        winning_team=0,
     )
 
     r = client.get(f"/games/{game_id}/result")
@@ -598,24 +637,27 @@ def test_get_game_result_4p_tie_omits_winning_team() -> None:
     create = client.post("/games", json={"num_players": 4, "player_names": ["A", "B", "C", "D"]})
     game_id = create.json()["game_id"]
 
-    server.active_games[game_id] = GameState(
-        num_players=4,
-        is_team_game=True,
-        teams=((0, 2), (1, 3)),
-        players=(
-            PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=30),
-            PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=30),
-            PlayerState(name="C", hand=tuple(), captured_cards=tuple(), points=30),
-            PlayerState(name="D", hand=tuple(), captured_cards=tuple(), points=30),
+    _put_state(
+        game_id,
+        GameState(
+            num_players=4,
+            is_team_game=True,
+            teams=((0, 2), (1, 3)),
+            players=(
+                PlayerState(name="A", hand=tuple(), captured_cards=tuple(), points=30),
+                PlayerState(name="B", hand=tuple(), captured_cards=tuple(), points=30),
+                PlayerState(name="C", hand=tuple(), captured_cards=tuple(), points=30),
+                PlayerState(name="D", hand=tuple(), captured_cards=tuple(), points=30),
+            ),
+            deck=tuple(),
+            trump_card=Card(Suit.CUPS, Rank.TWO),
+            table_cards=tuple(),
+            current_turn=0,
+            first_player=0,
+            game_over=True,
+            winner_index=None,
+            winning_team=None,
         ),
-        deck=tuple(),
-        trump_card=Card(Suit.CUPS, Rank.TWO),
-        table_cards=tuple(),
-        current_turn=0,
-        first_player=0,
-        game_over=True,
-        winner_index=None,
-        winning_team=None,
     )
 
     r = client.get(f"/games/{game_id}/result")
@@ -643,8 +685,16 @@ def test_server_version_is_monotone_on_actions_when_ai_disabled(monkeypatch: pyt
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
-    # Questo test esercita volutamente il loop HTTP manuale per entrambi i player.
-    server.game_ai_agents.pop(game_id, None)
+
+    # Questo test esercita volutamente il loop HTTP manuale per entrambi i player:
+    # rimuoviamo la config IA dal seat 1 così `_is_ai_controlled_player` lo lascia giocabile.
+    async def _clear_ai_seats() -> None:
+        session = await server.game_store.get(game_id)
+        assert session is not None
+        session.ai_seats = {}
+        await server.game_store.set(session)
+
+    asyncio.run(_clear_ai_seats())
 
     # Versione iniziale: 0
     obs0 = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
@@ -800,10 +850,14 @@ def test_create_game_allows_selecting_ai_agent_and_ai_turn_uses_observation(monk
     game_id = create.json()["game_id"]
 
     # Verifica che la selezione sia stata applicata (per la UI: player 1 è l'IA).
-    assert server.game_ai_agents[game_id][1].name == "heuristic_v1"
+    session = _get_session(game_id)
+    assert session is not None
+    assert session.ai_seats[1].agent_name == "heuristic_v1"
 
     # Sostituiamo l'agente con uno che fallisce se vede informazione nascosta.
-    server.game_ai_agents[game_id][1] = CheatDetectingAgent()
+    # Gli agenti sono ricostruiti per-mossa via `_agent_for_seat`: lo monkeypatchiamo.
+    cheat_agent = CheatDetectingAgent()
+    monkeypatch.setattr(server, "_agent_for_seat", lambda _cfg: cheat_agent)
 
     # Giochiamo una mossa umana per passare il turno all'IA.
     obs0 = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
@@ -816,8 +870,10 @@ def test_create_game_allows_selecting_ai_agent_and_ai_turn_uses_observation(monk
 
     # Eseguiamo una mossa IA (sincrona per test) sotto lock.
     async def _run_ai_once() -> None:
-        async with server.game_locks[game_id]:
-            await server._execute_ai_turn_locked(game_id, human_player_index=0)
+        async with server.game_store.lock(game_id):
+            current = await server.game_store.get(game_id)
+            assert current is not None
+            await server._execute_ai_turn_locked(current, human_player_index=0)
 
     asyncio.run(_run_ai_once())
 
@@ -849,3 +905,34 @@ def test_version_recommended_model_respects_env(monkeypatch: pytest.MonkeyPatch)
     with TestClient(main_app) as client:
         body = client.get("/version").json()
         assert body["recommended_model"] == "custom_model.npz"
+
+
+def test_play_action_when_local_game_data_buffer_missing() -> None:
+    """Simula una replica diversa: lo stato vive nello store ma il buffer `game_data` locale non c'è.
+
+    play_action deve funzionare (setdefault), senza KeyError/500: è il caso multi-replica
+    in cui l'azione arriva su una replica che non ha creato la partita.
+    """
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+    obs = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+
+    server.game_data.clear()  # nessun buffer locale per questa partita (altra "replica")
+
+    action = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},
+    )
+    assert action.status_code == 200
+    assert "error" not in action.json()
+
+
+def test_create_game_rejects_invalid_ai_agent() -> None:
+    """Un `ai_agent` non valido deve dare 400 alla creazione (validazione, non crash nel task IA)."""
+    client = TestClient(server.app)
+    r = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["A", "B"], "ai_agent": "agente_inesistente"},
+    )
+    assert r.status_code == 400

@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from briscola_ai.backend.game_store import (
     AiSeatConfig,
     GameSession,
@@ -134,3 +136,29 @@ def test_factory_selects_store_by_env(monkeypatch) -> None:
     monkeypatch.setenv("BRISCOLA_REDIS_URL", "redis://localhost:6379/0")
     assert resolve_redis_url() == "redis://localhost:6379/0"
     assert isinstance(build_game_session_store(), RedisGameSessionStore)
+
+
+def test_redis_lock_raises_if_not_acquired() -> None:
+    """Se `acquire()` ritorna False (timeout), il context manager NON deve cedere il contesto."""
+
+    class _FakeLock:
+        async def acquire(self) -> bool:
+            return False
+
+        async def release(self) -> None:
+            return None
+
+    class _FakeRedis:
+        def lock(self, *args: object, **kwargs: object) -> "_FakeLock":
+            return _FakeLock()
+
+    store = RedisGameSessionStore(client=_FakeRedis())
+
+    async def scenario() -> None:
+        entered = False
+        with pytest.raises(TimeoutError):
+            async with store.lock("g1"):
+                entered = True
+        assert entered is False  # il blocco protetto NON deve essere eseguito
+
+    asyncio.run(scenario())

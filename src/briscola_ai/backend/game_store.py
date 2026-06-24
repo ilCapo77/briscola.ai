@@ -160,7 +160,11 @@ class RedisGameSessionStore:
         # Lock distribuito Redis: serializza le azioni concorrenti sulla stessa partita,
         # anche tra repliche diverse.
         redis_lock = self._redis.lock(f"game:{game_id}:lock", timeout=30, blocking_timeout=10)
-        await redis_lock.acquire()
+        acquired = await redis_lock.acquire()
+        if not acquired:
+            # Dopo `blocking_timeout` non abbiamo ottenuto il lock: NON cediamo il contesto
+            # (altrimenti muteremmo lo stato senza esclusione). Il chiamante gestirà l'errore.
+            raise TimeoutError(f"Lock Redis non acquisito per la partita {game_id}")
         try:
             yield
         finally:

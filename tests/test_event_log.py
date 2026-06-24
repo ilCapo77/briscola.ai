@@ -20,6 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from briscola_ai.backend import server
+from briscola_ai.backend.game_store import InMemoryGameSessionStore
 from briscola_ai.main import app as main_app
 
 
@@ -37,11 +38,9 @@ def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.Monke
 
     # Puliamo lo stato globale (come in `tests/test_api_integration.py`) per evitare
     # interferenze con altri test che usano `briscola_ai.backend.server`.
-    server.active_games.clear()
+    server.game_store = InMemoryGameSessionStore()
     server.game_timestamps.clear()
     server.game_data.clear()
-    server.game_locks.clear()
-    server.game_versions.clear()
     server.connected_clients.clear()
 
     with TestClient(server.app) as client:
@@ -82,11 +81,9 @@ def test_event_log_works_when_api_is_mounted_under_main_app(tmp_path: Path, monk
     monkeypatch.setenv("BRISCOLA_EVENT_DB_PATH", str(db_path))
 
     # Pulizia stato globale per evitare interferenze.
-    server.active_games.clear()
+    server.game_store = InMemoryGameSessionStore()
     server.game_timestamps.clear()
     server.game_data.clear()
-    server.game_locks.clear()
-    server.game_versions.clear()
     server.connected_clients.clear()
 
     with TestClient(main_app) as client:

@@ -5,14 +5,13 @@ Questo modulo espone:
 - endpoint HTTP per creare una partita, ottenere lo stato e giocare una carta
 - endpoint WebSocket per inviare aggiornamenti in tempo reale ai client
 
-Scelte implementative (didattiche):
-- Lo stato delle partite è tenuto in memoria (`active_games`). È semplice ma non persistente:
-  riavviando il server si perdono le partite in corso.
-- Le azioni vengono registrate in `game_data` come base per una pipeline ML futura.
-
-Nel refactor profondo previsto in `PLAN.md` sposteremo verso:
-- dominio “puro” (motore) separato dall'API
-- persistenza su SQLite (event log) e export dataset.
+Scelte implementative:
+- Lo stato delle partite vive in un `GameSessionStore` (vedi `game_store.py`): in-memory in dev,
+  Redis in cloud (multi-replica). Questo evita "partita non trovata" quando azioni/WS finiscono su
+  repliche diverse. `game_data`/`game_timestamps`/`connected_clients` restano per-replica (best-effort:
+  buffer ML, cleanup, connessioni WS locali).
+- L'agente IA non è serializzato: la sessione salva la sua config (nome + model_id) e l'agente viene
+  ricostruito per mossa (con cache modello).
 """
 
 import asyncio
@@ -49,7 +48,17 @@ from .dto import (
     TrickResultDTO,
 )
 from .event_log import EventLog, EventLogConfig, parse_event_db_path
+from .game_store import (
+    AiSeatConfig,
+    GameSession,
+    InMemoryGameSessionStore,
+    build_game_session_store,
+)
 from .observation_builder import build_game_state_dto, build_observation_dto
+
+# `InMemoryGameSessionStore` è ri-esportato qui per comodità dei test, che resettano lo store
+# con `server.game_store = InMemoryGameSessionStore()`.
+__all__ = ["app", "game_store", "InMemoryGameSessionStore"]
 
 
 # Modelli per richieste e risposte API
@@ -113,12 +122,17 @@ def _safe_log_event(
     *,
     server_version: Optional[int] = None,
     player_index: Optional[int] = None,
+    state: Optional[DomainGameState] = None,
 ) -> None:
     """
     Wrapper “best-effort” per loggare eventi.
 
     Il logging è un optional feature: se il DB non è configurato o se una scrittura fallisce
     non vogliamo interrompere la partita.
+
+    `state` (opzionale) consente al chiamante, che ha già la sessione in scope, di fornire lo
+    stato di dominio per popolare la tabella `games` (num_players/seed) senza una lettura extra
+    dallo store.
     """
     log = _get_event_log()
     if log is None:
@@ -136,7 +150,6 @@ def _safe_log_event(
 
     try:
         # Garantiamo che la partita esista nella tabella `games` (idempotente).
-        state = active_games.get(game_id)
         if state is not None:
             # Compatibilità: se il dominio non espone `seed`, proviamo a prenderlo dal payload.
             seed = getattr(state, "seed", None)
@@ -176,7 +189,7 @@ def _safe_set_client_id(game_id: str, client_id: Optional[str]) -> None:
         pass
 
 
-def _maybe_log_game_finished(game_id: str, *, state: DomainGameState) -> None:
+def _maybe_log_game_finished(game_id: str, *, state: DomainGameState, server_version: int) -> None:
     """
     Se la partita è finita (`game_over=true`), logga un evento `game_finished` (best-effort).
 
@@ -224,7 +237,8 @@ def _maybe_log_game_finished(game_id: str, *, state: DomainGameState) -> None:
             "final_points_by_player_index": final_points,
             "winning_player_index": winning_index,
         },
-        server_version=game_versions.get(game_id, 0),
+        server_version=server_version,
+        state=state,
     )
 
 
@@ -335,34 +349,37 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Conserva le partite attive in memoria (in un'app reale, usare un database)
-active_games: Dict[str, DomainGameState] = {}
+# Store condiviso delle sessioni partita (stato + versioning + config IA + seed azioni).
+#
+# In cloud (Redis configurato) lo store è accessibile da tutte le repliche: azioni e WebSocket
+# che finiscono su repliche diverse non danno più "partita non trovata". In dev/test è in-memory.
+game_store = build_game_session_store()
+
+# Stato best-effort, per-replica (non critico per la correttezza cross-replica):
+# - `game_timestamps`: per il cleanup periodico delle partite inattive su questa replica.
+# - `game_data`: buffer in memoria delle azioni (base per pipeline ML futura).
+# - `connected_clients`: connessioni WebSocket aperte su questa replica.
 game_timestamps: Dict[str, datetime] = {}
 game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
-
-# Sincronizzazione e versioning server-side (per evitare race/doppi trigger IA):
-# - `game_locks`: garantisce che le mutazioni di stato di una partita siano serializzate.
-# - `game_versions`: contatore monotono incrementato ad ogni `play_action` (umano o IA).
-#   Lo includiamo negli snapshot/messaggi WS come metadato debug-friendly (ordering/reconnect).
-game_locks: Dict[str, asyncio.Lock] = {}
-game_versions: Dict[str, int] = {}
-
-# Config IA per partita (2-player UI: umano=0, IA=1).
-#
-# Nota:
-# - gli agenti sono stateless: li istanziamo una volta per partita e li riusiamo.
-# - l'RNG delle scelte IA è separato dallo shuffle del mazzo (seed partita), per riproducibilità.
-game_ai_agents: Dict[str, dict[int, Agent]] = {}
-game_action_rngs: Dict[str, random.Random] = {}
-
-# Connessioni WebSocket
 connected_clients: Dict[str, Dict[int, WebSocket]] = {}
 
 _DEFAULT_AI_AGENT_NAME = "random"
 _AI_PLAYER_DISPLAY_NAME = "Giocatore AI"
 
 
-def _is_ai_controlled_player(game_id: str, player_index: int) -> bool:
+def _agent_for_seat(cfg: AiSeatConfig) -> Agent:
+    """
+    Ricostruisce l'agente IA da `AiSeatConfig` (l'oggetto Agent non è serializzato nello store).
+
+    Nota: il caricamento dei modelli è cached, quindi ricostruire l'agente a ogni mossa è cheap.
+    """
+    if cfg.agent_name == "bc_model":
+        path = resolve_model_path(get_models_dir_from_env(), cfg.model_id or "")
+        return build_agent("bc_model", model_path=path)
+    return build_agent(cfg.agent_name)
+
+
+def _is_ai_controlled_player(session: GameSession, player_index: int) -> bool:
     """
     Ritorna True se `player_index` è controllato dal backend per questa partita.
 
@@ -371,10 +388,10 @@ def _is_ai_controlled_player(game_id: str, player_index: int) -> bool:
     resta però chiamabile manualmente: questa guardia evita che un client giochi le mosse
     del player controllato dall'IA.
     """
-    return player_index in game_ai_agents.get(game_id, {})
+    return player_index in session.ai_seats
 
 
-def _display_name_for_player(game_id: str, state: DomainGameState, player_index: int) -> str:
+def _display_name_for_player(session: GameSession, player_index: int) -> str:
     """
     Nome pubblico breve per messaggi UI.
 
@@ -382,7 +399,8 @@ def _display_name_for_player(game_id: str, state: DomainGameState, player_index:
     (es. label del modello selezionato in versioni vecchie della UI). Nei messaggi di partita
     mostriamo invece un'etichetta stabile e leggibile per i seat controllati dall'IA.
     """
-    if _is_ai_controlled_player(game_id, player_index):
+    state = session.state
+    if _is_ai_controlled_player(session, player_index):
         return _AI_PLAYER_DISPLAY_NAME
     if 0 <= player_index < len(state.players):
         return state.players[player_index].name
@@ -500,21 +518,38 @@ async def create_game(config: GameConfig):
 
         # Genera un ID univoco per la partita
         game_id = str(uuid.uuid4())
-        active_games[game_id] = state
-        game_timestamps[game_id] = datetime.now()
         ai_agent_name = config.ai_agent or _DEFAULT_AI_AGENT_NAME
 
         # Config IA (solo 2-player, come la UI attuale).
+        ai_seats: dict[int, AiSeatConfig] = {}
         if config.num_players == 2:
             if ai_agent_name == "bc_model":
                 models_dir = get_models_dir_from_env()
+                # Validiamo il path del modello PRIMA di salvare la sessione (come prima).
                 model_path = resolve_model_path(models_dir, config.ai_model_id or "")
                 validate_model_compatible_for_ui(model_path)
-                game_ai_agents[game_id] = {1: build_agent(ai_agent_name, model_path=model_path)}
+                ai_seats = {1: AiSeatConfig(agent_name=ai_agent_name, model_id=config.ai_model_id)}
             else:
-                game_ai_agents[game_id] = {1: build_agent(ai_agent_name)}
-            game_action_rngs[game_id] = random.Random(seed ^ 0x9E3779B9)
+                # Validiamo l'agente PRIMA di salvare la sessione (come prima): un nome non valido
+                # o un alias non disponibile (es. best_a2c senza file) deve dare 400 alla creazione,
+                # non un crash più tardi nel task IA. L'oggetto costruito viene scartato (la sessione
+                # salva solo la config; l'agente è ricostruito per mossa, con cache).
+                build_agent(ai_agent_name)
+                ai_seats = {1: AiSeatConfig(agent_name=ai_agent_name, model_id=None)}
 
+        now_iso = datetime.now().isoformat()
+        session = GameSession(
+            game_id=game_id,
+            state=state,
+            version=0,
+            ai_seats=ai_seats,
+            action_seed=seed ^ 0x9E3779B9,
+            created_at=now_iso,
+            updated_at=now_iso,
+        )
+        await game_store.set(session)
+
+        game_timestamps[game_id] = datetime.now()
         game_data[game_id] = [
             {
                 "timestamp": datetime.now().isoformat(),
@@ -526,8 +561,6 @@ async def create_game(config: GameConfig):
                 else None,
             }
         ]
-        game_locks[game_id] = asyncio.Lock()
-        game_versions[game_id] = 0
 
         # Inizializza il dizionario delle connessioni WebSocket per questa partita
         connected_clients[game_id] = {}
@@ -550,6 +583,7 @@ async def create_game(config: GameConfig):
                 "consent_to_data_collection": bool(config.consent_to_data_collection is True),
             },
             server_version=0,
+            state=state,
         )
         _safe_set_client_id(game_id, config.client_id)
 
@@ -571,10 +605,11 @@ async def create_game(config: GameConfig):
 @app.get("/games/{game_id}", response_model=Dict)
 async def get_game_state(game_id: str, player_index: Optional[int] = None):
     """Ottiene lo stato corrente di una partita"""
-    if game_id not in active_games:
+    session = await game_store.get(game_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
-    game = active_games[game_id]
+    game = session.state
 
     # Aggiorna il timestamp per mantenere la partita attiva
     game_timestamps[game_id] = datetime.now()
@@ -582,33 +617,36 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
     if player_index is not None:
         # Restituisce una vista specifica per il giocatore (stesso formato dei messaggi WS)
         try:
-            observation_dto = build_observation_dto(game, player_index, game_versions.get(game_id, 0))
+            observation_dto = build_observation_dto(game, player_index, session.version)
             return observation_dto.model_dump()
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
         # Restituisce lo stato completo (per spettatori o debugging) come DTO Pydantic.
-        game_state_dto = build_game_state_dto(game, game_versions.get(game_id, 0))
+        game_state_dto = build_game_state_dto(game, session.version)
         return game_state_dto.model_dump()
 
 
 @app.post("/games/{game_id}/actions", response_model=PlayActionResultDTO, response_model_exclude_none=True)
 async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
     """Gioca una carta nella partita"""
-    if game_id not in active_games:
+    if await game_store.get(game_id) is None:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
     should_schedule_ai = False
 
-    async with game_locks[game_id]:
-        state = active_games[game_id]
-        server_version_before = game_versions.get(game_id, 0)
+    async with game_store.lock(game_id):
+        session = await game_store.get(game_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Partita non trovata")
+        state = session.state
+        server_version_before = session.version
 
         # Verifica che sia il turno del giocatore
         if state.current_turn != action.player_index:
             raise HTTPException(status_code=400, detail="Non è il tuo turno")
 
-        if _is_ai_controlled_player(game_id, action.player_index):
+        if _is_ai_controlled_player(session, action.player_index):
             raise HTTPException(
                 status_code=400,
                 detail=(
@@ -637,9 +675,11 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
             # Questo rende l'API più prevedibile per i client e coerente con gli altri endpoint.
             raise HTTPException(status_code=400, detail=step_result.error)
 
-        active_games[game_id] = new_state
-        game_versions[game_id] = game_versions.get(game_id, 0) + 1
-        server_version = game_versions.get(game_id, 0)
+        session.state = new_state
+        session.version += 1
+        session.updated_at = datetime.now().isoformat()
+        await game_store.set(session)
+        server_version = session.version
 
         if step_result.played_card is None or step_result.player is None:
             # Invariante: su successo, `step()` deve restituire sempre played_card e player.
@@ -666,8 +706,10 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
         # Aggiorna timestamp
         game_timestamps[game_id] = datetime.now()
 
-        # Registra l'azione per il training ML
-        game_data[game_id].append(
+        # Registra l'azione per il training ML.
+        # setdefault: game_data e' per-replica; se l'azione arriva su una replica diversa da
+        # quella che ha creato la partita, la lista non esiste ancora (stato vive nello store).
+        game_data.setdefault(game_id, []).append(
             {
                 "timestamp": datetime.now().isoformat(),
                 "player_index": action.player_index,
@@ -707,6 +749,7 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
                 },
                 server_version=server_version,
                 player_index=action.player_index,
+                state=new_state,
             )
         else:
             _safe_log_event(
@@ -720,6 +763,7 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
                 },
                 server_version=server_version,
                 player_index=action.player_index,
+                state=new_state,
             )
 
         # Se la mano è stata completata dall'umano, invia notifica con carte e vincitore.
@@ -732,21 +776,21 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
             trick_cards = list(step_result.trick_cards)
             winner_index = step_result.trick_winner if step_result.trick_winner is not None else 0
             points = sum(card.rank.points for card, _ in step_result.trick_cards)
-            await notify_trick_result(game_id, trick_cards, winner_index, points)
+            await notify_trick_result(session, trick_cards, winner_index, points)
             # Subito dopo inviamo anche lo stato aggiornato (tavolo vuoto, nuove carte pescate).
             # Il frontend decide se applicarlo subito o dopo un delay.
             if game_id in connected_clients:
-                await notify_clients(game_id)
+                await notify_clients(game_id, new_state, server_version)
         else:
             # Mano non completata: notifica normale
             if game_id in connected_clients:
-                await notify_clients(game_id)
+                await notify_clients(game_id, new_state, server_version)
 
         # Calcoliamo qui se dobbiamo far giocare l'IA (fuori dal lock scheduliamo solo il task).
         if not new_state.game_over and new_state.num_players == 2 and new_state.current_turn != action.player_index:
             should_schedule_ai = True
         elif new_state.game_over:
-            _maybe_log_game_finished(game_id, state=new_state)
+            _maybe_log_game_finished(game_id, state=new_state, server_version=server_version)
 
     # Modello "standard": se dopo la mossa umana tocca all'IA, il backend gioca automaticamente.
     # Nota UX: non inseriamo `asyncio.sleep()` per animazioni; il frontend gestisce i timing
@@ -773,18 +817,16 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int) -> None:
     - modello standard: il backend avanza la partita senza richiedere un trigger dal client.
     - il frontend controlla solo la *presentazione* (hold/animazioni) senza influenzare il dominio.
     """
-    if game_id not in active_games or game_id not in game_locks:
-        return
-
     # In 2-player ci aspettiamo al massimo una mossa IA per volta, ma gestiamo anche
     # eventuali casi futuri dove l'IA potrebbe avere turni consecutivi (safety loop).
     safety = 10
     while safety > 0:
         safety -= 1
-        async with game_locks[game_id]:
-            if game_id not in active_games:
+        async with game_store.lock(game_id):
+            session = await game_store.get(game_id)
+            if session is None:
                 return
-            state = active_games[game_id]
+            state = session.state
             if state.game_over:
                 return
             if state.num_players != 2:
@@ -792,20 +834,18 @@ async def _maybe_ai_turn(game_id: str, human_player_index: int) -> None:
             if state.current_turn == human_player_index:
                 return
 
-            await _execute_ai_turn_locked(game_id, human_player_index)
+            await _execute_ai_turn_locked(session, human_player_index)
 
 
-async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None:
+async def _execute_ai_turn_locked(session: GameSession, human_player_index: int) -> None:
     """
     Esegue UNA singola mossa IA.
 
     Precondizione:
-    - il chiamante ha acquisito `game_locks[game_id]`.
+    - il chiamante ha acquisito `game_store.lock(game_id)` e passa la sessione già caricata.
     """
-    if game_id not in active_games:
-        return
-
-    state = active_games[game_id]
+    game_id = session.game_id
+    state = session.state
 
     # Se la partita è finita o tocca al giocatore umano, non fare nulla
     if state.game_over or state.current_turn == human_player_index:
@@ -821,8 +861,10 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     if not valid_actions:
         return
 
-    rng = game_action_rngs.get(game_id, random.Random())
-    agent = game_ai_agents.get(game_id, {}).get(ai_player_index)
+    # RNG deterministico per mossa: dipende dal seed della partita e dalla versione corrente.
+    rng = random.Random(session.action_seed ^ session.version)
+    seat_cfg = session.ai_seats.get(ai_player_index)
+    agent = _agent_for_seat(seat_cfg) if seat_cfg is not None else None
 
     if agent is None:
         card_index = rng.randrange(len(valid_actions))
@@ -845,8 +887,9 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
             game_id,
             "ai_card_reveal",
             reveal_dto.model_dump(),
-            server_version=game_versions.get(game_id, 0),
+            server_version=session.version,
             player_index=ai_player_index,
+            state=state,
         )
         reveal_json = reveal_dto.model_dump_json()
         for player_idx, client in list(connected_clients[game_id].items()):
@@ -859,9 +902,11 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
     if step_result.error:
         return
 
-    active_games[game_id] = new_state
-    game_versions[game_id] = game_versions.get(game_id, 0) + 1
-    server_version = game_versions.get(game_id, 0)
+    session.state = new_state
+    session.version += 1
+    session.updated_at = datetime.now().isoformat()
+    await game_store.set(session)
+    server_version = session.version
 
     # Event log + game_data: usiamo un DTO JSON-friendly anche per le mosse IA.
     trick_cards_dto: list[TableCardDTO] | None = None
@@ -890,16 +935,16 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
         trick_cards = list(step_result.trick_cards)
         winner_index = step_result.trick_winner if step_result.trick_winner is not None else 0
         points = sum(card.rank.points for card, _ in step_result.trick_cards)
-        await notify_trick_result(game_id, trick_cards, winner_index, points)
+        await notify_trick_result(session, trick_cards, winner_index, points)
         if game_id in connected_clients:
-            await notify_clients(game_id)
+            await notify_clients(game_id, new_state, server_version)
     else:
         if game_id in connected_clients:
-            await notify_clients(game_id)
+            await notify_clients(game_id, new_state, server_version)
 
-    # Registra l'azione AI
+    # Registra l'azione AI (setdefault: game_data e' per-replica, vedi nota in play_action).
     game_timestamps[game_id] = datetime.now()
-    game_data[game_id].append(
+    game_data.setdefault(game_id, []).append(
         {
             "timestamp": datetime.now().isoformat(),
             "player_index": ai_player_index,
@@ -920,20 +965,22 @@ async def _execute_ai_turn_locked(game_id: str, human_player_index: int) -> None
         },
         server_version=server_version,
         player_index=ai_player_index,
+        state=new_state,
     )
     if new_state.game_over:
-        _maybe_log_game_finished(game_id, state=new_state)
+        _maybe_log_game_finished(game_id, state=new_state, server_version=server_version)
     return
 
 
 @app.get("/games/{game_id}/result", response_model=GameResultDTO, response_model_exclude_none=True)
 async def get_game_result(game_id: str) -> GameResultDTO:
     """Ottiene il risultato finale di una partita"""
-    if game_id not in active_games:
+    session = await game_store.get(game_id)
+    if session is None:
         raise HTTPException(status_code=404, detail="Partita non trovata")
 
-    state = active_games[game_id]
-    server_version = game_versions.get(game_id, 0)
+    state = session.state
+    server_version = session.version
     if not state.game_over:
         return GameResultDTO(
             server_version=server_version,
@@ -999,11 +1046,12 @@ async def get_game_result(game_id: str) -> GameResultDTO:
 @app.websocket("/ws/{game_id}/{player_index}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: int):
     """Endpoint WebSocket per aggiornamenti della partita in tempo reale"""
-    if game_id not in active_games:
+    session = await game_store.get(game_id)
+    if session is None:
         await websocket.close(code=1000, reason="Partita non trovata")
         return
 
-    state = active_games[game_id]
+    state = session.state
 
     if player_index < 0 or player_index >= state.num_players:
         await websocket.close(code=1000, reason="Indice giocatore non valido")
@@ -1024,20 +1072,22 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
 
     try:
         # Invia lo stato iniziale della partita (usando DTO)
-        dto = build_observation_dto(state, player_index, game_versions.get(game_id, 0))
+        dto = build_observation_dto(state, player_index, session.version)
         _safe_log_event(
             game_id,
             "ws_connected",
             {"player_index": player_index},
-            server_version=game_versions.get(game_id, 0),
+            server_version=session.version,
             player_index=player_index,
+            state=state,
         )
         _safe_log_event(
             game_id,
             "observation_sent",
             dto.model_dump(),
-            server_version=game_versions.get(game_id, 0),
+            server_version=session.version,
             player_index=player_index,
+            state=state,
         )
         await websocket.send_text(dto.model_dump_json())
 
@@ -1057,24 +1107,24 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     except WebSocketDisconnect:
         # Rimuove la connessione quando il client si disconnette
         _remove_websocket_if_current(game_id, player_index, websocket)
+        # Best-effort: rileggiamo la sessione per loggare una server_version aggiornata (se esiste).
+        current = await game_store.get(game_id)
         _safe_log_event(
             game_id,
             "ws_disconnected",
             {"player_index": player_index},
-            server_version=game_versions.get(game_id, 0),
+            server_version=current.version if current is not None else 0,
             player_index=player_index,
+            state=current.state if current is not None else None,
         )
 
 
-async def notify_clients(game_id: str):
+async def notify_clients(game_id: str, state: DomainGameState, server_version: int):
     """Notifica tutti i client connessi sugli aggiornamenti della partita"""
     if game_id not in connected_clients:
         return
 
-    state = active_games[game_id]
-
     # Invia lo stato aggiornato a ogni client connesso (usando DTO)
-    server_version = game_versions.get(game_id, 0)
     for player_idx, websocket in list(connected_clients[game_id].items()):
         try:
             dto = build_observation_dto(state, player_idx, server_version)
@@ -1084,6 +1134,7 @@ async def notify_clients(game_id: str):
                 dto.model_dump(),
                 server_version=server_version,
                 player_index=player_idx,
+                state=state,
             )
             await websocket.send_text(dto.model_dump_json())
         except Exception:
@@ -1091,18 +1142,18 @@ async def notify_clients(game_id: str):
             _remove_websocket_if_current(game_id, player_idx, websocket)
 
 
-async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int, points: int):
+async def notify_trick_result(session: GameSession, trick_cards: list, winner_index: int, points: int):
     """
     Notifica i client del risultato della mano con le carte visibili.
 
     Questo messaggio speciale permette al frontend di mostrare entrambe le carte
     e indicare chiaramente chi ha vinto la mano.
     """
+    game_id = session.game_id
     if game_id not in connected_clients:
         return
 
-    state = active_games[game_id]
-    winner_name = _display_name_for_player(game_id, state, winner_index)
+    winner_name = _display_name_for_player(session, winner_index)
 
     # Costruisci DTO per il risultato della mano
     trick_cards_dto = [TableCardDTO.from_domain(card, idx) for card, idx in trick_cards]
@@ -1111,13 +1162,14 @@ async def notify_trick_result(game_id: str, trick_cards: list, winner_index: int
         winner_index=winner_index,
         winner_name=winner_name,
         points=points,
-        server_version=game_versions.get(game_id, 0),
+        server_version=session.version,
     )
     _safe_log_event(
         game_id,
         "trick_result",
         trick_result_dto.model_dump(),
-        server_version=game_versions.get(game_id, 0),
+        server_version=session.version,
+        state=session.state,
     )
     trick_result_json = trick_result_dto.model_dump_json()
 
@@ -1142,12 +1194,32 @@ async def cleanup_inactive_games():
 
         # Rimuove le partite inattive
         for game_id in games_to_remove:
+            session = await game_store.get(game_id)
+
+            # Staleness AUTORITATIVA: decidere dal solo timestamp locale è sbagliato su store
+            # condiviso (questa replica potrebbe aver creato la partita ma non servire più le
+            # azioni, mentre un'altra replica la sta ancora giocando). Usiamo `session.updated_at`.
+            truly_stale = session is None
+            if session is not None:
+                try:
+                    updated = datetime.fromisoformat(session.updated_at)
+                    truly_stale = (now - updated).total_seconds() > 3600
+                except Exception:
+                    truly_stale = False
+
+            if not truly_stale:
+                # Attiva altrove: NON toccare lo store condiviso; smetti solo di tracciarla
+                # localmente (i buffer per-replica). Le connessioni WS locali restano valide.
+                game_timestamps.pop(game_id, None)
+                game_data.pop(game_id, None)
+                continue
+
             # Event log: partita rimossa per inattività (non completa).
-            # Logghiamo prima di eliminare lo stato in memoria, così possiamo salvare anche `server_version`.
+            # Logghiamo prima di eliminare lo stato, così possiamo salvare anche `server_version`.
             log = _get_event_log()
             if log is not None and _get_event_log_mode() != "off":
                 try:
-                    state = active_games.get(game_id)
+                    state = session.state if session is not None else None
                     if state is not None:
                         seed = getattr(state, "seed", None)
                         log.ensure_game(
@@ -1165,21 +1237,13 @@ async def cleanup_inactive_games():
                         game_id,
                         "game_aborted",
                         {"reason": "inactive_timeout"},
-                        server_version=game_versions.get(game_id, 0),
+                        server_version=session.version if session is not None else 0,
+                        state=session.state if session is not None else None,
                     )
 
-            if game_id in active_games:
-                del active_games[game_id]
+            await game_store.delete(game_id)
             if game_id in game_timestamps:
                 del game_timestamps[game_id]
-            if game_id in game_versions:
-                del game_versions[game_id]
-            if game_id in game_locks:
-                del game_locks[game_id]
-            if game_id in game_ai_agents:
-                del game_ai_agents[game_id]
-            if game_id in game_action_rngs:
-                del game_action_rngs[game_id]
             if game_id in connected_clients:
                 # Chiude tutte le connessioni WebSocket
                 for websocket in connected_clients[game_id].values():
