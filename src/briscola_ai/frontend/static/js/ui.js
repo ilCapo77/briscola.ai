@@ -363,6 +363,7 @@ const UI = (() => {
         elements.gameSetup.classList.remove('hidden');
         elements.gameBoard.classList.add('hidden');
         elements.gameResult.classList.add('hidden');
+        document.body.classList.remove('playing');
         // Se il consenso è richiesto, resettiamo la checkbox per rendere esplicita la scelta ad ogni partita.
         if (elements.dataConsentCheckbox) elements.dataConsentCheckbox.checked = false;
         _updateConsentUi();
@@ -372,12 +373,16 @@ const UI = (() => {
         elements.gameSetup.classList.add('hidden');
         elements.gameBoard.classList.remove('hidden');
         elements.gameResult.classList.add('hidden');
+        // `playing` abilita il layout "fit-to-viewport" su mobile (vedi CSS): solo in partita,
+        // così setup e risultato restano scrollabili normalmente.
+        document.body.classList.add('playing');
     };
 
     const showGameResult = () => {
         elements.gameSetup.classList.add('hidden');
         elements.gameBoard.classList.add('hidden');
         elements.gameResult.classList.remove('hidden');
+        document.body.classList.remove('playing');
     };
 
     /**
@@ -570,9 +575,11 @@ const UI = (() => {
         elements.playerPoints.textContent = `${points} punti`;
     };
 
-    const updateOpponentInfo = (name, points) => {
+    const updateOpponentInfo = (name, _points) => {
         elements.opponentName.textContent = name;
-        elements.opponentPoints.textContent = `${points} punti`;
+        // Fairness: NON mostriamo i punti dell'avversario IA. In Briscola il mazzo di prese
+        // avversario non è pubblico; mostrarne il totale aiuterebbe l'umano (che dovrebbe contare
+        // a mente). Non scriviamo nemmeno il valore nel DOM. Vedi anche `#opponent-points` nel CSS.
     };
 
     const showTurnMessage = (message, isThinking = false) => {

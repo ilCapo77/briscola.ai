@@ -263,6 +263,12 @@ button:disabled {
     font-weight: 600;
 }
 
+/* Fairness: i punti dell'avversario IA non sono mostrati durante la partita (il mazzo di prese
+   avversario non è pubblico; il punteggio finale resta nella schermata di risultato). */
+#opponent-points {
+    display: none;
+}
+
 .turn-indicator {
     background: var(--accent-color);
     padding: 4px 12px;
@@ -594,5 +600,108 @@ footer {
         min-width: auto;
         padding: 8px 16px;
         font-size: 0.9rem;
+    }
+
+    /* Fit-to-viewport DURANTE la partita: l'interfaccia sta nello schermo senza scroll su/giù.
+       Applicato solo con `body.playing` (impostata da showGameBoard), così le schermate di setup
+       e risultato — che possono essere più alte — restano scrollabili normalmente. */
+    body.playing {
+        overflow: hidden;
+    }
+
+    body.playing .container {
+        height: 100dvh;
+        /* dvh: tiene conto della barra dinamica del browser mobile (a differenza di vh). */
+        min-height: 0;
+        overflow: hidden;
+        padding: 8px;
+    }
+
+    body.playing header {
+        margin-bottom: 6px;
+        padding: 4px 0;
+    }
+
+    /* Recuperiamo spazio verticale: niente footer in partita. */
+    body.playing footer {
+        display: none;
+    }
+
+    body.playing #game-board {
+        flex: 1;
+        min-height: 0;
+        /* min-height:0 permette ai figli flex di comprimersi sotto il loro contenuto. */
+        gap: 6px;
+        padding: 6px;
+    }
+
+    /* Avversario e giocatore a dimensione naturale; il tavolo assorbe lo spazio elastico. */
+    body.playing .player-area {
+        flex: 0 0 auto;
+        gap: 4px;
+    }
+
+    body.playing .player-info {
+        padding: 4px 10px;
+    }
+
+    body.playing #table-area {
+        flex: 1 1 auto;
+        min-height: 0;
+        /* override del min-height:200px desktop */
+        padding: 8px;
+        gap: 8px;
+        justify-content: center;
+    }
+
+    body.playing .hand {
+        min-height: 0;
+        padding: 2px;
+        gap: 6px;
+    }
+
+    body.playing #table-cards {
+        min-height: 0;
+    }
+
+    body.playing .turn-message {
+        margin-top: 8px;
+    }
+}
+
+/* Schermi molto bassi (tipico: smartphone in orizzontale): carte più piccole e via l'header,
+   così la partita resta comunque dentro il viewport senza scroll. */
+@media (max-height: 520px) and (pointer: coarse) {
+    body.playing {
+        --card-width: 46px;
+        overflow: hidden;
+    }
+
+    body.playing .container {
+        height: 100dvh;
+        min-height: 0;
+        overflow: hidden;
+        padding: 6px;
+    }
+
+    body.playing header,
+    body.playing footer {
+        display: none;
+    }
+
+    body.playing #game-board {
+        flex: 1;
+        min-height: 0;
+        gap: 4px;
+        padding: 4px;
+    }
+
+    body.playing #table-area {
+        flex: 1 1 auto;
+        min-height: 0;
+    }
+
+    body.playing .hand {
+        min-height: 0;
     }
 }
