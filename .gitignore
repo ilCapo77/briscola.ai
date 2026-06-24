@@ -31,3 +31,6 @@ dist/
 
 # Symlink locale ad AGENTS.md (non versionato)
 CLAUDE.md
+
+# FastAPI Cloud (link locale all-app, non versionare)
+.fastapicloud/
