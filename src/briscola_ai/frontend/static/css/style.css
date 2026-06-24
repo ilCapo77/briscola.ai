@@ -578,6 +578,12 @@ button:disabled {
 
 /* Footer */
 footer {
+    display: flex;
+    flex-wrap: wrap;
+    justify-content: center;
+    align-items: center;
+    gap: 6px 14px;
+    /* una sola riga (va a capo solo se lo schermo è troppo stretto) */
     text-align: center;
     padding: 12px;
     color: var(--text-muted);
@@ -590,7 +596,6 @@ footer {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    margin-top: 8px;
     color: var(--text-muted);
     text-decoration: none;
     transition: color 0.15s ease;
@@ -608,7 +613,6 @@ footer {
 
 /* Versione software nel footer */
 .app-version {
-    margin-top: 4px;
     font-size: 0.75rem;
     color: var(--text-muted);
     opacity: 0.7;
@@ -671,6 +675,22 @@ footer {
 
     header h1 {
         font-size: 1.2rem;
+    }
+
+    /* Footer compatto su mobile, per tenerlo su una sola riga. */
+    footer {
+        font-size: 0.72rem;
+        gap: 4px 8px;
+        padding: 10px 8px;
+    }
+
+    footer .app-version {
+        font-size: 0.68rem;
+    }
+
+    /* Su mobile mostriamo solo l'icona GitHub (la parola occupa spazio prezioso). */
+    footer .github-link span {
+        display: none;
     }
 
     #table-area {
