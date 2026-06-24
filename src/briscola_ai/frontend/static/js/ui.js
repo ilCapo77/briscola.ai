@@ -176,6 +176,38 @@ const UI = (() => {
     };
 
     /**
+     * Precarica TUTTE le immagini delle carte (40 facce + retro) nel browser.
+     *
+     * Perché: la prima volta che una carta viene mostrata, senza precaricamento il browser deve
+     * scaricarla al volo → comparsa "in ritardo"/flicker. Precaricandole (tipicamente mentre l'utente
+     * è ancora sulla home) finiscono in cache e il render è immediato.
+     *
+     * - Memoizzata: parte una volta sola.
+     * - Risolve anche in caso di errore di una singola immagine: il preload non deve mai bloccare il gioco.
+     */
+    let _cardPreloadPromise = null;
+    const preloadCardAssets = () => {
+        if (_cardPreloadPromise) return _cardPreloadPromise;
+        const suits = ['clubs', 'coins', 'cups', 'swords'];
+        const urls = [`${CARD_ASSET_BASE}/card_back.png`];
+        for (const suit of suits) {
+            for (let n = 1; n <= 10; n++) urls.push(`${CARD_ASSET_BASE}/${suit}_${n}.png`);
+        }
+        _cardPreloadPromise = Promise.all(
+            urls.map(
+                (url) =>
+                    new Promise((resolve) => {
+                        const img = new Image();
+                        img.onload = () => resolve();
+                        img.onerror = () => resolve();
+                        img.src = url;
+                    })
+            )
+        );
+        return _cardPreloadPromise;
+    };
+
+    /**
      * Create a card element
      */
     const createCardElement = (card, onClick = null) => {
@@ -643,6 +675,7 @@ const UI = (() => {
 
     return {
         init,
+        preloadCardAssets,
         setAiAgents,
         setAiModels,
         setDataCollectionConsent,

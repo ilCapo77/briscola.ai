@@ -503,6 +503,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
             UI.setPlayerName(config.playerName);
             UI.updateGameInfo({ gameId: result.game_id, connected: false, statusText: 'Connessione...', statusClass: 'connecting' });
+
+            // Assicura che le immagini delle carte siano in cache prima di mostrare il tavolo
+            // (evita la comparsa "in ritardo" al primo render). Di norma il preload è già partito
+            // alla home, quindi è istantaneo; il cap evita di bloccare l'avvio su reti lente.
+            await Promise.race([
+                UI.preloadCardAssets(),
+                new Promise((resolve) => setTimeout(resolve, 3000)),
+            ]);
             UI.showGameBoard();
 
             if (_shouldUsePolling()) {
@@ -632,6 +640,10 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     loadAiAgentMetadata();
+
+    // Precarica le immagini delle carte in background mentre l'utente è sulla home:
+    // quando avvia la partita sono già in cache (niente flicker al primo render).
+    UI.preloadCardAssets();
 
     UI.showGameSetup();
 });
