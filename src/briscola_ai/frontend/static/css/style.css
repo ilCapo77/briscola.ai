@@ -606,6 +606,14 @@ footer {
     fill: currentColor;
 }
 
+/* Versione software nel footer */
+.app-version {
+    margin-top: 4px;
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
 /* Home: tagline (hero) sopra il box di setup */
 .home-hero {
     text-align: center;
