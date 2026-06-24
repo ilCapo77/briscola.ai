@@ -5,7 +5,8 @@ description = "A Briscola card game with AI capabilities"
 authors = []
 requires-python = ">=3.14"
 dependencies = [
-    "fastapi>=0.128.0",
+    # `[standard]` include `fastapi-cli`: necessario perche' FastAPI Cloud avvia l'app con `fastapi run`.
+    "fastapi[standard]>=0.128.0",
     "uvicorn[standard]>=0.40.0",
     "pydantic>=2.12.0",
     "numpy>=2.4.0",
