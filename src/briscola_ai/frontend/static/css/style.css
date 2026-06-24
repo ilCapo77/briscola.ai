@@ -304,6 +304,9 @@ button:disabled {
 
 /* Table area */
 #table-area {
+    position: relative;
+    /* `relative` rende l'area verde il contenitore di riferimento per l'overlay `.trick-result`
+       (assoluto): senza questo l'overlay si ancorava al viewport e poteva sovrapporsi ai nomi. */
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -369,7 +372,10 @@ button:disabled {
 /* Trick result overlay */
 .trick-result {
     position: absolute;
+    top: 16px;
     right: 16px;
+    /* ancorato in alto a destra DENTRO l'area verde (vedi #table-area position:relative),
+       così non si sovrappone ai riquadri scuri col nome dei giocatori. */
     background: rgba(255, 255, 255, 0.95);
     color: var(--primary-color);
     padding: 12px 16px;
@@ -602,18 +608,14 @@ footer {
         font-size: 0.9rem;
     }
 
-    /* Fit-to-viewport DURANTE la partita: l'interfaccia sta nello schermo senza scroll su/giù.
-       Applicato solo con `body.playing` (impostata da showGameBoard), così le schermate di setup
-       e risultato — che possono essere più alte — restano scrollabili normalmente. */
-    body.playing {
-        overflow: hidden;
-    }
-
+    /* In partita puntiamo a far stare la UI nel viewport comprimendo spazi (carte, gap, padding).
+       NON forziamo `overflow: hidden`: usiamo `min-height: 100dvh`, così se lo schermo è troppo
+       basso (device piccoli, landscape, tastiera aperta) la pagina torna a scrollare normalmente
+       invece di sovrapporre gli elementi. Il footer resta visibile. Applicato solo con
+       `body.playing`, così setup e risultato restano scrollabili. */
     body.playing .container {
-        height: 100dvh;
+        min-height: 100dvh;
         /* dvh: tiene conto della barra dinamica del browser mobile (a differenza di vh). */
-        min-height: 0;
-        overflow: hidden;
         padding: 8px;
     }
 
@@ -622,20 +624,12 @@ footer {
         padding: 4px 0;
     }
 
-    /* Recuperiamo spazio verticale: niente footer in partita. */
-    body.playing footer {
-        display: none;
-    }
-
     body.playing #game-board {
-        flex: 1;
-        min-height: 0;
-        /* min-height:0 permette ai figli flex di comprimersi sotto il loro contenuto. */
         gap: 6px;
         padding: 6px;
     }
 
-    /* Avversario e giocatore a dimensione naturale; il tavolo assorbe lo spazio elastico. */
+    /* Avversario e giocatore a dimensione naturale; il tavolo verde assorbe lo spazio elastico. */
     body.playing .player-area {
         flex: 0 0 auto;
         gap: 4px;
@@ -649,8 +643,14 @@ footer {
         flex: 1 1 auto;
         min-height: 0;
         /* override del min-height:200px desktop */
-        padding: 8px;
-        gap: 8px;
+        justify-content: center;
+        /* centra verticalmente il gruppo (mazzo + carte giocate) nell'area verde */
+        gap: 10px;
+    }
+
+    /* Carte giocate centrate verticalmente nell'area verde. */
+    body.playing #table-center {
+        flex: 1 1 auto;
         justify-content: center;
     }
 
@@ -665,43 +665,6 @@ footer {
     }
 
     body.playing .turn-message {
-        margin-top: 8px;
-    }
-}
-
-/* Schermi molto bassi (tipico: smartphone in orizzontale): carte più piccole e via l'header,
-   così la partita resta comunque dentro il viewport senza scroll. */
-@media (max-height: 520px) and (pointer: coarse) {
-    body.playing {
-        --card-width: 46px;
-        overflow: hidden;
-    }
-
-    body.playing .container {
-        height: 100dvh;
-        min-height: 0;
-        overflow: hidden;
-        padding: 6px;
-    }
-
-    body.playing header,
-    body.playing footer {
-        display: none;
-    }
-
-    body.playing #game-board {
-        flex: 1;
-        min-height: 0;
-        gap: 4px;
-        padding: 4px;
-    }
-
-    body.playing #table-area {
-        flex: 1 1 auto;
-        min-height: 0;
-    }
-
-    body.playing .hand {
-        min-height: 0;
+        margin-top: 12px;
     }
 }
