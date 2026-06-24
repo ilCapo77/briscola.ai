@@ -8,8 +8,12 @@ Questo modulo espone:
 Scelte implementative:
 - Lo stato delle partite vive in un `GameSessionStore` (vedi `game_store.py`): in-memory in dev,
   Redis in cloud (multi-replica). Questo evita "partita non trovata" quando azioni/WS finiscono su
-  repliche diverse. `game_data`/`game_timestamps`/`connected_clients` restano per-replica (best-effort:
-  buffer ML, cleanup, connessioni WS locali).
+  repliche diverse. `game_data`/`game_timestamps` restano per-replica (best-effort: buffer ML, cleanup).
+- Gli eventi realtime (reveal carta IA, risultato mano, refresh snapshot) viaggiano TUTTI sul
+  pub/sub dello store (`publish`/`subscribe`): così raggiungono i client su QUALSIASI replica
+  (Redis in prod, fan-out asyncio in dev). Ogni connessione WebSocket avvia un task subscriber
+  che inoltra gli eventi al proprio socket; i "refresh" vengono tradotti nell'osservazione
+  per-giocatore (anti-cheat: mai lo stato completo).
 - L'agente IA non è serializzato: la sessione salva la sua config (nome + model_id) e l'agente viene
   ricostruito per mossa (con cache modello).
 """
@@ -19,7 +23,7 @@ import json
 import os
 import random
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import aclosing, asynccontextmanager
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
@@ -36,6 +40,7 @@ from ..ai.model_catalog import (
 )
 from ..domain.engine import PlayCardAction, step
 from ..domain.observation import make_player_observation
+from ..domain.serialization import game_state_from_dict, game_state_to_dict
 from ..domain.state import GameState as DomainGameState
 from ..domain.state import new_game_state
 from ..versioning import get_code_version, get_rules_version
@@ -105,7 +110,7 @@ def _get_event_log_mode() -> str:
     """
     Modalità di logging eventi.
 
-    - `debug` (default): log completo, utile per debug (include `observation_sent` e lifecycle WS).
+    - `debug` (default): log completo, utile per debug (azioni, reveal/trick IA e lifecycle WS).
     - `dataset`: log minimale, orientato a dataset umano (riduce molto la dimensione del DB).
     - `off`: non loggare nulla (senza cambiare DB path).
     """
@@ -142,8 +147,8 @@ def _safe_log_event(
     if mode == "off":
         return
     if mode == "dataset":
-        # In modalità dataset riduciamo il DB evitando payload ridondanti e molto grandi
-        # (soprattutto `observation_sent` per tutti i player dopo ogni azione).
+        # In modalità dataset riduciamo il DB tenendo solo gli eventi utili al dataset umano
+        # (escludiamo lifecycle WS e gli eventi di gioco non necessari).
         allowed = {"game_created", "human_action", "game_finished", "game_aborted"}
         if event_type not in allowed:
             return
@@ -358,10 +363,12 @@ game_store = build_game_session_store()
 # Stato best-effort, per-replica (non critico per la correttezza cross-replica):
 # - `game_timestamps`: per il cleanup periodico delle partite inattive su questa replica.
 # - `game_data`: buffer in memoria delle azioni (base per pipeline ML futura).
-# - `connected_clients`: connessioni WebSocket aperte su questa replica.
+#
+# Le connessioni WebSocket NON sono più tracciate qui: ogni connessione si iscrive al pub/sub
+# dello store (`game_store.subscribe`) e inoltra gli eventi al proprio socket. Questo rende la
+# consegna funzionante anche cross-replica (Redis in prod).
 game_timestamps: Dict[str, datetime] = {}
 game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
-connected_clients: Dict[str, Dict[int, WebSocket]] = {}
 
 _DEFAULT_AI_AGENT_NAME = "random"
 _AI_PLAYER_DISPLAY_NAME = "Giocatore AI"
@@ -405,17 +412,6 @@ def _display_name_for_player(session: GameSession, player_index: int) -> str:
     if 0 <= player_index < len(state.players):
         return state.players[player_index].name
     return f"Giocatore {player_index + 1}"
-
-
-def _remove_websocket_if_current(game_id: str, player_index: int, websocket: WebSocket) -> None:
-    """
-    Rimuove una connessione WS solo se è ancora quella registrata per il player.
-
-    Questo evita che una connessione vecchia, chiudendosi dopo un reconnect, cancelli
-    la connessione nuova appena registrata per lo stesso `player_index`.
-    """
-    if connected_clients.get(game_id, {}).get(player_index) is websocket:
-        del connected_clients[game_id][player_index]
 
 
 def _metadata_for_model_catalog_ui(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -561,9 +557,6 @@ async def create_game(config: GameConfig):
                 else None,
             }
         ]
-
-        # Inizializza il dizionario delle connessioni WebSocket per questa partita
-        connected_clients[game_id] = {}
 
         # Event log (opzionale): metadati partita.
         _safe_log_event(
@@ -779,12 +772,10 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
             await notify_trick_result(session, trick_cards, winner_index, points)
             # Subito dopo inviamo anche lo stato aggiornato (tavolo vuoto, nuove carte pescate).
             # Il frontend decide se applicarlo subito o dopo un delay.
-            if game_id in connected_clients:
-                await notify_clients(game_id, new_state, server_version)
+            await notify_clients(game_id, new_state, server_version)
         else:
             # Mano non completata: notifica normale
-            if game_id in connected_clients:
-                await notify_clients(game_id, new_state, server_version)
+            await notify_clients(game_id, new_state, server_version)
 
         # Calcoliamo qui se dobbiamo far giocare l'IA (fuori dal lock scheduliamo solo il task).
         if not new_state.game_over and new_state.num_players == 2 and new_state.current_turn != action.player_index:
@@ -877,26 +868,21 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
 
     selected_card = state.players[ai_player_index].hand[card_index]
 
-    # Invia messaggio per rivelare la carta nella mano IA (usando DTO)
-    if game_id in connected_clients:
-        reveal_dto = AiCardRevealDTO(
-            card_index=card_index,
-            card=CardDTO.from_domain(selected_card),
-        )
-        _safe_log_event(
-            game_id,
-            "ai_card_reveal",
-            reveal_dto.model_dump(),
-            server_version=session.version,
-            player_index=ai_player_index,
-            state=state,
-        )
-        reveal_json = reveal_dto.model_dump_json()
-        for player_idx, client in list(connected_clients[game_id].items()):
-            try:
-                await client.send_text(reveal_json)
-            except Exception:
-                _remove_websocket_if_current(game_id, player_idx, client)
+    # Pubblica il messaggio per rivelare la carta nella mano IA (usando DTO).
+    # Il fan-out verso i socket avviene tramite i task subscriber (pub/sub dello store).
+    reveal_dto = AiCardRevealDTO(
+        card_index=card_index,
+        card=CardDTO.from_domain(selected_card),
+    )
+    _safe_log_event(
+        game_id,
+        "ai_card_reveal",
+        reveal_dto.model_dump(),
+        server_version=session.version,
+        player_index=ai_player_index,
+        state=state,
+    )
+    await game_store.publish(game_id, reveal_dto.model_dump_json())
 
     new_state, step_result = step(state, PlayCardAction(player_index=ai_player_index, card_index=card_index))
     if step_result.error:
@@ -936,11 +922,9 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
         winner_index = step_result.trick_winner if step_result.trick_winner is not None else 0
         points = sum(card.rank.points for card, _ in step_result.trick_cards)
         await notify_trick_result(session, trick_cards, winner_index, points)
-        if game_id in connected_clients:
-            await notify_clients(game_id, new_state, server_version)
+        await notify_clients(game_id, new_state, server_version)
     else:
-        if game_id in connected_clients:
-            await notify_clients(game_id, new_state, server_version)
+        await notify_clients(game_id, new_state, server_version)
 
     # Registra l'azione AI (setdefault: game_data e' per-replica, vedi nota in play_action).
     game_timestamps[game_id] = datetime.now()
@@ -1043,6 +1027,46 @@ async def get_game_result(game_id: str) -> GameResultDTO:
     )
 
 
+async def _ws_subscriber(websocket: WebSocket, game_id: str, player_index: int) -> None:
+    """
+    Task di consegna realtime per UNA connessione WebSocket.
+
+    Si iscrive al pub/sub dello store per la partita e inoltra ogni evento al socket:
+    - messaggi `reveal`/`trick_result`: inoltrati verbatim (il `type` è già nel JSON);
+    - messaggi `refresh`: NON contengono un'osservazione (sarebbe per-giocatore); il subscriber
+      rilegge lo stato dallo store e costruisce l'osservazione PER QUESTO `player_index`
+      (anti-cheat: ogni client riceve solo la propria vista parziale).
+
+    Robustezza: un singolo messaggio malformato non deve uccidere il loop; in caso di errore di
+    `send` consideriamo la connessione persa e usciamo (il `finally` dell'endpoint farà cleanup).
+    """
+    # `aclosing` garantisce la chiusura deterministica del generator (unsubscribe/cleanup della
+    # coda o del pubsub) anche quando usciamo con `break` o per cancellazione del task.
+    async with aclosing(game_store.subscribe(game_id)) as events:
+        async for raw in events:
+            try:
+                msg = json.loads(raw)
+                if msg.get("type") == "refresh":
+                    # Stato point-in-time incluso nel messaggio (vedi `notify_clients`): lo usiamo
+                    # per costruire l'osservazione di QUESTO player, senza rileggere il "latest"
+                    # (che potrebbe essere già avanzato dalla mossa IA → ordine eventi sbagliato).
+                    state_dict = msg.get("state")
+                    if state_dict is None:
+                        continue
+                    state = game_state_from_dict(state_dict)
+                    obs = build_observation_dto(state, player_index, int(msg.get("server_version", 0)))
+                    await websocket.send_text(obs.model_dump_json())
+                else:
+                    # reveal/trick: inoltro verbatim del JSON pubblicato.
+                    await websocket.send_text(raw)
+            except WebSocketDisconnect, RuntimeError:
+                # Il socket è andato (disconnect o "websocket closed"): chiudiamo il loop.
+                break
+            except Exception:
+                # Messaggio malformato o errore non fatale di parsing: ignora e prosegui.
+                continue
+
+
 @app.websocket("/ws/{game_id}/{player_index}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: int):
     """Endpoint WebSocket per aggiornamenti della partita in tempo reale"""
@@ -1059,16 +1083,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
 
     await websocket.accept()
 
-    # Salva la connessione
-    if game_id not in connected_clients:
-        connected_clients[game_id] = {}
-    previous = connected_clients[game_id].get(player_index)
-    connected_clients[game_id][player_index] = websocket
-    if previous is not None and previous is not websocket:
-        try:
-            await previous.close(code=1000, reason="Sostituita da una nuova connessione")
-        except Exception:
-            pass
+    # Avvia il task subscriber che inoltra a questo socket gli eventi pubblicati sullo store.
+    sub_task = asyncio.create_task(_ws_subscriber(websocket, game_id, player_index))
 
     try:
         # Invia lo stato iniziale della partita (usando DTO)
@@ -1077,14 +1093,6 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
             game_id,
             "ws_connected",
             {"player_index": player_index},
-            server_version=session.version,
-            player_index=player_index,
-            state=state,
-        )
-        _safe_log_event(
-            game_id,
-            "observation_sent",
-            dto.model_dump(),
             server_version=session.version,
             player_index=player_index,
             state=state,
@@ -1105,8 +1113,6 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
                 pass
 
     except WebSocketDisconnect:
-        # Rimuove la connessione quando il client si disconnette
-        _remove_websocket_if_current(game_id, player_index, websocket)
         # Best-effort: rileggiamo la sessione per loggare una server_version aggiornata (se esiste).
         current = await game_store.get(game_id)
         _safe_log_event(
@@ -1117,29 +1123,29 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
             player_index=player_index,
             state=current.state if current is not None else None,
         )
-
-
-async def notify_clients(game_id: str, state: DomainGameState, server_version: int):
-    """Notifica tutti i client connessi sugli aggiornamenti della partita"""
-    if game_id not in connected_clients:
-        return
-
-    # Invia lo stato aggiornato a ogni client connesso (usando DTO)
-    for player_idx, websocket in list(connected_clients[game_id].items()):
+    finally:
+        # Ferma il task subscriber: la connessione non esiste più.
+        sub_task.cancel()
         try:
-            dto = build_observation_dto(state, player_idx, server_version)
-            _safe_log_event(
-                game_id,
-                "observation_sent",
-                dto.model_dump(),
-                server_version=server_version,
-                player_index=player_idx,
-                state=state,
-            )
-            await websocket.send_text(dto.model_dump_json())
-        except Exception:
-            # Gestisce client disconnessi
-            _remove_websocket_if_current(game_id, player_idx, websocket)
+            await sub_task
+        except asyncio.CancelledError:
+            pass
+
+
+async def notify_clients(game_id: str, state: DomainGameState, server_version: int) -> None:
+    """
+    Notifica i client connessi che lo snapshot della partita è cambiato.
+
+    Pubblichiamo un messaggio "refresh" sul pub/sub dello store, includendo lo stato
+    **point-in-time** (`game_state_to_dict(state)`): ogni task subscriber ne ricava l'osservazione
+    per il proprio `player_index` (anti-cheat). È importante includere lo stato di QUESTO preciso
+    momento e non rileggere il "latest" dallo store: altrimenti, se l'IA ha già mosso, il client
+    riceverebbe lo stato post-IA prima del relativo `ai_card_reveal`, perdendo lo stato intermedio.
+    """
+    await game_store.publish(
+        game_id,
+        json.dumps({"type": "refresh", "server_version": server_version, "state": game_state_to_dict(state)}),
+    )
 
 
 async def notify_trick_result(session: GameSession, trick_cards: list, winner_index: int, points: int):
@@ -1147,12 +1153,10 @@ async def notify_trick_result(session: GameSession, trick_cards: list, winner_in
     Notifica i client del risultato della mano con le carte visibili.
 
     Questo messaggio speciale permette al frontend di mostrare entrambe le carte
-    e indicare chiaramente chi ha vinto la mano.
+    e indicare chiaramente chi ha vinto la mano. È pubblicato sul pub/sub dello store, così
+    raggiunge i client su qualsiasi replica.
     """
     game_id = session.game_id
-    if game_id not in connected_clients:
-        return
-
     winner_name = _display_name_for_player(session, winner_index)
 
     # Costruisci DTO per il risultato della mano
@@ -1171,13 +1175,7 @@ async def notify_trick_result(session: GameSession, trick_cards: list, winner_in
         server_version=session.version,
         state=session.state,
     )
-    trick_result_json = trick_result_dto.model_dump_json()
-
-    for player_idx, websocket in list(connected_clients[game_id].items()):
-        try:
-            await websocket.send_text(trick_result_json)
-        except Exception:
-            _remove_websocket_if_current(game_id, player_idx, websocket)
+    await game_store.publish(game_id, trick_result_dto.model_dump_json())
 
 
 async def cleanup_inactive_games():
@@ -1244,14 +1242,6 @@ async def cleanup_inactive_games():
             await game_store.delete(game_id)
             if game_id in game_timestamps:
                 del game_timestamps[game_id]
-            if game_id in connected_clients:
-                # Chiude tutte le connessioni WebSocket
-                for websocket in connected_clients[game_id].values():
-                    try:
-                        await websocket.close(code=1000, reason="Partita scaduta")
-                    except Exception:
-                        pass
-                del connected_clients[game_id]
 
             # Salva i dati della partita prima di rimuoverla
             if game_id in game_data:

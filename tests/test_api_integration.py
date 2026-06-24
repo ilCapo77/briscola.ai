@@ -31,7 +31,6 @@ def _reset_server_state() -> None:
     server.game_store = InMemoryGameSessionStore()
     server.game_timestamps.clear()
     server.game_data.clear()
-    server.connected_clients.clear()
 
 
 def _get_session(game_id: str) -> GameSession | None:
@@ -748,10 +747,16 @@ def test_websocket_ping_pong_and_receives_update_after_action() -> None:
             json={"game_id": game_id, "player_index": 0, "card_index": initial["valid_actions"][0]},
         )
         assert play.status_code == 200
+        play_version = play.json()["server_version"]
 
+        # Primo snapshot dopo la giocata. Nel modello pub/sub il "refresh" include lo stato
+        # point-in-time (vedi notify_clients) ed è pubblicato PRIMA dello scheduling del task IA;
+        # il pub/sub è FIFO, quindi il primo messaggio riflette lo stato subito dopo la mossa
+        # umana: la versione coincide con la risposta HTTP e ora tocca all'IA (my_turn False).
         updated = ws.receive_json()
         assert updated["type"] == "observation"
         assert updated["my_index"] == 0
+        assert updated["server_version"] == play_version
         assert updated["my_turn"] is False
         assert updated["valid_actions"] == []
 

@@ -20,7 +20,7 @@ import asyncio
 import contextlib
 import json
 import os
-from collections.abc import AsyncIterator
+from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
 from typing import Any, Optional, Protocol, runtime_checkable
 
@@ -106,7 +106,7 @@ class GameSessionStore(Protocol):
         """Pubblica un messaggio sul canale eventi della partita (per fan-out WebSocket multi-replica)."""
         ...
 
-    def subscribe(self, game_id: str) -> AsyncIterator[str]:
+    def subscribe(self, game_id: str) -> AsyncGenerator[str, None]:
         """Async generator che produce i messaggi pubblicati sul canale eventi della partita."""
         ...
 
@@ -141,7 +141,7 @@ class InMemoryGameSessionStore:
         for queue in list(self._subscribers.get(game_id, ())):
             queue.put_nowait(message)
 
-    async def subscribe(self, game_id: str) -> AsyncIterator[str]:
+    async def subscribe(self, game_id: str) -> AsyncGenerator[str, None]:
         queue: asyncio.Queue[str] = asyncio.Queue()
         self._subscribers.setdefault(game_id, set()).add(queue)
         try:
@@ -205,7 +205,7 @@ class RedisGameSessionStore:
     async def publish(self, game_id: str, message: str) -> None:
         await self._redis.publish(self._channel(game_id), message)
 
-    async def subscribe(self, game_id: str) -> AsyncIterator[str]:
+    async def subscribe(self, game_id: str) -> AsyncGenerator[str, None]:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(self._channel(game_id))
         try:

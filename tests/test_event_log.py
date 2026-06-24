@@ -41,7 +41,6 @@ def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.Monke
     server.game_store = InMemoryGameSessionStore()
     server.game_timestamps.clear()
     server.game_data.clear()
-    server.connected_clients.clear()
 
     with TestClient(server.app) as client:
         create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
@@ -84,7 +83,6 @@ def test_event_log_works_when_api_is_mounted_under_main_app(tmp_path: Path, monk
     server.game_store = InMemoryGameSessionStore()
     server.game_timestamps.clear()
     server.game_data.clear()
-    server.connected_clients.clear()
 
     with TestClient(main_app) as client:
         create = client.post("/api/games", json={"num_players": 2, "player_names": ["A", "B"]})
