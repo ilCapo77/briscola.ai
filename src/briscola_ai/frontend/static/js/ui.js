@@ -16,6 +16,7 @@ const UI = (() => {
     // DOM elements cache
     const elements = {
         homeHero: document.getElementById('home-hero'),
+        homeAbout: document.getElementById('home-about'),
         gameSetup: document.getElementById('game-setup'),
         gameBoard: document.getElementById('game-board'),
         gameResult: document.getElementById('game-result'),
@@ -362,6 +363,7 @@ const UI = (() => {
 
     const showGameSetup = () => {
         elements.homeHero?.classList.remove('hidden');
+        elements.homeAbout?.classList.remove('hidden');
         elements.gameSetup.classList.remove('hidden');
         elements.gameBoard.classList.add('hidden');
         elements.gameResult.classList.add('hidden');
@@ -373,6 +375,7 @@ const UI = (() => {
 
     const showGameBoard = () => {
         elements.homeHero?.classList.add('hidden');
+        elements.homeAbout?.classList.add('hidden');
         elements.gameSetup.classList.add('hidden');
         elements.gameBoard.classList.remove('hidden');
         elements.gameResult.classList.add('hidden');
@@ -383,6 +386,7 @@ const UI = (() => {
 
     const showGameResult = () => {
         elements.homeHero?.classList.add('hidden');
+        elements.homeAbout?.classList.add('hidden');
         elements.gameSetup.classList.add('hidden');
         elements.gameBoard.classList.add('hidden');
         elements.gameResult.classList.remove('hidden');

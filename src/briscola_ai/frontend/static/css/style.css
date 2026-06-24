@@ -585,6 +585,27 @@ footer {
     margin-top: auto;
 }
 
+/* Link al progetto su GitHub nel footer (icona SVG inline) */
+.github-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 8px;
+    color: var(--text-muted);
+    text-decoration: none;
+    transition: color 0.15s ease;
+}
+
+.github-link:hover {
+    color: var(--text-color);
+}
+
+.github-icon {
+    width: 20px;
+    height: 20px;
+    fill: currentColor;
+}
+
 /* Home: tagline (hero) sopra il box di setup */
 .home-hero {
     text-align: center;
@@ -602,11 +623,9 @@ footer {
     color: var(--secondary-color);
 }
 
-/* Home: spiegazione dettagliata (dopo il form) */
+/* Home: spiegazione dettagliata, in un riquadro proprio FUORI dal box del form (.panel). */
 .home-about {
-    margin-top: 20px;
-    padding-top: 16px;
-    border-top: 1px solid var(--border-color);
+    margin-top: 16px;
     color: var(--text-muted);
     font-size: 0.92rem;
     line-height: 1.55;
