@@ -16,6 +16,14 @@
             </div>
         </header>
 
+        <!-- Hero / tagline (solo schermata iniziale) -->
+        <section id="home-hero" class="home-hero">
+            <p class="home-tagline">
+                <strong>Briscola AI</strong> — gioca contro un'intelligenza artificiale addestrata da zero.<br>
+                Un progetto didattico open source per imparare il machine learning… giocando.
+            </p>
+        </section>
+
         <!-- Setup screen -->
         <div id="game-setup" class="panel">
             <h2>Inizia una nuova partita</h2>
@@ -32,10 +40,6 @@
                         <option value="heuristic_v1" selected>Euristica v1</option>
                     </select>
                     <div id="ai-agent-description" class="help-text"></div>
-                    <div id="ai-agent-common-note" class="anti-cheat-callout hidden">
-                        <div class="anti-cheat-title">Nota anti-cheat</div>
-                        <div id="ai-agent-common-note-text" class="anti-cheat-body"></div>
-                    </div>
                 </div>
                 <div class="form-group hidden" id="ai-model-group">
                     <label for="ai-model-select">Modello (file .npz):</label>
@@ -55,7 +59,32 @@
                 <div class="form-group">
                     <button type="submit" id="start-game">Avvia partita</button>
                 </div>
+                <!-- Nota anti-cheat: sotto il pulsante, ma in alto nella pagina (sopra l'about). -->
+                <div id="ai-agent-common-note" class="anti-cheat-callout hidden">
+                    <div class="anti-cheat-title">Nota anti-cheat</div>
+                    <div id="ai-agent-common-note-text" class="anti-cheat-body"></div>
+                </div>
             </form>
+
+            <!-- Spiegazione dettagliata (dopo il form) -->
+            <div id="home-about" class="home-about">
+                <h3>Cos'è Briscola AI?</h3>
+                <p>
+                    Un progetto didattico che costruisce, dall'inizio alla fine, un'IA capace di giocare a
+                    Briscola: dal <strong>motore di regole puro</strong>, alla <strong>pipeline di dati</strong>,
+                    fino all'<strong>allenamento degli agenti</strong> con self-play e reinforcement learning
+                    (A2C) — scritti in NumPy, senza framework esterni.
+                </p>
+                <p>
+                    L'avversario che affronti vede <strong>solo ciò che vedrebbe un giocatore leale</strong>
+                    (nessuna carta nascosta): la sua forza viene dall'addestramento, non da scorciatoie.
+                </p>
+                <p class="home-github">
+                    <a href="https://github.com/ilCapo77/briscola.ai" target="_blank" rel="noopener">
+                        🔗 Codice, dettagli e documentazione su GitHub →
+                    </a>
+                </p>
+            </div>
         </div>
 
         <!-- Game board -->

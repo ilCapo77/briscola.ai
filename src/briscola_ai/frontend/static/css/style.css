@@ -585,6 +585,57 @@ footer {
     margin-top: auto;
 }
 
+/* Home: tagline (hero) sopra il box di setup */
+.home-hero {
+    text-align: center;
+    max-width: 640px;
+    margin: 4px auto 16px;
+}
+
+.home-tagline {
+    font-size: 1.05rem;
+    line-height: 1.5;
+    color: var(--text-color);
+}
+
+.home-tagline strong {
+    color: var(--secondary-color);
+}
+
+/* Home: spiegazione dettagliata (dopo il form) */
+.home-about {
+    margin-top: 20px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.92rem;
+    line-height: 1.55;
+}
+
+.home-about h3 {
+    color: var(--text-color);
+    font-size: 1rem;
+    margin-bottom: 8px;
+}
+
+.home-about p {
+    margin-bottom: 8px;
+}
+
+.home-about strong {
+    color: var(--text-color);
+}
+
+.home-github a {
+    color: var(--secondary-color);
+    font-weight: 600;
+    text-decoration: none;
+}
+
+.home-github a:hover {
+    text-decoration: underline;
+}
+
 /* Responsive */
 @media (max-width: 600px) {
     :root {
