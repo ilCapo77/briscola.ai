@@ -259,13 +259,27 @@ const UI = (() => {
             if (!a?.name) return;
             const option = document.createElement('option');
             option.value = a.name;
-            option.textContent = a.label || a.name;
+            const available = a.available !== false;
+            // Opzioni non disponibili (es. modello richiesto assente nel deploy) restano visibili
+            // ma disabilitate: l'utente capisce che esistono ma non può selezionarle (niente errori).
+            option.textContent = available ? (a.label || a.name) : `${a.label || a.name} (non disponibile)`;
+            if (!available) {
+                option.disabled = true;
+                option.title = 'Modello richiesto non disponibile in questo deploy';
+            }
             elements.aiAgentSelect.appendChild(option);
         });
 
-        // Default: se esiste heuristic_v1 la pre-selezioniamo, altrimenti il primo.
-        const hasHeuristic = !!aiAgentMetaByName.heuristic_v1;
-        elements.aiAgentSelect.value = hasHeuristic ? 'heuristic_v1' : (agents[0]?.name || 'random');
+        // Default: il "modello migliore" (bc_model + modello consigliato) se disponibile; in caso
+        // contrario euristica v1; altrimenti il primo agente disponibile. Gli altri restano
+        // selezionabili solo se l'utente vuole cambiare avversario.
+        const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
+        const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
+        let defaultAgent;
+        if (isAvail('bc_model')) defaultAgent = 'bc_model';
+        else if (isAvail('heuristic_v1')) defaultAgent = 'heuristic_v1';
+        else defaultAgent = firstAvailable || agents[0]?.name || 'random';
+        elements.aiAgentSelect.value = defaultAgent;
         _updateAiAgentDescription();
         _updateAiModelUi();
     };

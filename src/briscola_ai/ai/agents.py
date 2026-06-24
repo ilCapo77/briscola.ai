@@ -74,6 +74,10 @@ class AgentSpec:
     name: str
     label: str
     description_it: str
+    # Se valorizzato, l'agente richiede questo modello "bundled" (file .npz nella directory modelli)
+    # per funzionare. Serve a UI/CLI per sapere se l'agente è realmente disponibile nel deploy
+    # corrente (es. `hybrid_endgame_best_a2c` richiede `best_a2c.npz`, non sempre presente in cloud).
+    requires_model_id: str | None = None
 
 
 @dataclass(frozen=True)
@@ -879,18 +883,20 @@ BEST_A2C_SPEC = AgentSpec(
         "Carica un modello “campione” A2C da un file locale `best_a2c.npz` nella directory modelli. "
         "È pensato per training in stile league (avversario congelato) e per confronti riproducibili."
     ),
+    requires_model_id="best_a2c.npz",
 )
 
 _BEST_A2C_DEFAULT_MODEL_ID = "best_a2c.npz"
 
 HYBRID_ENDGAME_BEST_A2C_SPEC = AgentSpec(
     name="hybrid_endgame_best_a2c",
-    label="Hybrid Endgame (Best A2C) — consigliato",
+    label="Hybrid Endgame (Best A2C)",
     description_it=(
-        "Baseline consigliata per UI/evaluation. Come Hybrid Endgame, ma usa il modello campione "
-        "`best_a2c.npz` come policy in mid-game e il solver esatto a mazzo vuoto. Unisce la forza "
-        "mid-game di best_a2c al finale ottimo (vantaggio stabile +1.9 su 100k partite vs best_a2c puro)."
+        "Come Hybrid Endgame, ma usa il modello `best_a2c.npz` come policy in mid-game e il solver "
+        "esatto a mazzo vuoto. Richiede il file `best_a2c.npz` nella directory modelli (non sempre "
+        "presente: in tal caso l'opzione è non disponibile)."
     ),
+    requires_model_id="best_a2c.npz",
 )
 
 AI_AGENTS_COMMON_NOTE_IT = (

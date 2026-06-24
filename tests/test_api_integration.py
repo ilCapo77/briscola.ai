@@ -205,6 +205,26 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert by_name["heuristic_v2"]["description_it"]
 
 
+def test_list_ai_agents_reports_availability(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`available` deve riflettere la presenza del modello richiesto (no opzioni rotte nella UI)."""
+    # Directory modelli vuota: nessun modello compatibile, niente best_a2c.npz.
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    client = TestClient(server.app)
+    by_name = {a["name"]: a for a in client.get("/ai/agents").json()["agents"]}
+
+    # Agenti senza dipendenze da modello: sempre disponibili.
+    assert by_name["random"]["available"] is True
+    assert by_name["heuristic_v1"]["available"] is True
+    assert by_name["hybrid_endgame"]["available"] is True
+
+    # Dipendono da best_a2c.npz (assente) → non disponibili, con requires_model_id dichiarato.
+    assert by_name["hybrid_endgame_best_a2c"]["available"] is False
+    assert by_name["hybrid_endgame_best_a2c"]["requires_model_id"] == "best_a2c.npz"
+
+    # bc_model: nessun modello compatibile in dir → non disponibile.
+    assert by_name["bc_model"]["available"] is False
+
+
 def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     """`GET /ai/models` deve elencare i modelli `.npz` disponibili (senza path assoluti)."""
     monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))

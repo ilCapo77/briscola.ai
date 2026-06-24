@@ -424,14 +424,39 @@ def _metadata_for_model_catalog_ui(metadata: dict[str, Any]) -> dict[str, Any]:
 
 @app.get("/ai/agents", response_model=Dict)
 async def list_ai_agents():
-    """Elenca gli agenti IA disponibili (metadati per UI)."""
-    return {
-        "common_note_it": AI_AGENTS_COMMON_NOTE_IT,
-        "agents": [
-            {"name": spec.name, "label": spec.label, "description_it": spec.description_it}
-            for spec in list_agent_specs()
-        ],
-    }
+    """
+    Elenca gli agenti IA disponibili (metadati per UI), con un flag `available`.
+
+    `available` dice se l'agente è realmente giocabile nel deploy corrente:
+    - agenti che richiedono un modello "bundled" (`spec.requires_model_id`, es. `best_a2c.npz`) sono
+      disponibili solo se quel file è presente nella directory modelli;
+    - `bc_model` è disponibile se esiste almeno un modello `.npz` compatibile nel catalogo;
+    - gli altri (random/greedy/euristiche/hybrid_endgame) sono sempre disponibili.
+    La UI usa il flag per disabilitare le opzioni rotte (evita "manca il modello") e per scegliere
+    un default sensato.
+    """
+    models_dir = get_models_dir_from_env()
+    has_compatible_model = any(m.is_compatible for m in list_local_models(models_dir, recursive=False))
+
+    agents = []
+    for spec in list_agent_specs():
+        if spec.name == "bc_model":
+            available = has_compatible_model
+        elif spec.requires_model_id is not None:
+            available = (models_dir / spec.requires_model_id).exists()
+        else:
+            available = True
+        agents.append(
+            {
+                "name": spec.name,
+                "label": spec.label,
+                "description_it": spec.description_it,
+                "requires_model_id": spec.requires_model_id,
+                "available": available,
+            }
+        )
+
+    return {"common_note_it": AI_AGENTS_COMMON_NOTE_IT, "agents": agents}
 
 
 @app.get("/ai/models", response_model=Dict)
