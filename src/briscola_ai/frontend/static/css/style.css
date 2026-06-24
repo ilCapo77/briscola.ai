@@ -339,6 +339,10 @@ button:disabled {
     justify-content: center;
     align-items: center;
     min-height: var(--card-height);
+    /* Riserva lo spazio per l'etichetta "chi ha giocato" (`.card-label`, assoluta a bottom:-28px):
+       senza questo padding l'etichetta nera sborda sotto la carta e si sovrappone alla
+       turn-message bianca ("Tocca a te"). */
+    padding-bottom: 34px;
 }
 
 /* Turn message */
@@ -350,7 +354,8 @@ button:disabled {
     font-weight: 600;
     text-align: center;
     min-width: 200px;
-    margin-top: 30px;
+    /* spazio dalla carta+etichetta sopra; lo spazio dell'etichetta è già riservato in #table-cards */
+    margin-top: 10px;
 }
 
 .turn-message.thinking {
