@@ -76,17 +76,28 @@ L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 ## Struttura del progetto
 
 - `src/briscola_ai/domain/` – dominio canonico, puro e testabile
-  - `models.py` (`Card`/`Suit`/`Rank`), `state.py` (`GameState`), `engine.py` (`step(state, action)`), `rules.py`, `observation.py`
-- `src/briscola_ai/backend/` – adattatore HTTP/WS (FastAPI): `dto.py` (Pydantic v2), `server.py`, `event_log.py`, `observation_builder.py`
+  - `models.py` (`Card`/`Suit`/`Rank`), `state.py` (`GameState`), `engine.py` (`step(state, action)`), `rules.py`, `observation.py`, `card_id.py` (mappa carta ↔ id 0–39), `serialization.py` (`GameState` ↔ dict JSON)
+- `src/briscola_ai/backend/` – adattatore HTTP/WS (FastAPI): `dto.py` (Pydantic v2), `server.py`, `game_store.py` (stato partita in‑memory/Redis + pub/sub), `event_log.py` (SQLite/Postgres), `observation_builder.py`
 - `src/briscola_ai/ai/`
   - `agents.py` – baseline, ibridi endgame, factory e catalogo agenti
   - `endgame_solver.py` – solver esatto del finale 2‑player
   - `training/observation_encoder.py` – encoder v1/v2/v3
-  - `fast_*` – fast path 2‑player (Python/Numba) per throughput, tenuto coerente col dominio dai test di parità
+  - `model_catalog.py` / `model_provisioning.py` – catalogo `.npz` per la UI / download del modello allo startup
+  - `fast_*.py` – motore "fast" 2‑player (interi/array NumPy); `fast_numba.py` – kernel JIT Numba (vedi nota sotto)
 - `src/briscola_ai/frontend/static/` – UI (HTML/CSS/JS), immagini carte in `assets/cards/`
 - `tests/` – unit + integrazione API/WS (pytest)
 - `scripts/` – simulazione, self‑play, export, training, evaluation, benchmark
 - `PLAN.md` – stato corrente e prossime azioni (fonte di verità). `data/` e `benchmarks/` sono artefatti locali (gitignored).
+
+### I tre motori dello stesso gioco (dominio · fast · numba)
+
+Lo **stesso** gioco è implementato a tre livelli, tenuti **in parità dai test** (`tests/test_fast_*`):
+
+- **dominio** (`domain/engine.py`) — il motore "standard": puro, immutabile, leggibile. È la **fonte di verità**, usato da backend, UI e test. Ottimizzato per chiarezza, non per velocità.
+- **fast** (`ai/fast_*.py`) — riscrittura 2‑player su **interi/array NumPy** (niente oggetti `Card`/`GameState`): stessa logica, molto più veloce. Serve a self‑play, training ed evaluation massivi.
+- **numba** (`ai/fast_numba.py`) — gli stessi kernel del fast path compilati **JIT con Numba**: ancora più rapidi.
+
+Negli script si scelgono con `--engine domain|fast|numba` (es. `evaluate_agents.py`, `--rollout-engine`/`--fast-rollout` in `train_a2c.py`). Regola d'oro: il dominio decide la correttezza; fast/numba devono dare **risultati identici** (se cambi una regola nel dominio, aggiorna anche fast/numba e i test di parità). I numeri di throughput sono nella sezione [Performance](#performance-fast-path-pythonnumba).
 
 ## Backend (FastAPI + WebSocket)
 
