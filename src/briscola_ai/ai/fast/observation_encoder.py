@@ -3,7 +3,7 @@ Encoder diretto da `Fast2PState` a feature/mask 2-player.
 
 Il layout delle feature è identico a `encode_player_observation_2p`, ma evita la costruzione
 di `Card`, `PlayerObservation` e DTO. È il pezzo che permette a un rollout neurale di usare
-`fast_2p` senza tornare al dominio canonico nel loop caldo.
+`ai.fast.state_2p` senza tornare al dominio canonico nel loop caldo.
 """
 
 from __future__ import annotations

@@ -1,5 +1,5 @@
 """
-Encoder Numba per osservazioni `fast_2p`.
+Encoder Numba per osservazioni del fast path 2-player.
 
 Questo modulo prepara l'integrazione del rollout A2C su stato numerico/JIT:
 mantiene lo stesso layout di `encode_fast_observation_2p`, ma lo costruisce da array

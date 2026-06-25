@@ -1,5 +1,5 @@
 """
-Self-play veloce basato su `fast_2p`, senza event log completo.
+Self-play veloce basato sul fast path 2-player, senza event log completo.
 
 Questo modulo serve per misurare e riusare roll-out 2-player ad alto throughput quando non serve
 serializzare ogni osservazione/azione nel DB SQLite. È pensato come ponte verso training più veloce:
@@ -134,7 +134,7 @@ def iter_fast_self_play_2p(
     game_seeds: Sequence[int] | None = None,
 ) -> Iterator[FastSelfPlayGameSummary]:
     """
-    Genera riassunti partita usando `fast_2p`.
+    Genera riassunti partita usando il fast path 2-player.
 
     Seed:
     - `game_seed` controlla lo shuffle;

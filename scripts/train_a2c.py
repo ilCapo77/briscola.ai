@@ -423,7 +423,7 @@ def _play_one_fast_game_2p_collect(
     bc_anchor_beta: float,
 ) -> tuple[Fast2PState, list[StepRecord], float]:
     """
-    Simula una partita A2C usando `fast_2p`.
+    Simula una partita A2C usando il fast path 2-player (`ai.fast.state_2p`).
 
     Limitazioni intenzionali:
     - supporta solo avversari tradotti su card id (`random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`);

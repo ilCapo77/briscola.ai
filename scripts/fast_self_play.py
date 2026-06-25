@@ -2,8 +2,9 @@
 """
 Self-play veloce 2-player senza DB/event log completo.
 
-Questo comando usa `fast_2p` e salva al massimo un JSONL minimale per partita. È utile per benchmark
-e per preparare un futuro path di training più veloce, dove non vogliamo pagare il costo di DTO/SQLite.
+Questo comando usa il fast path 2-player (`ai.fast.state_2p`) e salva al massimo
+un JSONL minimale per partita. È utile per benchmark e per preparare un futuro
+path di training più veloce, dove non vogliamo pagare il costo di DTO/SQLite.
 """
 
 from __future__ import annotations

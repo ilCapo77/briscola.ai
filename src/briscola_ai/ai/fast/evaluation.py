@@ -1,5 +1,5 @@
 """
-Valutazione sperimentale basata su `fast_2p`.
+Valutazione sperimentale basata sul fast path 2-player.
 
 Questo modulo è volutamente separato da `ai.evaluation`:
 - `ai.evaluation` resta il path canonico, anti-cheat e compatibile con tutti gli agenti;
@@ -301,7 +301,7 @@ def play_one_fast_game_2p(
     game_seed: int,
 ) -> Fast2PState:
     """
-    Simula una singola partita 2-player con `fast_2p`.
+    Simula una singola partita 2-player con il fast path.
 
     Supporta agenti numerici fast-compatible senza costruire `PlayerObservation`.
     """
@@ -335,7 +335,7 @@ def evaluate_fast_match_2p(
     game_seeds: Optional[Sequence[int]] = None,
 ) -> MatchStats:
     """
-    Valuta due agenti fast-compatible usando `fast_2p`.
+    Valuta due agenti fast-compatible usando il fast path.
 
     La semantica di seed replica `evaluate_match_2p`: un RNG per gli shuffle e uno per le azioni.
     """
@@ -393,7 +393,7 @@ def evaluate_fast_seat_fair_match_2p(
     game_seeds: Optional[Sequence[int]] = None,
 ) -> SeatFairStats:
     """
-    Valuta due agenti fast-compatible in modalità seat-fair usando `fast_2p`.
+    Valuta due agenti fast-compatible in modalità seat-fair usando il fast path.
 
     `num_games` deve essere pari, come nel path canonico.
     """

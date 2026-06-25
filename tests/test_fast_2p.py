@@ -1,5 +1,5 @@
 """
-Test di equivalenza per il motore sperimentale `fast_2p`.
+Test di equivalenza per il motore sperimentale fast 2-player.
 
 Il modulo fast è pensato per performance, quindi questi test lo vincolano al dominio
 canonico: stesso seed e stesse azioni devono produrre gli stessi eventi essenziali.
@@ -28,7 +28,7 @@ def _assert_state_equivalent(canonical: GameState, fast: Fast2PState) -> None:
     """
     Confronta lo stato osservabile del dominio canonico con lo stato fast.
 
-    `fast_2p` non conserva le carte catturate, quindi confrontiamo punti e zone attive
+    Il fast path non conserva le carte catturate, quindi confrontiamo punti e zone attive
     della partita: deck, mani, tavolo, turno e risultato finale.
     """
     assert canonical.num_players == 2
