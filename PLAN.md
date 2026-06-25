@@ -4,7 +4,7 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.7.3` (`pyproject.toml`).
+- Versione progetto: `0.8.0` (`pyproject.toml`).
 - Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
 - Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>.
@@ -96,6 +96,7 @@ Decisione: `best_a2c_v3.npz` è la baseline consigliata. `best_a2c.npz` resta se
 - Export JSONL.
 - Self-play verso DB.
 - Evaluation offline seat-fair.
+- Package `ai/` riorganizzato per responsabilità (`agents/ encoding/ models/ endgame/ fast/ numba/ evaluation/ training/`); shim legacy rimossi; docstring complete su moduli/pubbliche e nei test (vedi `ai/README.md`).
 
 ### Deploy E Infrastruttura (Fase 1)
 
