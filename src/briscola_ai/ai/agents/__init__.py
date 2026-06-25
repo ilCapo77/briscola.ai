@@ -25,15 +25,15 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import ClassVar, Protocol
 
-from ..domain.card_id import card_to_id, id_to_card
-from ..domain.models import Card, Suit
-from ..domain.observation import PlayerObservation
-from ..domain.rules import trick_points, who_wins_trick
-from ..domain.state import GameState, PlayerState
-from .bc_model_agent import BCModelAgent
-from .endgame_solver import solve_endgame
-from .model_catalog import get_models_dir_from_env, resolve_model_path
-from .training.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
+from ...domain.card_id import card_to_id, id_to_card
+from ...domain.models import Card, Suit
+from ...domain.observation import PlayerObservation
+from ...domain.rules import trick_points, who_wins_trick
+from ...domain.state import GameState, PlayerState
+from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
+from ..endgame.solver import solve_endgame
+from ..models.bc_model import BCModelAgent
+from ..models.catalog import get_models_dir_from_env, resolve_model_path
 
 
 class Agent(Protocol):

@@ -46,7 +46,7 @@ def _version_from_pyproject() -> str | None:
     try:
         with pyproject.open("rb") as fp:
             data = tomllib.load(fp)
-    except (OSError, tomllib.TOMLDecodeError):
+    except OSError, tomllib.TOMLDecodeError:
         return None
     version = data.get("project", {}).get("version")
     return str(version).strip() if version else None

@@ -18,7 +18,7 @@ import pytest
 
 from briscola_ai.ai.agents import Agent, GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
 from briscola_ai.ai.evaluation import play_one_game_2p
-from briscola_ai.ai.fast_self_play import (
+from briscola_ai.ai.fast.self_play import (
     FastSelfPlayAccumulator,
     iter_fast_self_play_2p,
     run_fast_self_play_2p,

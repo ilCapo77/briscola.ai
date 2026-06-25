@@ -24,11 +24,11 @@ from dataclasses import asdict
 from pathlib import Path
 
 from briscola_ai.ai.agents import build_agent, list_agent_specs
-from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.decision_quality import (
+from briscola_ai.ai.evaluation.decision_quality import (
     evaluate_bc_model_seat_fair_match_2p_with_quality_numba,
     evaluate_seat_fair_match_2p_with_quality_parallel,
 )
+from briscola_ai.ai.models import BCModelAgent
 
 
 def main() -> int:

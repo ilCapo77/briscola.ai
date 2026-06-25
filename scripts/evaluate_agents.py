@@ -25,14 +25,14 @@ from dataclasses import asdict
 from pathlib import Path
 
 from briscola_ai.ai.agents import Agent, build_agent, list_agent_specs
-from briscola_ai.ai.bc_model_agent import BCModelAgent, MLPBCModel
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
-from briscola_ai.ai.fast_evaluation import (
+from briscola_ai.ai.fast.evaluation import (
     FAST_EVALUATION_AGENT_NAMES,
     evaluate_fast_match_2p,
     evaluate_fast_seat_fair_match_2p,
 )
-from briscola_ai.ai.fast_numba_observation import evaluate_mlp_policy_numba_2p
+from briscola_ai.ai.models import BCModelAgent, MLPBCModel
+from briscola_ai.ai.numba.observation import evaluate_mlp_policy_numba_2p
 
 
 def _repo_root() -> Path:

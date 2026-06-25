@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import pytest
 
-from briscola_ai.ai.fast_numba import (
+from briscola_ai.ai.numba.core import (
     evaluate_numba_match_2p,
     evaluate_numba_seat_fair_match_2p,
     evaluate_random_numba_2p,

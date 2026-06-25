@@ -19,10 +19,10 @@ import random
 from dataclasses import dataclass
 from typing import Optional, Sequence
 
-from ..domain.engine import PlayCardAction, step
-from ..domain.observation import make_player_observation
-from ..domain.state import GameState, new_game_state
-from .agents import Agent
+from ...domain.engine import PlayCardAction, step
+from ...domain.observation import make_player_observation
+from ...domain.state import GameState, new_game_state
+from ..agents import Agent
 
 
 @dataclass(frozen=True)

@@ -19,9 +19,9 @@ import numpy as np
 import pytest
 
 from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
-from briscola_ai.ai.fast_evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
+from briscola_ai.ai.fast.evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
 
 
 def test_evaluate_match_is_deterministic_for_fixed_seed() -> None:

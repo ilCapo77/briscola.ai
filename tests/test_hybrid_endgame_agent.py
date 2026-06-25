@@ -20,8 +20,8 @@ from briscola_ai.ai.agents import (
     list_agent_specs,
     reconstruct_endgame_state,
 )
-from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.endgame_solver import solve_endgame
+from briscola_ai.ai.endgame.solver import solve_endgame
+from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.domain.card_id import card_to_id
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit

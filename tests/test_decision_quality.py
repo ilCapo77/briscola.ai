@@ -14,15 +14,15 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.agents import build_agent
-from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.decision_quality import (
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
+from briscola_ai.ai.evaluation.decision_quality import (
     _is_trump_overkill_second_hand,
     _is_trump_waste_second_hand,
     evaluate_bc_model_seat_fair_match_2p_with_quality_numba,
     evaluate_seat_fair_match_2p_with_quality,
     evaluate_seat_fair_match_2p_with_quality_parallel,
 )
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
+from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.state import GameState, PlayerState
 

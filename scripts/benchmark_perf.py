@@ -19,19 +19,19 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.agents import build_agent, list_agent_specs
-from briscola_ai.ai.bc_model_agent import BCModelAgent
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
-from briscola_ai.ai.fast_2p import Fast2PState, play_random_fast_2p
-from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, evaluate_fast_seat_fair_match_2p
-from briscola_ai.ai.fast_numba import (
+from briscola_ai.ai.fast.evaluation import FAST_EVALUATION_AGENT_NAMES, evaluate_fast_seat_fair_match_2p
+from briscola_ai.ai.fast.state_2p import Fast2PState, play_random_fast_2p
+from briscola_ai.ai.models import BCModelAgent
+from briscola_ai.ai.numba.core import (
     NUMBA_EVALUATION_AGENT_NAMES,
     evaluate_numba_seat_fair_match_2p,
     evaluate_random_numba_2p,
     warm_up_numba,
     warm_up_numba_evaluation,
 )
-from briscola_ai.ai.fast_numba_observation import evaluate_mlp_policy_numba_2p, warm_up_numba_mlp_rollout
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
+from briscola_ai.ai.numba.observation import evaluate_mlp_policy_numba_2p, warm_up_numba_mlp_rollout
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.state import GameState, new_game_state
 

@@ -12,8 +12,8 @@ import argparse
 import time
 from pathlib import Path
 
-from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES
-from briscola_ai.ai.fast_self_play import FastSelfPlayAccumulator, iter_fast_self_play_2p
+from briscola_ai.ai.fast.evaluation import FAST_EVALUATION_AGENT_NAMES
+from briscola_ai.ai.fast.self_play import FastSelfPlayAccumulator, iter_fast_self_play_2p
 
 
 def _parse_agents(raw: str) -> tuple[str, str]:

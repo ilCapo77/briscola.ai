@@ -15,8 +15,8 @@ from pathlib import Path
 
 import numpy as np
 
-from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
+from briscola_ai.ai.encoding.card_action_space import action_id_from_suit_number
+from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
 

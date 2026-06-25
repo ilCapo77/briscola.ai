@@ -13,7 +13,7 @@ import sys
 import time
 from pathlib import Path
 
-from briscola_ai.ai.evaluation_matrix import default_opponents, evaluate_model_matrix, format_matrix_table
+from briscola_ai.ai.evaluation.matrix import default_opponents, evaluate_model_matrix, format_matrix_table
 
 
 def _print_rich_table_if_available(*, matrix) -> bool:

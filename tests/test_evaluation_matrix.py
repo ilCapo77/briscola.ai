@@ -15,14 +15,14 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from briscola_ai.ai import evaluation_matrix
-from briscola_ai.ai.evaluation_matrix import (
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
+from briscola_ai.ai.evaluation import matrix as evaluation_matrix
+from briscola_ai.ai.evaluation.matrix import (
     EvaluationMatrix,
     build_suites_for_benchmark,
     evaluate_model_matrix,
     make_range_seed_suite,
 )
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1
 
 
 def test_make_range_seed_suite_length_and_32bit_normalization() -> None:

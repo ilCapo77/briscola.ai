@@ -17,18 +17,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.fast_2p import new_fast_2p_state
-from briscola_ai.ai.fast_numba_observation import encode_fast_observation_numba_2p
-from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
-from briscola_ai.ai.model_catalog import validate_model_compatible_for_ui
-from briscola_ai.ai.training.observation_encoder import (
+from briscola_ai.ai.encoding.observation_encoder import (
     FEATURE_DIM_2P_V2,
     FEATURE_DIM_2P_V3,
     encode_observation_2p_with_version,
     encode_player_observation_2p,
     feature_dim_for_encoder_version,
 )
+from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
+from briscola_ai.ai.fast.state_2p import new_fast_2p_state
+from briscola_ai.ai.models import BCModelAgent, validate_model_compatible_for_ui
+from briscola_ai.ai.numba.observation import encode_fast_observation_numba_2p
 from briscola_ai.backend.observation_builder import build_observation_dto
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit

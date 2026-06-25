@@ -10,18 +10,18 @@ from __future__ import annotations
 
 import random
 
-from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
-from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
-from briscola_ai.ai.training.card_action_space import (
+from briscola_ai.ai.encoding.card_action_space import (
     action_id_from_suit_number,
     action_mask_from_hand,
     suit_number_from_action_id,
 )
-from briscola_ai.ai.training.observation_encoder import (
+from briscola_ai.ai.encoding.observation_encoder import (
     encode_observation_2p,
     encode_observation_2p_with_version,
     encode_player_observation_2p,
 )
+from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
+from briscola_ai.ai.fast.state_2p import new_fast_2p_state, step_fast_2p
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation, make_player_observation

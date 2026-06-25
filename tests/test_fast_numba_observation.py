@@ -13,9 +13,11 @@ import random
 import numpy as np
 import pytest
 
-from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
-from briscola_ai.ai.fast_numba import numba_agent_code
-from briscola_ai.ai.fast_numba_observation import (
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, EncoderVersion
+from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
+from briscola_ai.ai.fast.state_2p import new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.numba.core import numba_agent_code
+from briscola_ai.ai.numba.observation import (
     _trump_overkill_penalty_numba,
     collect_a2c_batch_numba_2p,
     collect_a2c_trajectory_numba_2p,
@@ -25,8 +27,6 @@ from briscola_ai.ai.fast_numba_observation import (
     warm_up_numba_mlp_rollout,
     warm_up_numba_observation,
 )
-from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, EncoderVersion
 
 
 def _assert_encoders_match(*, seed: int, steps: int, version: EncoderVersion) -> None:

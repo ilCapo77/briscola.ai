@@ -17,9 +17,9 @@ import numpy as np
 import pytest
 
 from briscola_ai.ai.agents import build_agent
-from briscola_ai.ai.bc_model_agent import BCModelAgent, load_bc_model_npz
-from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V1, encode_player_observation_2p
+from briscola_ai.ai.encoding.card_action_space import action_id_from_suit_number
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1, encode_player_observation_2p
+from briscola_ai.ai.models import BCModelAgent, load_bc_model_npz
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
 
@@ -211,8 +211,7 @@ def test_bc_model_cache_invalidated_when_file_changes(tmp_path: Path) -> None:
 
 def test_validate_for_ui_shares_cache_with_from_npz(tmp_path: Path) -> None:
     """La validazione UI e `from_npz` usano lo stesso `load_bc_model_npz` cacheato (no doppia lettura)."""
-    from briscola_ai.ai.bc_model_agent import load_bc_model_npz
-    from briscola_ai.ai.model_catalog import validate_model_compatible_for_ui
+    from briscola_ai.ai.models import load_bc_model_npz, validate_model_compatible_for_ui
 
     model_path = tmp_path / "m.npz"
     _write_linear_model(model_path)

@@ -44,8 +44,8 @@ from pathlib import Path
 
 import numpy as np
 
-from briscola_ai.ai.training.card_action_space import card_dto_to_action_id
-from briscola_ai.ai.training.observation_encoder import EncoderVersion, encode_observation_2p_with_version
+from briscola_ai.ai.encoding.card_action_space import card_dto_to_action_id
+from briscola_ai.ai.encoding.observation_encoder import EncoderVersion, encode_observation_2p_with_version
 
 
 @dataclass(frozen=True)

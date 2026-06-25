@@ -20,8 +20,8 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from briscola_ai.ai.bc_model_agent import BCModelAgent
-from briscola_ai.ai.training.observation_encoder import FEATURE_DIM_2P_V3
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
+from briscola_ai.ai.models import BCModelAgent
 
 _ROOT = Path(__file__).resolve().parents[1]
 

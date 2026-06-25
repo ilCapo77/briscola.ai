@@ -15,10 +15,10 @@ import random
 
 import pytest
 
-from briscola_ai.ai.fast_2p import new_fast_2p_state, step_fast_2p
-from briscola_ai.ai.fast_numba_observation import encode_fast_observation_numba_2p
-from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
-from briscola_ai.ai.training.observation_encoder import encode_player_observation_2p
+from briscola_ai.ai.encoding.observation_encoder import encode_player_observation_2p
+from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
+from briscola_ai.ai.fast.state_2p import new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.numba.observation import encode_fast_observation_numba_2p
 from briscola_ai.domain.card_id import card_to_id
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit

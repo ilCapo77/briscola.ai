@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import pytest
 
-from briscola_ai.ai.endgame_solver import solve_endgame
+from briscola_ai.ai.endgame.solver import solve_endgame
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.rules import trick_points

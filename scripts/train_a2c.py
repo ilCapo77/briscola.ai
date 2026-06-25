@@ -47,25 +47,25 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.agents import Agent, build_agent
-from briscola_ai.ai.bc_model_agent import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
-from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, step_fast_2p
-from briscola_ai.ai.fast_evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
-from briscola_ai.ai.fast_numba import numba_agent_code
-from briscola_ai.ai.fast_numba_observation import (
-    NumbaA2CBatch,
-    NumbaA2CTrajectory,
-    collect_a2c_batch_numba_2p,
-    collect_a2c_trajectory_numba_2p,
-    encode_fast_observation_numba_2p,
-)
-from briscola_ai.ai.fast_observation_encoder import encode_fast_observation_2p
-from briscola_ai.ai.training.card_action_space import action_id_from_suit_number
-from briscola_ai.ai.training.observation_encoder import (
+from briscola_ai.ai.encoding.card_action_space import action_id_from_suit_number
+from briscola_ai.ai.encoding.observation_encoder import (
     FEATURE_DIM_2P_V1,
     FEATURE_DIM_2P_V2,
     EncoderVersion,
     encode_player_observation_2p,
     feature_dim_for_encoder_version,
+)
+from briscola_ai.ai.fast.evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
+from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
+from briscola_ai.ai.fast.state_2p import Fast2PState, new_fast_2p_state, step_fast_2p
+from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.numba.core import numba_agent_code
+from briscola_ai.ai.numba.observation import (
+    NumbaA2CBatch,
+    NumbaA2CTrajectory,
+    collect_a2c_batch_numba_2p,
+    collect_a2c_trajectory_numba_2p,
+    encode_fast_observation_numba_2p,
 )
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs

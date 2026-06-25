@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 from pathlib import Path
 
-from briscola_ai.ai.model_provisioning import ensure_model_available
+from briscola_ai.ai.models.provisioning import ensure_model_available
 
 
 def _make_source(tmp_path: Path, content: bytes = b"fake-model-bytes") -> tuple[Path, str]:

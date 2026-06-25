@@ -12,7 +12,7 @@ from collections.abc import Sequence
 
 import pytest
 
-from briscola_ai.ai.fast_2p import Fast2PState, new_fast_2p_state, play_random_fast_2p, step_fast_2p
+from briscola_ai.ai.fast.state_2p import Fast2PState, new_fast_2p_state, play_random_fast_2p, step_fast_2p
 from briscola_ai.domain.card_id import card_to_id
 from briscola_ai.domain.engine import PlayCardAction, StepResult, step
 from briscola_ai.domain.models import Card
