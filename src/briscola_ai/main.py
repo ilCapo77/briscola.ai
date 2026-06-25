@@ -66,8 +66,7 @@ async def lifespan(app: FastAPI):
     # Provisioning modello (best-effort): se manca e `BRISCOLA_MODEL_URL` è impostata, scarica il
     # campione consigliato nella directory modelli. Non blocca l'avvio in caso di errore.
     try:
-        from .ai.model_catalog import get_models_dir_from_env
-        from .ai.model_provisioning import DEFAULT_MODEL_ID, ensure_model_available
+        from .ai.models import DEFAULT_MODEL_ID, ensure_model_available, get_models_dir_from_env
 
         _, provisioning_msg = ensure_model_available(
             models_dir=get_models_dir_from_env(),
@@ -191,8 +190,7 @@ async def version_info():
     Utile in cloud per verificare che `best_a2c_v3.npz` sia risolvibile nella directory modelli
     effettiva (che dipende da `BRISCOLA_MODELS_DIR` o dalla working directory).
     """
-    from .ai.model_catalog import get_models_dir_from_env
-    from .ai.model_provisioning import DEFAULT_MODEL_ID
+    from .ai.models import DEFAULT_MODEL_ID, get_models_dir_from_env
     from .versioning import get_rules_version
 
     models_dir = get_models_dir_from_env()

@@ -8,13 +8,14 @@ from .catalog import (
     resolve_model_path,
     validate_model_compatible_for_ui,
 )
-from .provisioning import ensure_model_available
+from .provisioning import DEFAULT_MODEL_ID, ensure_model_available
 
 __all__ = [
     "BCModelAgent",
     "LoadedBCModel",
     "MLPBCModel",
     "LocalModelSpec",
+    "DEFAULT_MODEL_ID",
     "ensure_model_available",
     "get_models_dir_from_env",
     "list_local_models",
