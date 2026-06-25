@@ -37,7 +37,7 @@ from ...domain.state import GameState, new_game_state
 from ..agents import Agent
 from ..fast.evaluation import FAST_EVALUATION_AGENT_NAMES
 from ..models.bc_model import BCModelAgent, MLPBCModel
-from ..numba.observation import evaluate_mlp_policy_quality_numba_2p
+from ..numba.mlp import evaluate_mlp_policy_quality_numba_2p
 from .match import SeatFairStats, _winner_index_2p  # noqa: PLC2701 (didattico, reuse interno)
 
 

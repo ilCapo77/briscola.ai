@@ -17,14 +17,16 @@ from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATU
 from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.fast.state_2p import new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.numba.core import numba_agent_code
-from briscola_ai.ai.numba.observation import (
-    _trump_overkill_penalty_numba,
+from briscola_ai.ai.numba.mlp import (
     collect_a2c_batch_numba_2p,
     collect_a2c_trajectory_numba_2p,
-    encode_fast_observation_numba_2p,
     evaluate_mlp_policy_numba_2p,
     evaluate_mlp_policy_quality_numba_2p,
     warm_up_numba_mlp_rollout,
+)
+from briscola_ai.ai.numba.observation import (
+    _trump_overkill_penalty_numba,
+    encode_fast_observation_numba_2p,
     warm_up_numba_observation,
 )
 

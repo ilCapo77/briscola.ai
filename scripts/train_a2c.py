@@ -60,13 +60,9 @@ from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.fast.state_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.ai.numba.core import numba_agent_code
-from briscola_ai.ai.numba.observation import (
-    NumbaA2CBatch,
-    NumbaA2CTrajectory,
-    collect_a2c_batch_numba_2p,
-    collect_a2c_trajectory_numba_2p,
-    encode_fast_observation_numba_2p,
-)
+from briscola_ai.ai.numba.mlp import collect_a2c_batch_numba_2p, collect_a2c_trajectory_numba_2p
+from briscola_ai.ai.numba.observation import encode_fast_observation_numba_2p
+from briscola_ai.ai.numba.types import NumbaA2CBatch, NumbaA2CTrajectory
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap

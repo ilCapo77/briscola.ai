@@ -6,14 +6,16 @@ dover leggere subito i path ottimizzati.
 
 ## Mappa
 
-- `agents/`: agenti giocabili nel backend/UI e registry (`build_agent`, `list_agent_specs`).
+- `agents/`: agenti giocabili nel backend/UI. La facciata `__init__.py` esporta l'API pubblica;
+  l'implementazione e' separata in `base.py`, `rule_based.py`, `hybrid_endgame.py`, `registry.py`.
 - `models/`: caricamento modelli `.npz`, agente BC/A2C, catalogo server-side e provisioning.
 - `endgame/`: solver esatto del finale 2-player a mazzo vuoto.
 - `encoding/`: spazio azioni e encoder observation -> feature/mask per i modelli.
 - `training/`: componenti di training condivisi (curriculum, reward shaping, opponent mix, regolarizzazioni).
 - `evaluation/`: valutazione offline, matrici benchmark e metriche di qualita' decisionale.
 - `fast/`: motore 2-player mutabile in Python/NumPy per rollout veloci.
-- `numba/`: kernel Numba per rollout/evaluation ad alto throughput.
+- `numba/`: path JIT ad alto throughput. `core.py` contiene regole/euristiche numeriche,
+  `observation.py` encoder e kernel condivisi, `mlp.py` wrapper MLP/A2C, `types.py` DTO.
 
 ## Regola didattica
 

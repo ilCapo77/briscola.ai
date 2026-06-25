@@ -25,7 +25,7 @@ from typing import Literal
 from ..agents import build_agent
 from ..fast.evaluation import FAST_EVALUATION_AGENT_NAMES
 from ..models.bc_model import BCModelAgent, MLPBCModel
-from ..numba.observation import evaluate_mlp_policy_numba_2p
+from ..numba.mlp import evaluate_mlp_policy_numba_2p
 from .match import SeatFairStats, evaluate_seat_fair_match_2p
 
 BenchmarkName = Literal["small", "medium", "big"]

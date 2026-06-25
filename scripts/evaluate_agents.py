@@ -32,7 +32,7 @@ from briscola_ai.ai.fast.evaluation import (
     evaluate_fast_seat_fair_match_2p,
 )
 from briscola_ai.ai.models import BCModelAgent, MLPBCModel
-from briscola_ai.ai.numba.observation import evaluate_mlp_policy_numba_2p
+from briscola_ai.ai.numba.mlp import evaluate_mlp_policy_numba_2p
 
 
 def _repo_root() -> Path:

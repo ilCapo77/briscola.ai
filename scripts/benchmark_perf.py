@@ -31,7 +31,7 @@ from briscola_ai.ai.numba.core import (
     warm_up_numba,
     warm_up_numba_evaluation,
 )
-from briscola_ai.ai.numba.observation import evaluate_mlp_policy_numba_2p, warm_up_numba_mlp_rollout
+from briscola_ai.ai.numba.mlp import evaluate_mlp_policy_numba_2p, warm_up_numba_mlp_rollout
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.state import GameState, new_game_state
 
