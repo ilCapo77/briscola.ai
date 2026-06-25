@@ -37,11 +37,15 @@ def _make_session(game_id: str = "g1", version: int = 1) -> GameSession:
 
 
 def test_session_json_roundtrip() -> None:
+    """Serializzare e rideserializzare una GameSession (stato, versione, seat IA, seed)
+    deve restituire un oggetto uguale campo per campo."""
     s = _make_session()
     assert session_from_json(session_to_json(s)) == s
 
 
 def test_inmemory_set_get_delete_and_no_leak() -> None:
+    """Lo store in-memory deve supportare set/get/delete e isolare le copie: mutare l'oggetto
+    restituito non deve persistere senza un nuovo set() (stessa semantica di Redis)."""
     store = InMemoryGameSessionStore()
 
     async def scenario() -> None:
@@ -61,6 +65,8 @@ def test_inmemory_set_get_delete_and_no_leak() -> None:
 
 
 def test_inmemory_lock_is_usable() -> None:
+    """Il lock in-memory deve funzionare come context manager async, permettendo di scrivere
+    e poi rileggere la sessione all'interno della sezione protetta."""
     store = InMemoryGameSessionStore()
 
     async def scenario() -> None:
@@ -82,6 +88,8 @@ def _fake_redis_pair():
 
 
 def test_redis_store_set_get_delete() -> None:
+    """Lo store Redis (via fakeredis) deve supportare set/get/delete preservando i campi
+    della sessione (es. version)."""
     from fakeredis import aioredis
 
     store = RedisGameSessionStore(client=aioredis.FakeRedis(decode_responses=True))
@@ -114,6 +122,8 @@ def test_redis_two_replicas_share_session() -> None:
 
 
 def test_redis_lock_is_usable() -> None:
+    """Il lock Redis deve funzionare come context manager async, permettendo di scrivere
+    e poi rileggere la sessione all'interno della sezione protetta."""
     from fakeredis import aioredis
 
     store = RedisGameSessionStore(client=aioredis.FakeRedis(decode_responses=True))
@@ -127,6 +137,8 @@ def test_redis_lock_is_usable() -> None:
 
 
 def test_factory_selects_store_by_env(monkeypatch) -> None:
+    """La factory deve scegliere lo store in base all'ambiente: in-memory senza URL Redis,
+    RedisGameSessionStore quando `BRISCOLA_REDIS_URL` è impostata."""
     monkeypatch.delenv("BRISCOLA_REDIS_URL", raising=False)
     monkeypatch.delenv("REDIS_URL", raising=False)
     monkeypatch.delenv("REDISCLOUD_URL", raising=False)
@@ -165,6 +177,7 @@ def test_redis_lock_raises_if_not_acquired() -> None:
 
 
 def test_inmemory_pubsub_delivers_messages() -> None:
+    """Il pub/sub in-memory deve recapitare al subscriber, nell'ordine, i messaggi pubblicati su un canale."""
     store = InMemoryGameSessionStore()
 
     async def scenario() -> None:

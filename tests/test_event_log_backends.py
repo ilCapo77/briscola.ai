@@ -58,6 +58,8 @@ def _sqls(conn: _FakeConn) -> str:
 
 
 def test_postgres_event_log_creates_schema_on_init() -> None:
+    """All'init il backend Postgres deve emettere il DDL idempotente (CREATE TABLE IF NOT EXISTS
+    games/events) usando il dialetto Postgres (BIGSERIAL)."""
     conn = _FakeConn()
     PostgresEventLog(conn=conn)
     sqls = _sqls(conn)
@@ -67,6 +69,8 @@ def test_postgres_event_log_creates_schema_on_init() -> None:
 
 
 def test_postgres_event_log_insert_uses_on_conflict_and_placeholders() -> None:
+    """L'insert della partita deve essere idempotente (ON CONFLICT DO NOTHING) e usare i placeholder
+    Postgres `%s` (mai `?` di SQLite); gli eventi devono legare il game_id corretto."""
     conn = _FakeConn()
     log = PostgresEventLog(conn=conn)
     log.ensure_game("g1", num_players=2, seed=7, code_version="0.6.0", rules_version="1")
@@ -80,6 +84,8 @@ def test_postgres_event_log_insert_uses_on_conflict_and_placeholders() -> None:
 
 
 def test_postgres_try_mark_finished_idempotent_via_rowcount() -> None:
+    """`try_mark_game_finished` deve basare l'esito sul `rowcount`: True se ha aggiornato una riga,
+    False se l'UPDATE non ha toccato nulla (partita già chiusa)."""
     conn_ok = _FakeConn(rowcount=1)
     assert PostgresEventLog(conn=conn_ok).try_mark_game_finished("g1") is True
 
@@ -88,6 +94,8 @@ def test_postgres_try_mark_finished_idempotent_via_rowcount() -> None:
 
 
 def test_postgres_try_mark_aborted_atomic_guard() -> None:
+    """`try_mark_game_aborted` deve essere un UPDATE atomico con la guardia idempotente nel WHERE
+    (finished_at/aborted_at IS NULL), senza SELECT-then-UPDATE soggetto a race."""
     conn = _FakeConn(rowcount=1)
     log = PostgresEventLog(conn=conn)
     assert log.try_mark_game_aborted("g1", aborted_reason="inactive_timeout") is True
@@ -97,17 +105,22 @@ def test_postgres_try_mark_aborted_atomic_guard() -> None:
 
 
 def test_postgres_close_is_safe() -> None:
+    """`close()` deve chiudere la connessione sottostante (conn.closed diventa True)."""
     conn = _FakeConn()
     PostgresEventLog(conn=conn).close()
     assert conn.closed is True
 
 
 def test_both_backends_satisfy_protocol() -> None:
+    """Sia il backend Postgres sia quello SQLite devono soddisfare `EventLogProtocol`,
+    così da essere intercambiabili a runtime."""
     assert isinstance(PostgresEventLog(conn=_FakeConn()), EventLogProtocol)
     assert isinstance(EventLog(EventLogConfig(path=":memory:")), EventLogProtocol)
 
 
 def test_build_event_log_selection() -> None:
+    """La factory deve scegliere SQLite quando è dato solo un path e restituire None
+    quando non c'è né path né database_url (event log disabilitato)."""
     # Solo SQLite (path) → EventLog.
     log = build_event_log(sqlite_path=":memory:", database_url=None)
     assert isinstance(log, EventLog)
@@ -116,6 +129,8 @@ def test_build_event_log_selection() -> None:
 
 
 def test_resolve_database_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """`resolve_database_url` deve ritornare None senza env, leggere `DATABASE_URL`,
+    e dare priorità a `BRISCOLA_DATABASE_URL` quando entrambe sono presenti."""
     monkeypatch.delenv("BRISCOLA_DATABASE_URL", raising=False)
     monkeypatch.delenv("DATABASE_URL", raising=False)
     assert resolve_database_url() is None

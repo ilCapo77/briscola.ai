@@ -64,6 +64,8 @@ def test_analyze_trump_overkill_detects_cheaper_winning_trump() -> None:
 
 
 def test_trump_overkill_penalty_is_flat_negative_when_overkill() -> None:
+    """In caso di overkill la penalità deve essere il valore piatto -beta; deve annullarsi
+    se la mossa non è overkill o se beta=0."""
     obs = _obs_second_hand(
         hand=(Card(Suit.CUPS, Rank.TWO), Card(Suit.CUPS, Rank.ACE)),
         lead=Card(Suit.SWORDS, Rank.TWO),

@@ -20,18 +20,24 @@ def _play_some(state, moves: int):
 
 
 def test_roundtrip_initial_2p() -> None:
+    """Serializzare e rideserializzare lo stato iniziale 2p deve restituire un GameState
+    identico (== campo per campo)."""
     state = new_game_state(num_players=2, seed=42)
     restored = game_state_from_dict(game_state_to_dict(state))
     assert restored == state
 
 
 def test_roundtrip_initial_4p() -> None:
+    """Il round-trip di serializzazione deve preservare anche lo stato iniziale 4p (a squadre),
+    restituendo un GameState identico."""
     state = new_game_state(num_players=4, seed=7)
     restored = game_state_from_dict(game_state_to_dict(state))
     assert restored == state
 
 
 def test_roundtrip_midgame_and_endgame_2p() -> None:
+    """Il round-trip deve restare fedele anche a stato mid-game (tavolo parziale, prese accumulate)
+    e a stato endgame (game_over) 2p."""
     state = new_game_state(num_players=2, seed=123)
     # Mid-game (tavolo parziale o pieno, prese accumulate).
     state = _play_some(state, 7)

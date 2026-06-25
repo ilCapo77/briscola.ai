@@ -20,6 +20,8 @@ def _make_source(tmp_path: Path, content: bytes = b"fake-model-bytes") -> tuple[
 
 
 def test_returns_true_if_already_present(tmp_path: Path) -> None:
+    """Se il modello esiste già localmente (e nessuno sha da verificare), deve ritornare True
+    senza scaricare ("già presente")."""
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     (models_dir / "best_a2c_v3.npz").write_bytes(b"x")
@@ -30,6 +32,8 @@ def test_returns_true_if_already_present(tmp_path: Path) -> None:
 
 
 def test_returns_false_if_missing_and_no_url(tmp_path: Path) -> None:
+    """Se il modello manca e non c'è alcun URL da cui scaricarlo, deve ritornare False
+    con messaggio esplicativo (nessun BRISCOLA_MODEL_URL)."""
     models_dir = tmp_path / "models"
     ok, msg = ensure_model_available(models_dir=models_dir, model_id="best_a2c_v3.npz", url=None)
     assert ok is False
@@ -37,6 +41,8 @@ def test_returns_false_if_missing_and_no_url(tmp_path: Path) -> None:
 
 
 def test_downloads_when_missing(tmp_path: Path) -> None:
+    """Se il modello manca ma c'è un URL, deve creare la dir di destinazione, scaricare
+    e scrivere il file con il contenuto sorgente identico."""
     src, url = _make_source(tmp_path)
     models_dir = tmp_path / "models"  # non esiste ancora: deve crearla
 
@@ -49,6 +55,7 @@ def test_downloads_when_missing(tmp_path: Path) -> None:
 
 
 def test_sha256_match_installs(tmp_path: Path) -> None:
+    """Quando lo sha256 atteso coincide con quello scaricato, il file deve essere installato (download accettato)."""
     content = b"model-with-hash"
     src, url = _make_source(tmp_path, content)
     digest = hashlib.sha256(content).hexdigest()
@@ -60,6 +67,8 @@ def test_sha256_match_installs(tmp_path: Path) -> None:
 
 
 def test_sha256_mismatch_does_not_install(tmp_path: Path) -> None:
+    """Se lo sha256 scaricato non corrisponde al pin atteso, deve fallire e NON lasciare
+    alcun file parziale/sbagliato a destinazione."""
     src, url = _make_source(tmp_path, b"good-bytes")
     models_dir = tmp_path / "models"
 
@@ -70,6 +79,8 @@ def test_sha256_mismatch_does_not_install(tmp_path: Path) -> None:
 
 
 def test_download_failure_is_non_fatal(tmp_path: Path) -> None:
+    """Un download fallito (URL inesistente) non deve essere fatale: ritorna False
+    con messaggio e non lascia file a destinazione."""
     models_dir = tmp_path / "models"
     ok, msg = ensure_model_available(
         models_dir=models_dir,
@@ -82,6 +93,8 @@ def test_download_failure_is_non_fatal(tmp_path: Path) -> None:
 
 
 def test_existing_file_with_matching_sha_is_verified(tmp_path: Path) -> None:
+    """Se il file locale esiste e il suo sha256 coincide con il pin atteso, deve essere accettato
+    senza riscaricare ("verificato")."""
     content = b"pinned-model"
     models_dir = tmp_path / "models"
     models_dir.mkdir()
@@ -108,6 +121,8 @@ def test_existing_file_sha_mismatch_redownloads_when_url(tmp_path: Path) -> None
 
 
 def test_existing_file_sha_mismatch_no_url_fails(tmp_path: Path) -> None:
+    """Se il file locale ha sha diverso dal pin e non c'è URL per riscaricarlo, deve fallire
+    ("non corrisponde") invece di accettare un modello stale."""
     models_dir = tmp_path / "models"
     models_dir.mkdir()
     (models_dir / "m.npz").write_bytes(b"stale")
@@ -118,6 +133,7 @@ def test_existing_file_sha_mismatch_no_url_fails(tmp_path: Path) -> None:
 
 
 def test_disallowed_url_scheme_is_rejected(tmp_path: Path) -> None:
+    """Uno schema URL non ammesso (es. ftp://) deve essere rifiutato per sicurezza, senza tentare il download."""
     models_dir = tmp_path / "models"
     ok, msg = ensure_model_available(models_dir=models_dir, model_id="m.npz", url="ftp://example.com/m.npz")
     assert ok is False

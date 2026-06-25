@@ -26,6 +26,8 @@ from briscola_ai.ai.evaluation.matrix import (
 
 
 def test_make_range_seed_suite_length_and_32bit_normalization() -> None:
+    """La seed suite deve avere la lunghezza richiesta e i semi devono wrappare a 32 bit
+    (0xFFFFFFFF -> 0 -> 1) per restare deterministici tra engine."""
     seeds = make_range_seed_suite(start=0xFFFFFFFF, step=1, count=3)
     assert len(seeds) == 3
     assert seeds[0] == 0xFFFFFFFF
@@ -35,6 +37,8 @@ def test_make_range_seed_suite_length_and_32bit_normalization() -> None:
 
 
 def test_build_suites_for_benchmark_returns_two_suites_with_expected_counts() -> None:
+    """Un benchmark deve generare le due suite [standard, holdout] con il numero di semi seat-fair
+    atteso (medium: 10k game -> 5k semi ciascuna)."""
     suites = build_suites_for_benchmark(benchmark="medium", standard_start=0, holdout_start=1_000_000, step=1)
     assert [s.name for s in suites] == ["standard", "holdout"]
     # medium seat-fair: 10k games -> 5k seeds
@@ -43,6 +47,8 @@ def test_build_suites_for_benchmark_returns_two_suites_with_expected_counts() ->
 
 
 def test_evaluation_matrix_json_serialization_is_stable(tmp_path: Path) -> None:
+    """`to_json_text()` deve produrre JSON valido che preserva i campi (model_path, benchmark)
+    e applica il default `engine="domain"`."""
     # Creiamo un oggetto minimale e verifichiamo che `to_json_text()` sia JSON valido.
     matrix = EvaluationMatrix(model_path="data/model.npz", benchmark="small", num_games=2000, seed=0, rows=[])
     text = matrix.to_json_text()

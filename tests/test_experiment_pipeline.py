@@ -37,6 +37,8 @@ def _load_run_experiment_module():
 
 
 def test_build_experiment_name_is_deterministic_and_safe() -> None:
+    """A parità di input il nome esperimento deve essere deterministico e filesystem-safe
+    (niente spazi/slash), con i token attesi (prefisso algo, "200k", "seed5")."""
     name1 = build_experiment_name(
         algo="a2c",
         num_games=200_000,
@@ -62,6 +64,8 @@ def test_build_experiment_name_is_deterministic_and_safe() -> None:
 
 
 def test_extract_best_metric_from_matrix_json_reads_holdout_diff() -> None:
+    """L'estrazione metrica deve selezionare la riga della suite richiesta (holdout) per l'opponent
+    dato e leggerne l'`avg_point_diff` corretto."""
     matrix_json = {
         "rows": [
             {
@@ -84,6 +88,8 @@ def test_extract_best_metric_from_matrix_json_reads_holdout_diff() -> None:
 
 
 def test_extract_best_metric_from_matrix_json_raises_when_missing() -> None:
+    """Se la matrix non contiene righe (nessuna metrica estraibile) l'estrazione deve sollevare
+    ValueError invece di restituire un valore silenzioso."""
     with pytest.raises(ValueError):
         extract_best_metric_from_matrix_json({"rows": []}, benchmark="big")
 
