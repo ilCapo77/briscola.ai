@@ -107,7 +107,7 @@ Decisione: `best_a2c_v3.npz` è la baseline consigliata. `best_a2c.npz` resta se
 - Cache-busting asset automatico (versione + mtime degli static).
 - Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone, preload immagini carte, footer su una riga con icona GitHub e versione software.
 - Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
-- Repo/release: history senza trailer `Co-Authored-By`; serie tag `v0.1.0…v0.7.3` su GitHub; release `v0.5.0` con asset `best_a2c_v3.npz` usata dal provisioning.
+- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.5.0` con asset `best_a2c_v3.npz` usata dal provisioning.
 - **Deploy COMPLETATO** su FastAPI Cloud (Redis collegato): <https://briscolaai.fastapicloud.dev>. Resta opzionale attivare Postgres/Neon (`DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`) per la raccolta dati.
 
 ### Endgame E Strategia
