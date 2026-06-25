@@ -39,9 +39,9 @@ pytest --cov=briscola_ai --cov-report=term-missing
 
 - `domain/`: regole pure, modelli, stato, osservazioni, mapping carte, serializzazione (`serialization.py`).
 - `backend/`: FastAPI, DTO, server, `game_store.py` (GameSessionStore in-memory/Redis + pub/sub), event log (`event_log.py`: SQLite/Postgres).
-- `ai/agents.py`: agenti baseline, ibridi, factory e catalogo agenti.
-- `ai/training/observation_encoder.py`: encoder v1/v2/v3 canonici.
-- `ai/fast_*`: fast path 2-player; deve restare coerente col dominio tramite test di parità.
+- `ai/agents/`: agenti baseline, ibridi, factory e catalogo agenti.
+- `ai/encoding/observation_encoder.py`: encoder v1/v2/v3 canonici.
+- `ai/fast/` e `ai/numba/`: fast path 2-player; deve restare coerente col dominio tramite test di parità.
 - `scripts/`: simulazione, export dataset, training, evaluation, benchmark.
 - `data/` e `benchmarks/experiments/`: artefatti locali gitignored.
 

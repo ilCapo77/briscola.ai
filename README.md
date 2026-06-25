@@ -79,11 +79,13 @@ L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
   - `models.py` (`Card`/`Suit`/`Rank`), `state.py` (`GameState`), `engine.py` (`step(state, action)`), `rules.py`, `observation.py`, `card_id.py` (mappa carta ↔ id 0–39), `serialization.py` (`GameState` ↔ dict JSON)
 - `src/briscola_ai/backend/` – adattatore HTTP/WS (FastAPI): `dto.py` (Pydantic v2), `server.py`, `game_store.py` (stato partita in‑memory/Redis + pub/sub), `event_log.py` (SQLite/Postgres), `observation_builder.py`
 - `src/briscola_ai/ai/`
-  - `agents.py` – baseline, ibridi endgame, factory e catalogo agenti
-  - `endgame_solver.py` – solver esatto del finale 2‑player
-  - `training/observation_encoder.py` – encoder v1/v2/v3
-  - `model_catalog.py` / `model_provisioning.py` – catalogo `.npz` per la UI / download del modello allo startup
-  - `fast_*.py` – motore "fast" 2‑player (interi/array NumPy); `fast_numba.py` – kernel JIT Numba (vedi nota sotto)
+  - `agents/` – baseline, ibridi endgame, factory e catalogo agenti
+  - `endgame/` – solver esatto del finale 2‑player
+  - `encoding/` – encoder v1/v2/v3 e spazio azioni
+  - `models/` – agente modello `.npz`, catalogo per la UI e provisioning modello
+  - `fast/` – motore "fast" 2‑player (interi/array NumPy)
+  - `numba/` – kernel JIT Numba (vedi nota sotto)
+  - `evaluation/` / `training/` – valutazione offline e componenti training condivisi
 - `src/briscola_ai/frontend/static/` – UI (HTML/CSS/JS), immagini carte in `assets/cards/`
 - `tests/` – unit + integrazione API/WS (pytest)
 - `scripts/` – simulazione, self‑play, export, training, evaluation, benchmark
@@ -94,8 +96,8 @@ L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 Lo **stesso** gioco è implementato a tre livelli, tenuti **in parità dai test** (`tests/test_fast_*`):
 
 - **dominio** (`domain/engine.py`) — il motore "standard": puro, immutabile, leggibile. È la **fonte di verità**, usato da backend, UI e test. Ottimizzato per chiarezza, non per velocità.
-- **fast** (`ai/fast_*.py`) — riscrittura 2‑player su **interi/array NumPy** (niente oggetti `Card`/`GameState`): stessa logica, molto più veloce. Serve a self‑play, training ed evaluation massivi.
-- **numba** (`ai/fast_numba.py`) — gli stessi kernel del fast path compilati **JIT con Numba**: ancora più rapidi.
+- **fast** (`ai/fast/`) — riscrittura 2‑player su **interi/array NumPy** (niente oggetti `Card`/`GameState`): stessa logica, molto più veloce. Serve a self‑play, training ed evaluation massivi.
+- **numba** (`ai/numba/`) — gli stessi kernel del fast path compilati **JIT con Numba**: ancora più rapidi.
 
 Negli script si scelgono con `--engine domain|fast|numba` (es. `evaluate_agents.py`, `--rollout-engine`/`--fast-rollout` in `train_a2c.py`). Regola d'oro: il dominio decide la correttezza; fast/numba devono dare **risultati identici** (se cambi una regola nel dominio, aggiorna anche fast/numba e i test di parità). I numeri di throughput sono nella sezione [Performance](#performance-fast-path-pythonnumba).
 
@@ -187,7 +189,7 @@ Lo stesso stato lecito può essere codificato a livelli crescenti di “memoria/
 - **v2** (`288`): v1 + `seen_cards_onehot[40]` → card counting lecito (storia pubblica).
 - **v3** (`310`): v2 + 22 feature **strategiche aggregate**, leggibili: briscole/carichi ignoti, assi/tre usciti per seme, fase partita (`deck_size`, carte in mano, endgame flag), e info sulla presa corrente. Usa `out_of_play_cards_onehot` per distinguere “visto” da “fuori gioco”.
 
-L’encoder canonico vive in `ai/training/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast** (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, in fallback, dalla `feature_dim` (248/288/310).
+L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast** (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, in fallback, dalla `feature_dim` (248/288/310).
 
 ### Agenti disponibili
 
@@ -199,7 +201,7 @@ L’encoder canonico vive in `ai/training/observation_encoder.py`; esiste in ver
 - `hybrid_endgame_best_a2c` – modello `best_a2c` nel mid‑game + solver nel finale.
 - `bc_model` – modello locale `.npz` (BC/PG/A2C), encoder dedotto dai metadati.
 
-Il **solver endgame** (`ai/endgame_solver.py`) calcola la mossa ottima esatta con minimax a mazzo vuoto; l’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
+Il **solver endgame** (`ai/endgame/solver.py`) calcola la mossa ottima esatta con minimax a mazzo vuoto; l’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
 
 ### Raccolta dati ed export
 
@@ -256,7 +258,7 @@ Strumenti aggiuntivi:
 
 ### Performance (fast path Python/Numba)
 
-Il dominio canonico è la fonte di verità; il fast path 2‑player (`ai/fast_*`) replica la stessa logica su interi/array per alzare il throughput, con kernel Numba JIT. È tenuto coerente dai test di parità. Misure con `scripts/benchmark_perf.py` (modi `*-random`, `fast-eval`, `numba-eval`, `numba-mlp`).
+Il dominio canonico è la fonte di verità; il fast path 2‑player (`ai/fast/`) replica la stessa logica su interi/array per alzare il throughput, con kernel JIT in `ai/numba/`. È tenuto coerente dai test di parità. Misure con `scripts/benchmark_perf.py` (modi `*-random`, `fast-eval`, `numba-eval`, `numba-mlp`).
 
 Esempio dell’ordine di grandezza: il **training A2C v3** su 20k partite passa da ~419 games/sec (`--rollout-engine domain`) a ~5900 games/sec (`--rollout-engine fast --fast-rollout numba`), ~14×; questo rende fattibili run da 1M partite in pochi minuti.
 

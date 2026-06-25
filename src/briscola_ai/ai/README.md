@@ -21,9 +21,8 @@ Il dominio canonico resta in `briscola_ai.domain`. Gli agenti ricevono sempre
 `PlayerObservation`, mai `GameState` completo, salvo moduli-oracolo espliciti come
 `endgame.solver` che sono usati solo dopo ricostruzione lecita dell'informazione.
 
-## Compatibilita'
+## Import
 
-Alcuni moduli storici al livello root (`bc_model_agent.py`, `fast_2p.py`,
-`evaluation_matrix.py`, ecc.) sono rimasti come shim. Servono per non rompere script,
-test e import esterni durante la migrazione. Il nuovo codice dovrebbe preferire i
-percorsi organizzati indicati sopra.
+Il nuovo codice deve usare i percorsi organizzati sopra. I vecchi moduli root storici
+sono stati rimossi per evitare ambiguita' didattica: ogni import deve rendere chiara
+la responsabilita' del modulo che sta usando.
