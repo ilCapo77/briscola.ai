@@ -58,6 +58,7 @@ const UI = (() => {
 
     // Modelli locali selezionabili (solo per `bc_model`).
     let aiModelMetaById = {};
+    let recommendedAiModelId = '';
 
     // Se true, richiediamo una checkbox esplicita prima di avviare la partita.
     let dataConsentRequired = false;
@@ -79,8 +80,15 @@ const UI = (() => {
     const _isBestAiModel = (model) => {
         const id = model?.id || '';
         const filename = model?.filename || '';
-        // Campione consigliato: best_a2c_v3 (encoder v3). best_a2c (v2) resta selezionabile.
-        return id === 'best_a2c_v3.npz' || filename === 'best_a2c_v3.npz';
+        return Boolean(recommendedAiModelId) && (id === recommendedAiModelId || filename === recommendedAiModelId);
+    };
+
+    const _modelRecencyScore = (model) => {
+        const id = model?.id || model?.filename || '';
+        const match = id.match(/best_a2c_v(\d+)\.npz$/);
+        if (match) return Number.parseInt(match[1], 10);
+        if (id === 'best_a2c.npz') return 2;
+        return 0;
     };
 
     const _formatAiModelOptionLabel = (model) => {
@@ -327,6 +335,7 @@ const UI = (() => {
      */
     const setAiModels = (catalog) => {
         const models = Array.isArray(catalog) ? catalog : (catalog?.models || []);
+        recommendedAiModelId = Array.isArray(catalog) ? '' : (catalog?.recommended_model || '');
         aiModelMetaById = {};
 
         if (!elements.aiModelSelect) {
@@ -349,7 +358,9 @@ const UI = (() => {
         const orderedModels = [...models].sort((a, b) => {
             if (_isBestAiModel(a) && !_isBestAiModel(b)) return -1;
             if (!_isBestAiModel(a) && _isBestAiModel(b)) return 1;
-            return 0;
+            const scoreDiff = _modelRecencyScore(b) - _modelRecencyScore(a);
+            if (scoreDiff !== 0) return scoreDiff;
+            return (a?.label || a?.id || '').localeCompare(b?.label || b?.id || '');
         });
 
         orderedModels.forEach((m) => {
@@ -366,9 +377,11 @@ const UI = (() => {
             elements.aiModelSelect.appendChild(option);
         });
 
-        // Default: best compatibile (se presente), altrimenti il primo modello compatibile.
+        // Default: modello consigliato compatibile; fallback al best più recente compatibile.
+        const recommendedCompatible = orderedModels.find((m) => _isBestAiModel(m) && m?.id && m.is_compatible !== false);
         const firstCompatible = orderedModels.find((m) => m?.id && m.is_compatible !== false);
-        if (firstCompatible?.id) elements.aiModelSelect.value = firstCompatible.id;
+        if (recommendedCompatible?.id) elements.aiModelSelect.value = recommendedCompatible.id;
+        else if (firstCompatible?.id) elements.aiModelSelect.value = firstCompatible.id;
         else if (orderedModels[0]?.id) elements.aiModelSelect.value = orderedModels[0].id;
 
         _updateAiModelUi();

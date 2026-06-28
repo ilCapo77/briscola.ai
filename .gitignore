@@ -21,6 +21,7 @@ data/
 *.sqlite3
 *.sqlite3-wal
 *.sqlite3-shm
+~$*.xlsx
 
 # Local benchmark outputs
 benchmarks/

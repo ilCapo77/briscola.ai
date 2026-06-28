@@ -4,7 +4,7 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.8.0` (`pyproject.toml`).
+- Versione progetto: `0.9.0` (`pyproject.toml`).
 - Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
 - Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>.
@@ -15,9 +15,10 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
   - v1: `FEATURE_DIM_2P_V1`
   - v2: `FEATURE_DIM_2P_V2 = 288`
   - v3: `FEATURE_DIM_2P_V3 = 310`
-- Modello consigliato: `data/models/best_a2c_v3.npz` (encoder v3, guard anti-overkill ON).
+- Modello consigliato: `data/models/best_a2c_v4.npz` (encoder v3, guard anti-overkill ON).
 - Modello precedente ancora disponibile: `data/models/best_a2c.npz` (encoder v2).
-- Default UI: avversario = modello migliore (`bc_model` + `best_a2c_v3`); `GET /api/ai/agents` espone `available`/`requires_model_id` e la UI disabilita gli avversari il cui modello bundle manca (es. `hybrid_endgame_best_a2c` senza `best_a2c.npz`). Il default lato API resta `random` se non specificato.
+- Modello v3 precedente: `data/models/best_a2c_v3.npz`, ancora selezionabile se presente nella directory modelli.
+- Default UI: avversario = modello consigliato (`bc_model` + `BRISCOLA_DEFAULT_MODEL_ID`, oggi `best_a2c_v4.npz`). `GET /api/ai/models` espone `recommended_model`; la UI seleziona quel modello se compatibile, altrimenti il `best_a2c_vN` più recente disponibile. `GET /api/ai/agents` espone `available`/`requires_model_id` e la UI disabilita gli avversari il cui modello bundle manca. Il default lato API resta `random` se non specificato. In cloud, per restare dentro il limite disco, provisionare solo pochi asset (idealmente v4 e, se serve confronto manuale, v3).
 - Coverage badge README: manuale via Shields.io.
 
 Comandi quality gate:
@@ -60,28 +61,28 @@ Invarianti importanti:
 
 ### Best Corrente
 
-`best_a2c_v3.npz`
+`best_a2c_v4.npz`
 
 - Encoder: v3 (`feature_dim=310`).
 - Guard anti-overkill: ON per runtime/UI.
 - Addestramento riproducibile a grandi linee:
   - teacher dataset: `hybrid_endgame_best_a2c` vs `hybrid_endgame_best_a2c`, 20k partite;
   - BC v3: MLP hidden 128, 20 epoche, output `bc_v3.npz`;
-  - A2C v3: fast+numba, 1M partite, seed 300;
-  - opponent mix: `best_a2c:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1`;
+  - A2C v3/v4 league: fast+numba, warm-start da `best_a2c_v3`, 1M partite, seed 301;
+  - opponent mix: `best_a2c_v3:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1`;
   - BC anchor: `--bc-anchor data/models/bc_v3.npz --bc-anchor-beta 0.01`.
 
 ### Risultati Di Promozione
 
-Confronto contro vecchio `best_a2c`:
+Confronto v4 contro `best_a2c_v3`:
 
-- head-to-head raw, big: `+0.63` avg diff;
-- head-to-head guarded, medium: `+0.09` avg diff;
-- holdout vs `heuristic_v1`: `+17.23` vs `+16.56`;
-- overkill raw: `11.4%` vs `12.7%`;
-- overkill low-lead raw: `1.6%` vs `4.8%`.
+- head-to-head big guarded: `+0.45` standard, `+0.36` holdout;
+- holdout big vs `heuristic_v1`: `+17.50` vs `+17.29` del v3;
+- decision-quality medium vs `heuristic_v1`: `+17.62`, `trump_overkill_rate=0.0%`,
+  `trump_waste_rate=0.1%`.
 
-Decisione: `best_a2c_v3.npz` è la baseline consigliata. `best_a2c.npz` resta selezionabile per confronto/regressioni.
+Decisione: `best_a2c_v4.npz` è la baseline consigliata. `best_a2c_v3.npz` e `best_a2c.npz` restano
+selezionabili per confronto/regressioni se presenti nella directory modelli.
 
 ## Cosa È Già Chiuso
 
@@ -202,16 +203,16 @@ Esperimento seed301, 1M partite (2026-06-28):
   sugli stessi benchmark: `+17.07/+17.29`.
 - Decision-quality medium vs `heuristic_v1`: `+17.62`, `trump_overkill_rate=0.0%`,
   `trump_waste_rate=0.1%`.
-- Decisione: **candidato promuovibile**. Copiato localmente come `data/models/best_a2c_v4.npz`, ma non
-  ancora impostato come default pubblico. Serve decisione esplicita del maintainer su bump/release asset
-  e provisioning se deve sostituire v3 in produzione.
+- Decisione: **promosso come nuovo modello consigliato locale/webapp** (`best_a2c_v4.npz`). Serve pubblicare
+  l'asset release e configurare `BRISCOLA_MODEL_URL`/`BRISCOLA_MODEL_SHA256` in cloud perché il provisioning
+  scarichi v4 in produzione.
 - Report storico modelli generato in `docs/reports/model_progress.xlsx` tramite
   `scripts/build_model_report.py`: include dashboard, milestones, best significativi, prove di promozione,
   candidati scartati e fonti dati.
 
 Prossimo esperimento consigliato:
 
-- decidere se promuovere `best_a2c_v4.npz` a default/runtime/provisioning;
+- pubblicare `best_a2c_v4.npz` come GitHub Release asset e aggiornare le env cloud;
 - in alternativa, rivedere obiettivo/mix: i run 200k mostrano miglioramenti head-to-head troppo piccoli
   e facilmente compensati da regressioni sulle baseline;
 - valutare prima medium, poi big solo se medium è promettente.
@@ -264,9 +265,9 @@ uv run python scripts/evaluate_agents.py \
   --benchmark medium \
   --engine domain \
   --agent0 bc_model \
-  --agent0-model data/models/best_a2c_v3.npz \
+  --agent0-model data/models/best_a2c_v4.npz \
   --agent1 bc_model \
-  --agent1-model data/models/best_a2c.npz
+  --agent1-model data/models/best_a2c_v3.npz
 ```
 
 Decision quality:
@@ -276,7 +277,7 @@ uv run python scripts/evaluate_decision_quality.py \
   --benchmark medium \
   --engine numba \
   --agent-a bc_model \
-  --agent-a-model data/models/best_a2c_v3.npz \
+  --agent-a-model data/models/best_a2c_v4.npz \
   --agent-b heuristic_v1
 ```
 
@@ -287,8 +288,9 @@ uv run python scripts/train_a2c.py \
   --encoder-version v3 \
   --rollout-engine fast \
   --fast-rollout numba \
-  --init data/models/bc_v3.npz \
-  --opponent-mix best_a2c:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1 \
+  --init data/models/best_a2c_v4.npz \
+  --opponent-mix bc_model:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1 \
+  --opponent-model data/models/best_a2c_v4.npz \
   --bc-anchor data/models/bc_v3.npz \
   --bc-anchor-beta 0.01
 ```

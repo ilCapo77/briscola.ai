@@ -33,6 +33,7 @@ from pydantic import BaseModel
 
 from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
 from ..ai.models import (
+    DEFAULT_MODEL_ID,
     get_models_dir_from_env,
     list_local_models,
     resolve_model_path,
@@ -470,7 +471,9 @@ async def list_ai_models():
     """
     models_dir = get_models_dir_from_env()
     models = list_local_models(models_dir, recursive=False)
+    recommended_model = os.getenv("BRISCOLA_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID)
     return {
+        "recommended_model": recommended_model,
         "models": [
             {
                 "id": m.id,
@@ -483,7 +486,7 @@ async def list_ai_models():
                 "compatibility_reason_it": m.compatibility_reason_it,
             }
             for m in models
-        ]
+        ],
     }
 
 

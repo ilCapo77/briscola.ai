@@ -187,7 +187,7 @@ async def version_info():
     """
     Diagnostica deploy: versioni e presenza del modello consigliato.
 
-    Utile in cloud per verificare che `best_a2c_v3.npz` sia risolvibile nella directory modelli
+    Utile in cloud per verificare che il modello consigliato sia risolvibile nella directory modelli
     effettiva (che dipende da `BRISCOLA_MODELS_DIR` o dalla working directory).
     """
     from .ai.models import DEFAULT_MODEL_ID, get_models_dir_from_env

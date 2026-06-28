@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 # Id del modello consigliato (coerente con la baseline ufficiale e con `/version`).
-DEFAULT_MODEL_ID = "best_a2c_v3.npz"
+DEFAULT_MODEL_ID = "best_a2c_v4.npz"
 
 # Timeout (s) per il download: evita che un endpoint lento/appeso blocchi lo startup dell'app.
 _DEFAULT_DOWNLOAD_TIMEOUT_S = 30.0

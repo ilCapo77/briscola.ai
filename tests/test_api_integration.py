@@ -247,6 +247,7 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     assert models
 
     assert "models_dir" not in payload  # non vogliamo esporre path server-side
+    assert payload["recommended_model"] == "best_a2c_v4.npz"
     by_id = {m["id"]: m for m in models}
     assert "compatible_v1.npz" in by_id
     assert "compatible_v2.npz" in by_id
@@ -266,6 +267,19 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     assert bad["is_compatible"] is False
     assert isinstance(bad.get("compatibility_reason_it"), str)
     assert bad["compatibility_reason_it"]
+
+
+def test_list_ai_models_reports_recommended_model_from_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Il catalogo modelli espone lo stesso recommended model usato dal provisioning."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    monkeypatch.setenv("BRISCOLA_DEFAULT_MODEL_ID", "best_a2c_v3.npz")
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "best_a2c_v3.npz", feature_dim=310)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "best_a2c_v4.npz", feature_dim=310)
+
+    payload = TestClient(server.app).get("/ai/models").json()
+
+    assert payload["recommended_model"] == "best_a2c_v3.npz"
+    assert {m["id"] for m in payload["models"]} == {"best_a2c_v3.npz", "best_a2c_v4.npz"}
 
 
 def test_create_game_supports_bc_model_with_ai_model_id(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -919,7 +933,7 @@ def test_version_endpoint_reports_versions_and_model_presence() -> None:
         body = resp.json()
         assert "code_version" in body
         assert "rules_version" in body
-        assert body["recommended_model"] == "best_a2c_v3.npz"
+        assert body["recommended_model"] == "best_a2c_v4.npz"
         assert isinstance(body["recommended_model_present"], bool)
         assert "models_dir" in body
 
