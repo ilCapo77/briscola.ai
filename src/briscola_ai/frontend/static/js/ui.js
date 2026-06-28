@@ -6,6 +6,7 @@
 
 const UI = (() => {
     const CARD_ASSET_BASE = '/static/assets/cards';
+    const DATA_CONSENT_STORAGE_KEY = 'briscola_data_collection_consent';
 
     // Map rank names to numbers for image paths
     const RANK_TO_NUMBER = {
@@ -64,6 +65,37 @@ const UI = (() => {
     // Se true, richiediamo una checkbox esplicita prima di avviare la partita.
     let dataConsentRequired = false;
     let gameStartupInProgress = false;
+
+    const _readStoredDataConsent = () => {
+        try {
+            return window.localStorage.getItem(DATA_CONSENT_STORAGE_KEY) === 'true';
+        } catch (e) {
+            // Privacy mode o storage disabilitato: la checkbox resta una scelta per-sessione.
+            return false;
+        }
+    };
+
+    const _writeStoredDataConsent = (accepted) => {
+        try {
+            if (accepted) {
+                window.localStorage.setItem(DATA_CONSENT_STORAGE_KEY, 'true');
+            } else {
+                window.localStorage.removeItem(DATA_CONSENT_STORAGE_KEY);
+            }
+        } catch (e) {
+            // Il consenso viene comunque inviato nel payload della partita corrente.
+        }
+    };
+
+    const _restoreDataConsentCheckbox = () => {
+        if (!elements.dataConsentCheckbox) return;
+        elements.dataConsentCheckbox.checked = dataConsentRequired && _readStoredDataConsent();
+    };
+
+    const _handleDataConsentChange = () => {
+        _writeStoredDataConsent(elements.dataConsentCheckbox?.checked === true);
+        _updateConsentUi();
+    };
 
     const _updateAiAgentDescription = () => {
         const name = elements.aiAgentSelect?.value;
@@ -299,7 +331,7 @@ const UI = (() => {
             _updateAiModelUi();
         });
         elements.aiModelSelect?.addEventListener('change', _updateAiModelUi);
-        elements.dataConsentCheckbox?.addEventListener('change', _updateConsentUi);
+        elements.dataConsentCheckbox?.addEventListener('change', _handleDataConsentChange);
 
         elements.newGame.addEventListener('click', () => {
             callbacks.onNewGame?.();
@@ -420,9 +452,7 @@ const UI = (() => {
         if (elements.dataConsentGroup) {
             elements.dataConsentGroup.classList.toggle('hidden', !required);
         }
-        if (elements.dataConsentCheckbox) {
-            elements.dataConsentCheckbox.checked = false;
-        }
+        _restoreDataConsentCheckbox();
         if (elements.dataConsentDescription) {
             elements.dataConsentDescription.textContent = required
                 ? (descriptionIt || 'Questa istanza sta raccogliendo dataset umano: serve il tuo consenso.')
@@ -439,8 +469,8 @@ const UI = (() => {
         elements.gameBoard.classList.add('hidden');
         elements.gameResult.classList.add('hidden');
         document.body.classList.remove('playing');
-        // Se il consenso è richiesto, resettiamo la checkbox per rendere esplicita la scelta ad ogni partita.
-        if (elements.dataConsentCheckbox) elements.dataConsentCheckbox.checked = false;
+        // Il consenso resta revocabile: se l'utente lo ha già dato, riproponiamo la checkbox selezionata.
+        _restoreDataConsentCheckbox();
         _updateConsentUi();
     };
 
