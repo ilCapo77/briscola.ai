@@ -100,6 +100,19 @@ MODEL_SPECS: list[ModelSpec] = [
         decision="Promoted as recommended local/webapp/cloud model.",
         notes="League v3 1M run warm-started from best_a2c_v3 with best_a2c_v3 in the opponent mix.",
     ),
+    ModelSpec(
+        model_id="best_a2c_v5",
+        path=_rel("data/models/best_a2c_v5.npz"),
+        role="official best",
+        status="promoted",
+        order=4,
+        progress_source="benchmarks/experiments/a2c_v5_seed401_1m_numba/eval_big_vs_heuristic_v1_numba.json",
+        progress_score=17.832,
+        h2h_source="benchmarks/experiments/a2c_v5_seed401_1m_numba/head_to_head_best_a2c_v4_big_numba.json",
+        h2h_score=0.33972,
+        decision="Promoted as recommended model for the v0.11.0 release.",
+        notes="League v5 1M run warm-started from best_a2c_v4 with best_a2c_v4 in the opponent mix.",
+    ),
 ]
 
 
@@ -189,6 +202,22 @@ MILESTONES: list[dict[str, Any]] = [
         "evidence": "Big vs best_a2c_v3 +0.45/+0.36; big vs heuristic_v1 +17.43/+17.50.",
         "impact": "Frontend/server/cloud default now points to v4 via release asset provisioning.",
         "source": "data/models/best_a2c_v4.npz + a2c_v3_league_seed301_1m_numba",
+    },
+    {
+        "order": 7,
+        "date": "2026-06-28",
+        "model_id": "best_a2c_v5",
+        "type": "promoted",
+        "decision": "Promote v5 as the recommended model for v0.11.0.",
+        "why": (
+            "It beats best_a2c_v4 head-to-head and improves the heuristic_v1 holdout "
+            "without material quality regressions."
+        ),
+        "evidence": (
+            "Big vs best_a2c_v4 +0.34; big vs heuristic_v1 +17.83; decision-quality +18.00, overkill 0.0%, waste 0.07%."
+        ),
+        "impact": "Frontend/server default now points to v5; cloud rollout needs the v0.11.0 asset URL in env.",
+        "source": "data/models/best_a2c_v5.npz + a2c_v5_seed401_1m_numba",
     },
 ]
 
@@ -292,6 +321,11 @@ def decision_quality_rows() -> list[dict[str, Any]]:
             "best_a2c_v4",
             "Best A2C v4",
             "benchmarks/experiments/a2c_v3_league_seed301_1m_numba/decision_quality_vs_heuristic_v1_medium_numba.json",
+        ),
+        (
+            "best_a2c_v5",
+            "Best A2C v5",
+            "benchmarks/experiments/a2c_v5_seed401_1m_numba/decision_quality_vs_heuristic_v1_big_numba.json",
         ),
     ]
     rows = []
@@ -401,6 +435,22 @@ def promotion_rows() -> list[dict[str, Any]]:
             label="Best A2C v4",
         )
     )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/a2c_v5_seed401_1m_numba/eval_big_vs_heuristic_v1_numba.json",
+            model_id="best_a2c_v5",
+            label="Best A2C v5",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/a2c_v5_seed401_1m_numba/head_to_head_best_a2c_v4_big_numba.json",
+            model_id="best_a2c_v5",
+            label="Best A2C v5",
+            opponent="best_a2c_v4",
+        )
+    )
     return rows
 
 
@@ -504,7 +554,7 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
     models = model_rows()
     promotion = promotion_rows()
     quality = decision_quality_rows()
-    progress_models = [m for m in models if m["model_id"] in {"best_a2c", "best_a2c_v3", "best_a2c_v4"}]
+    progress_models = [m for m in models if m["model_id"] in {"best_a2c", "best_a2c_v3", "best_a2c_v4", "best_a2c_v5"}]
 
     dashboard: list[list[Any]] = [
         ["Briscola AI - Model Progress Report"],
@@ -527,8 +577,8 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v4 is the recommended local/webapp/cloud model: it improves big holdout vs "
-                "heuristic_v1 and beats best_a2c_v3 head-to-head on both big suites."
+                "best_a2c_v5 is the recommended v0.11.0 model: it improves big holdout vs "
+                "heuristic_v1 and beats best_a2c_v4 head-to-head."
             ],
             [],
             ["Quick comparison"],
@@ -832,10 +882,30 @@ def drawing_rels_xml() -> str:
     )
 
 
-def chart_xml() -> str:
+def dashboard_progress_row_count(dashboard_rows: list[list[Any]]) -> int:
+    """Count official-best progression rows in the Dashboard sheet.
+
+    The chart range must grow with promoted models. The Dashboard section is deliberately simple:
+    title row, header row, then one row per official best until the next blank separator.
+    """
+    for idx, row in enumerate(dashboard_rows):
+        if row[:1] == ["Progression curve data"]:
+            data_start = idx + 2
+            count = 0
+            for data_row in dashboard_rows[data_start:]:
+                if not data_row or data_row[0] == "":
+                    break
+                count += 1
+            return count
+    return 0
+
+
+def chart_xml(progress_row_count: int) -> str:
     """Chart XML for the official-best progression curve."""
-    cats_ref = "Dashboard!$A$6:$A$8"
-    vals_ref = "Dashboard!$B$6:$B$8"
+    first_row = 6
+    last_row = max(first_row, first_row + progress_row_count - 1)
+    cats_ref = f"Dashboard!$A${first_row}:$A${last_row}"
+    vals_ref = f"Dashboard!$B${first_row}:$B${last_row}"
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
@@ -873,6 +943,7 @@ def write_xlsx(sheets: dict[str, list[list[Any]]], out_path: Path) -> None:
     """Write the report as an .xlsx file."""
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sheet_names = list(sheets)
+    progress_row_count = dashboard_progress_row_count(sheets["Dashboard"])
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
         zf.writestr("[Content_Types].xml", content_types_xml(len(sheet_names)))
         zf.writestr("_rels/.rels", root_rels_xml())
@@ -888,7 +959,7 @@ def write_xlsx(sheets: dict[str, list[list[Any]]], out_path: Path) -> None:
                 zf.writestr(f"xl/worksheets/_rels/sheet{idx}.xml.rels", sheet_drawing_rels_xml())
         zf.writestr("xl/drawings/drawing1.xml", drawing_xml())
         zf.writestr("xl/drawings/_rels/drawing1.xml.rels", drawing_rels_xml())
-        zf.writestr("xl/charts/chart1.xml", chart_xml())
+        zf.writestr("xl/charts/chart1.xml", chart_xml(progress_row_count))
 
 
 def main() -> int:

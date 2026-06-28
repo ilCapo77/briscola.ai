@@ -255,7 +255,7 @@ Confronti riproducibili senza UI/server:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v4.npz --agent1 heuristic_v1
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v5.npz --agent1 heuristic_v1
 ```
 
 Concetti chiave:
@@ -293,7 +293,7 @@ Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
 - **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
-- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v4. Per allenare contro il best v4 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v4.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
+- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v5. Per allenare contro il best v5 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v5.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
 - **curriculum** (`--curriculum easy_standard_hard`) per stage easy→standard→hard.
 
 **Pipeline riproducibile** (`scripts/run_experiment.py`): un comando unico fa training → evaluation matrix → manifest → aggiorna il best locale. Supporta `--rollout-engine fast --fast-rollout numba` e `--eval-engine numba` per i run lunghi. Output in `data/models/` e `benchmarks/experiments/<name>/`.
@@ -303,18 +303,17 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-Il modello consigliato è **`data/models/best_a2c_v4.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v3` nel confronto head‑to‑head big e non peggiora l'holdout vs `heuristic_v1`. `best_a2c_v3.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v4 è in `PLAN.md`.
+Il modello consigliato è **`data/models/best_a2c_v5.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v4` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. `best_a2c_v4.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v5 è in `PLAN.md`.
 
-La release `v0.10.0` usa `best_a2c_v4.npz` come modello consigliato anche in cloud. Per un nuovo deploy/release
-di modello, pubblica il `.npz` come release asset e configura:
+La release `v0.11.0` usa `best_a2c_v5.npz` come modello consigliato. Per il deploy cloud configura:
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v4.npz
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v5.npz
 BRISCOLA_MODEL_URL=<URL HTTPS del release asset>
-BRISCOLA_MODEL_SHA256=bd3c7612c4a4314f5757472f9fcbffb7c5385cc3661d468a1fafc9341a198827
+BRISCOLA_MODEL_SHA256=2ab069f2f5a0ad15812c86b080c622aaecbc1fc63bc2bfdd5aecc20fc989cde7
 ```
 
-Il provisioning scarica solo il modello consigliato: su ambienti con disco limitato (es. 512 MB) evita di rendere disponibili troppi `.npz` contemporaneamente. Se vuoi mantenere anche `best_a2c_v3.npz` selezionabile online, caricalo nella stessa directory modelli solo se il budget disco lo consente.
+Il provisioning scarica solo il modello consigliato: su ambienti con disco limitato (es. 512 MB) evita di rendere disponibili troppi `.npz` contemporaneamente. Se vuoi mantenere anche `best_a2c_v4.npz` selezionabile online, caricalo nella stessa directory modelli solo se il budget disco lo consente.
 
 ### Report progressione modelli
 
@@ -336,8 +335,8 @@ Esempio di confronto testa‑a‑testa tra due modelli:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v4.npz \
-  --agent1 bc_model --agent1-model ./data/models/best_a2c.npz
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v5.npz \
+  --agent1 bc_model --agent1-model ./data/models/best_a2c_v4.npz
 ```
 
 ## Stato e roadmap
