@@ -202,13 +202,16 @@ Esperimento seed301, 1M partite (2026-06-28):
   sugli stessi benchmark: `+17.07/+17.29`.
 - Decision-quality medium vs `heuristic_v1`: `+17.62`, `trump_overkill_rate=0.0%`,
   `trump_waste_rate=0.1%`.
-- Decisione: **candidato promuovibile**, ma non ancora promosso. Serve decisione esplicita del maintainer
-  su nome/versione asset (es. nuovo `best_a2c_v4.npz` o sostituzione del v3) e, se diventa default
-  pubblico, eventuale bump/release asset.
+- Decisione: **candidato promuovibile**. Copiato localmente come `data/models/best_a2c_v4.npz`, ma non
+  ancora impostato come default pubblico. Serve decisione esplicita del maintainer su bump/release asset
+  e provisioning se deve sostituire v3 in produzione.
+- Report storico modelli generato in `docs/reports/model_progress.xlsx` tramite
+  `scripts/build_model_report.py`: include dashboard, milestones, best significativi, prove di promozione,
+  candidati scartati e fonti dati.
 
 Prossimo esperimento consigliato:
 
-- decidere se promuovere il seed301 1M;
+- decidere se promuovere `best_a2c_v4.npz` a default/runtime/provisioning;
 - in alternativa, rivedere obiettivo/mix: i run 200k mostrano miglioramenti head-to-head troppo piccoli
   e facilmente compensati da regressioni sulle baseline;
 - valutare prima medium, poi big solo se medium è promettente.
