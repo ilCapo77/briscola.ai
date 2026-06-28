@@ -51,6 +51,7 @@ from briscola_ai.ai.encoding.card_action_space import action_id_from_suit_number
 from briscola_ai.ai.encoding.observation_encoder import (
     FEATURE_DIM_2P_V1,
     FEATURE_DIM_2P_V2,
+    FEATURE_DIM_2P_V3,
     EncoderVersion,
     encode_player_observation_2p,
     feature_dim_for_encoder_version,
@@ -382,10 +383,11 @@ def _load_fast_numba_model_opponent(*, opponent_name: str, opponent_model_path: 
         raise ValueError(f"Opponent {opponent_name!r} non ha prodotto un BCModelAgent.")
     if not isinstance(agent.model, MLPBCModel):
         raise ValueError("Il fast rollout Numba supporta per ora solo opponent `.npz` MLP (w1/b1/w2/b2).")
-    if int(agent.model.feature_dim) not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2)):
+    if int(agent.model.feature_dim) not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
         raise ValueError(
             "Opponent MLP non compatibile: "
-            f"feature_dim={int(agent.model.feature_dim)} atteso {int(FEATURE_DIM_2P_V1)} o {int(FEATURE_DIM_2P_V2)}."
+            f"feature_dim={int(agent.model.feature_dim)} atteso "
+            f"{int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}."
         )
     return FastNumbaModelOpponent(agent=agent, model=agent.model)
 

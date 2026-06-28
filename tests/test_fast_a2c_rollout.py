@@ -37,10 +37,15 @@ _softmax_1d = _TRAIN_A2C._softmax_1d
 
 def _write_dummy_mlp_model(path: Path, *, feature_dim: int = 248, hidden_dim: int = 4) -> None:
     """Scrive un piccolo modello MLP compatibile con `BCModelAgent`."""
+    encoder_version = "v1"
+    if feature_dim == 288:
+        encoder_version = "v2"
+    elif feature_dim == 310:
+        encoder_version = "v3"
     metadata = {
         "format": "mlp_bc_v1",
         "feature_dim": feature_dim,
-        "encoder_version": "v1" if feature_dim == 248 else "v2",
+        "encoder_version": encoder_version,
         "inference_overkill_guard": True,
     }
     np.savez(
@@ -292,6 +297,61 @@ def test_train_a2c_fast_numba_rollout_supports_bc_model_in_opponent_mix(tmp_path
     with np.load(out_path, allow_pickle=False) as data:
         metadata = json.loads(str(data["metadata_json"]))
 
+    assert metadata["rollout_engine"] == "fast"
+    assert metadata["fast_rollout"] == "numba"
+    assert metadata["opponent"] is None
+    assert metadata["opponent_model"] == str(opponent_path)
+    assert sorted(metadata["opponent_mix"], key=lambda item: item["name"]) == [
+        {"name": "bc_model", "prob": 0.5},
+        {"name": "random", "prob": 0.5},
+    ]
+
+
+def test_train_a2c_fast_numba_rollout_supports_v3_bc_model_in_opponent_mix(tmp_path: Path) -> None:
+    """Il league training v3 deve poter usare un opponent `.npz` v3 nel mix fast Numba."""
+    out_path = tmp_path / "a2c_fast_numba_bc_v3_mix_smoke.npz"
+    opponent_path = tmp_path / "opponent_mix_model_v3.npz"
+    _write_dummy_mlp_model(opponent_path, feature_dim=310)
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--out",
+            str(out_path),
+            "--encoder-version",
+            "v3",
+            "--rollout-engine",
+            "fast",
+            "--fast-rollout",
+            "numba",
+            "--opponent-mix",
+            "bc_model:0.5,random:0.5",
+            "--opponent-model",
+            str(opponent_path),
+            "--num-games",
+            "4",
+            "--seed",
+            "123",
+            "--hidden-dim",
+            "8",
+            "--update-every",
+            "2",
+            "--log-every",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert out_path.exists()
+    with np.load(out_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+
+    assert metadata["encoder_version"] == "v3"
+    assert metadata["feature_dim"] == 310
     assert metadata["rollout_engine"] == "fast"
     assert metadata["fast_rollout"] == "numba"
     assert metadata["opponent"] is None

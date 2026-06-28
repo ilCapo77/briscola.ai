@@ -167,16 +167,28 @@ l'uso dei dati umani per training/evaluation è quindi posticipato.
 
 ### 3. Self-Improvement V3 In Stile League
 
-Priorità media, dopo consolidamento.
+Stato: **in corso**.
 
 Obiettivo: usare `best_a2c_v3` come nuovo avversario di lega senza cambiare algoritmo.
 
-Esperimento base:
+Esperimento seed301, 200k partite (2026-06-28):
 
-- warm-start da `best_a2c_v3` o da BC/A2C v3 candidato, da decidere esplicitamente;
-- rollout `fast --fast-rollout numba`;
-- opponent mix con `best_a2c_v3` incluso;
-- mantenere BC-anchor se l'overkill raw peggiora;
+- Sbloccato training fast+Numba con opponent `.npz` v3 nel mix (`bc_model` -> `best_a2c_v3.npz`).
+- Config: warm-start `best_a2c_v3`, rollout `fast --fast-rollout numba`, opponent mix
+  `best_a2c_v3:0.4,heuristic_v2:0.3,heuristic_v1:0.2,random:0.1`, BC-anchor `bc_v3` beta `0.01`,
+  guard anti-overkill salvato.
+- Medium Numba vs `best_a2c_v3`: `+0.10` standard, `+0.08` holdout.
+- Big Numba vs `best_a2c_v3`: `+0.12` standard, `+0.13` holdout.
+- Decision-quality medium vs `heuristic_v1`: `+16.91`, `trump_overkill_rate=0.0%`,
+  `trump_waste_rate=0.1%`.
+- Decisione: **non promuovere**. Head-to-head positivo ma piccolo; quality/holdout vs `heuristic_v1`
+  non migliora il best consolidato in modo chiaro. Artefatti in
+  `benchmarks/experiments/a2c_v3_league_seed301_200k_numba/`.
+
+Prossimo esperimento consigliato:
+
+- run più lungo (es. 1M) o seed alternativo solo se si accetta il costo; altrimenti provare mix/anchor
+  più conservativi per preservare holdout vs `heuristic_v1`;
 - valutare prima medium, poi big solo se medium è promettente.
 
 Criteri di promozione:
