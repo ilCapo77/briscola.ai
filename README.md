@@ -218,7 +218,21 @@ Export in JSONL (schema v1, pensato per il 2‑player):
 python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl
 ```
 
-Default: solo azioni del `player_index=0`, escluse quelle IA, solo partite complete. Opzioni utili: `--all-players`, `--include-ai`, `--no-next-state` (supervised), `--include-incomplete`. In modalità `dataset` l’exporter usa preferibilmente `human_action`.
+Con `DATABASE_URL`/`BRISCOLA_DATABASE_URL` presente, l'exporter legge da Postgres; passa `--db` per forzare
+SQLite locale anche in un ambiente che ha la variabile Postgres:
+
+```bash
+DATABASE_URL=... python scripts/export_dataset.py --out ./data/dataset.jsonl
+```
+
+Default: solo azioni del `player_index=0`, escluse quelle IA, solo partite complete. Opzioni utili: `--all-players`, `--include-ai`, `--no-next-state` (supervised), `--include-incomplete`. In modalità `dataset` l’exporter usa preferibilmente `human_action` e anonimizza i nomi giocatore negli snapshot (`player_0`, `player_1`, ...), mantenendo `client_id` come pseudonimo per split train/val.
+
+Report aggregato dell'event log (nessun payload/client_id stampato):
+
+```bash
+python scripts/report_event_log.py --db ./data/briscola_events.sqlite3
+DATABASE_URL=... python scripts/report_event_log.py --json
+```
 
 **Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://briscolaai.fastapicloud.dev>.
 

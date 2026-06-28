@@ -118,6 +118,7 @@ roadmap; non usarlo come archivio di ogni run locale.
 - Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
 - Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.10.0` pubblicata con asset `best_a2c_v4.npz` usato dal provisioning.
 - **Deploy COMPLETATO** su FastAPI Cloud (Redis collegato): <https://briscolaai.fastapicloud.dev>. Postgres/event log e modalità dataset sono attivabili via `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset` quando serve raccogliere dataset umano.
+- Osservabilità/export cloud completati: produzione verificata con `DATABASE_URL` (Neon/Postgres), `BRISCOLA_EVENT_LOG_MODE=dataset` e `REDIS_URL`; `scripts/report_event_log.py` conta partite/consenso/finestre 24h-7d/qualità `human_action`; `scripts/export_dataset.py` legge SQLite o Postgres mantenendo JSONL v1 e sanifica i nomi giocatore (`player_0`, `player_1`, ...). Smoke export produzione validato: 18 partite complete / 360 record.
 
 ### Endgame E Strategia
 
@@ -141,25 +142,7 @@ roadmap; non usarlo come archivio di ogni run locale.
 
 ## Prossime Azioni Consigliate
 
-### 1. Osservabilità E Dataset Umano
-
-Obiettivo: capire se la webapp sta raccogliendo abbastanza partite reali da diventare utile per training/evaluation.
-
-- Verificare in produzione se `DATABASE_URL` e `BRISCOLA_EVENT_LOG_MODE=dataset` sono attivi quando si vuole raccogliere dati umani.
-- Aggiungere un comando/report leggero per contare partite Postgres: totali, complete, con consenso, ultime 24h/7d, errori o partite abbandonate.
-- Non usare ancora i dati umani per promuovere modelli finché il volume resta basso.
-- Prima dell'uso ML, verificare privacy e qualità: niente PII, `client_id` pseudonimo, solo partite consenzienti/complete.
-
-### 2. Export Dataset Da Postgres
-
-Obiettivo: rendere la pipeline dati cloud utilizzabile senza copiare manualmente il DB.
-
-- Estendere `scripts/export_dataset.py` per leggere da Postgres quando è presente `DATABASE_URL`, mantenendo SQLite come default locale.
-- Usare lo stesso formato JSONL versionato già esistente, così `train_bc.py` e gli strumenti di analisi non cambiano contratto.
-- Aggiungere test con connessione fake o fixture isolata: la suite non deve contattare servizi reali.
-- Validare con un export piccolo prima di pianificare training su dati umani.
-
-### 3. Prossima Iterazione Modello (`best_a2c_v5`)
+### 1. Prossima Iterazione Modello (`best_a2c_v5`)
 
 Obiettivo: migliorare v4 solo con una ipotesi misurabile, non con run casuali.
 
@@ -172,7 +155,7 @@ Obiettivo: migliorare v4 solo con una ipotesi misurabile, non con run casuali.
   - niente promozione se il vantaggio è solo rumore statistico.
 - Aggiornare `docs/reports/model_progress.xlsx` solo per candidati significativi.
 
-### 4. PPO/GAE Solo Dopo Un Blocco Reale Di A2C
+### 2. PPO/GAE Solo Dopo Un Blocco Reale Di A2C
 
 Priorità bassa per ora.
 
@@ -180,12 +163,13 @@ Priorità bassa per ora.
 - Tenere l'esperimento piccolo e isolato, con test fast/numba verdi prima e dopo.
 - Non introdurre DQN per ora: action mask, parziale osservabilità e self-play rendono più coerente continuare con policy-gradient.
 
-### 5. Igiene
+### 3. Igiene
 
 - Aggiornare badge coverage README solo dopo `pytest --cov=briscola_ai` se la variazione è materiale.
 - Tenere `PLAN.md` breve: risultati intermedi e tentativi falliti vanno rimossi o sintetizzati.
 - Non committare artefatti locali in `data/`, `benchmarks/`, `.claude/`.
 - Commit in italiano.
+- Continuare a non usare dati umani per promuovere modelli finché il volume resta basso; prima dell'uso ML reale verificare ancora privacy/qualità aggregata con `scripts/report_event_log.py`.
 
 ## Comandi Utili
 

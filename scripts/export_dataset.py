@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Export dataset da SQLite (event log) a JSONL.
+Export dataset da event log (SQLite locale o Postgres cloud) a JSONL.
 
 Perché JSONL?
 ------------
@@ -45,9 +45,16 @@ Focus attuale:
   è una semplificazione: per un training “team-play” conviene usare reward per squadra e osservazioni parziali
   progettate esplicitamente (vedi `PLAN.md`).
 
-Uso
----
+Uso SQLite locale
+-----------------
   python scripts/export_dataset.py --db ./data/briscola_events.sqlite3 --out ./data/dataset.jsonl
+
+Uso Postgres/Neon
+-----------------
+  DATABASE_URL=... python scripts/export_dataset.py --out ./data/dataset.jsonl
+
+  # Oppure esplicito, utile in automazioni:
+  python scripts/export_dataset.py --database-url "$DATABASE_URL" --out ./data/dataset.jsonl
 
 Per esportare solo azioni “umane” del player 0 (default UI):
   python scripts/export_dataset.py --player-index 0 --exclude-ai
@@ -65,22 +72,28 @@ from __future__ import annotations
 
 import argparse
 import json
-import sqlite3
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
+
+from briscola_ai.backend.event_log import resolve_database_url
+from briscola_ai.backend.event_log_privacy import sanitize_dataset_payload
+from briscola_ai.backend.event_log_reader import open_event_log_reader
+
+DEFAULT_SQLITE_DB = Path("./data/briscola_events.sqlite3")
 
 
 @dataclass(frozen=True)
 class ExportConfig:
     """Configurazione dell'export."""
 
-    db_path: Path
+    db_path: Optional[Path]
     out_path: Path
     player_index: Optional[int]
     include_ai: bool
     include_next_state: bool
     only_completed_games: bool
+    database_url: Optional[str] = None
     schema_version: int = 1
 
 
@@ -137,7 +150,7 @@ def _find_best_observation(observations: list[dict[str, Any]], *, card_index: in
 
 def export_dataset(config: ExportConfig) -> dict[str, int]:
     """
-    Esegue l'export SQLite → JSONL.
+    Esegue l'export event log → JSONL.
 
     Ritorna un riepilogo (contatori) utile per debug:
     - `rows_total`: eventi letti
@@ -149,71 +162,29 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
     """
     config.out_path.parent.mkdir(parents=True, exist_ok=True)
 
-    conn = sqlite3.connect(str(config.db_path))
-    conn.row_factory = sqlite3.Row
+    reader = open_event_log_reader(sqlite_path=config.db_path, database_url=config.database_url)
 
-    completed_game_ids: set[str] = set()
-    if config.only_completed_games:
-        # Preferiamo un marker esplicito (`game_finished`), e facciamo fallback su DB legacy
-        # dove la completezza era implicita negli snapshot `observation_sent`.
-        for row in conn.execute(
-            """
-            SELECT DISTINCT game_id
-            FROM events
-            WHERE event_type = 'game_finished';
-            """
-        ):
-            completed_game_ids.add(str(row["game_id"]))
-
-        for row in conn.execute(
-            """
-            SELECT DISTINCT game_id
-            FROM events
-            WHERE event_type = 'observation_sent'
-              AND payload_json LIKE '%"game_over":true%';
-            """
-        ):
-            completed_game_ids.add(str(row["game_id"]))
-
-    # Compatibilità: DB creati prima dell'introduzione di `code_version`/`rules_version`
-    # potrebbero non avere queste colonne. Interroghiamo lo schema e selezioniamo solo ciò che esiste.
-    game_columns = {r[1] for r in conn.execute("PRAGMA table_info(games);").fetchall()}
-    select_cols = [
-        c
-        for c in (
-            "game_id",
-            "num_players",
-            "seed",
-            "code_version",
-            "rules_version",
-            "client_id",
-            "finished_at",
-            "aborted_at",
-            "aborted_reason",
-        )
-        if c in game_columns
-    ]
-    select_sql = f"SELECT {', '.join(select_cols)} FROM games;"
+    completed_game_ids: set[str] = reader.list_completed_game_ids() if config.only_completed_games else set()
     games: dict[str, dict[str, Any]] = {}
-    for row in conn.execute(select_sql):
+    for row in reader.iter_games():
         meta: dict[str, Any] = {}
-        if "num_players" in row.keys():
-            meta["num_players"] = row["num_players"]
-        if "seed" in row.keys():
-            meta["seed"] = row["seed"]
-        if "code_version" in row.keys():
-            meta["code_version"] = row["code_version"]
-        if "rules_version" in row.keys():
-            meta["rules_version"] = row["rules_version"]
-        if "client_id" in row.keys():
-            meta["client_id"] = row["client_id"]
-        if "finished_at" in row.keys():
-            meta["finished_at"] = row["finished_at"]
-        if "aborted_at" in row.keys():
-            meta["aborted_at"] = row["aborted_at"]
-        if "aborted_reason" in row.keys():
-            meta["aborted_reason"] = row["aborted_reason"]
-        games[row["game_id"]] = meta
+        if row.num_players is not None:
+            meta["num_players"] = row.num_players
+        if row.seed is not None:
+            meta["seed"] = row.seed
+        if row.code_version is not None:
+            meta["code_version"] = row.code_version
+        if row.rules_version is not None:
+            meta["rules_version"] = row.rules_version
+        if row.client_id is not None:
+            meta["client_id"] = row.client_id
+        if row.finished_at is not None:
+            meta["finished_at"] = row.finished_at
+        if row.aborted_at is not None:
+            meta["aborted_at"] = row.aborted_at
+        if row.aborted_reason is not None:
+            meta["aborted_reason"] = row.aborted_reason
+        games[row.game_id] = meta
 
     counters = {
         "rows_total": 0,
@@ -254,17 +225,9 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
     config.out_path.write_text("", encoding="utf-8")
 
     try:
-        rows = conn.execute(
-            """
-            SELECT id, game_id, server_version, player_index, event_type, payload_json
-            FROM events
-            ORDER BY game_id, id;
-            """
-        )
-
-        for row in rows:
+        for row in reader.iter_events():
             counters["rows_total"] += 1
-            game_id = row["game_id"]
+            game_id = row.game_id
 
             if current_game_id is None:
                 current_game_id = game_id
@@ -280,14 +243,15 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
                 counters["records_skipped_incomplete_game"] += 1
                 continue
 
-            event_type = row["event_type"]
-            server_version = row["server_version"]
-            db_player_index = row["player_index"]
+            event_type = row.event_type
+            server_version = row.server_version
+            db_player_index = row.player_index
 
             try:
-                payload = json.loads(row["payload_json"])
+                payload = json.loads(row.payload_json)
             except json.JSONDecodeError:
                 continue
+            payload = sanitize_dataset_payload(payload)
 
             if event_type == "human_action":
                 # Nuovo formato (raccolta umana "dataset mode"): evento self-contained.
@@ -310,7 +274,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
                 record: dict[str, Any] = {
                     "schema_version": config.schema_version,
                     "game_id": game_id,
-                    "event_id": row["id"],
+                    "event_id": row.id,
                     "server_version": server_version,
                     "player_index": player_idx,
                     "is_ai": False,
@@ -415,7 +379,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
             record: dict[str, Any] = {
                 "schema_version": config.schema_version,
                 "game_id": game_id,
-                "event_id": row["id"],
+                "event_id": row.id,
                 "server_version": server_version,
                 "player_index": player_idx,
                 "is_ai": is_ai,
@@ -441,13 +405,25 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
         flush_game_pending()
         return counters
     finally:
-        conn.close()
+        reader.close()
 
 
 def main() -> int:
     """Entry point CLI."""
-    parser = argparse.ArgumentParser(description="Export dataset da SQLite (event log) a JSONL")
-    parser.add_argument("--db", default="./data/briscola_events.sqlite3", help="Path DB SQLite (event log)")
+    parser = argparse.ArgumentParser(description="Export dataset da event log SQLite/Postgres a JSONL")
+    parser.add_argument(
+        "--db",
+        default=None,
+        help=(
+            "Path DB SQLite (event log). Se omesso e DATABASE_URL/BRISCOLA_DATABASE_URL è presente, "
+            "l'export legge da Postgres; altrimenti usa ./data/briscola_events.sqlite3."
+        ),
+    )
+    parser.add_argument(
+        "--database-url",
+        default=None,
+        help="DSN Postgres esplicito. Default: BRISCOLA_DATABASE_URL o DATABASE_URL, se presenti.",
+    )
     parser.add_argument("--out", default="./data/dataset.jsonl", help="Path output JSONL")
     parser.add_argument(
         "--player-index",
@@ -482,16 +458,24 @@ def main() -> int:
     if args.exclude_ai:
         include_ai = False
 
+    database_url = (
+        str(args.database_url).strip() if args.database_url else (None if args.db else resolve_database_url())
+    )
+    db_path = Path(args.db) if args.db else None
+    if db_path is None and not database_url:
+        db_path = DEFAULT_SQLITE_DB
+
     config = ExportConfig(
-        db_path=Path(args.db),
+        db_path=db_path,
         out_path=Path(args.out),
         player_index=player_index,
         include_ai=include_ai,
         include_next_state=not args.no_next_state,
         only_completed_games=bool(not args.include_incomplete),
+        database_url=database_url,
     )
 
-    if not config.db_path.exists():
+    if config.db_path is not None and not config.db_path.exists():
         print(f"DB non trovato: {config.db_path}")
         return 2
 

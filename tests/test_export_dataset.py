@@ -16,7 +16,10 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 from briscola_ai.backend.event_log import EventLog, EventLogConfig
+from briscola_ai.backend.event_log_reader import EventLogEventRow, EventLogGameRow
 
 # Nota:
 # `scripts/` non è un package Python installato, quindi in test carichiamo il modulo
@@ -39,6 +42,59 @@ def _read_jsonl(path: Path) -> list[dict]:
     return [json.loads(ln) for ln in lines]
 
 
+class _FakePostgresReader:
+    """Reader fake: simula Postgres senza aprire connessioni reali."""
+
+    backend_name = "postgres"
+
+    def __init__(self) -> None:
+        self.closed = False
+
+    def close(self) -> None:
+        self.closed = True
+
+    def list_completed_game_ids(self) -> set[str]:
+        return {"pg_game"}
+
+    def iter_games(self) -> list[EventLogGameRow]:
+        return [
+            EventLogGameRow(
+                game_id="pg_game",
+                created_at=1.0,
+                num_players=2,
+                seed=99,
+                code_version="0.10.0",
+                rules_version="1",
+                client_id="client_anon",
+                finished_at=10.0,
+                aborted_at=None,
+                aborted_reason=None,
+            )
+        ]
+
+    def iter_events(self) -> list[EventLogEventRow]:
+        return [
+            EventLogEventRow(
+                id=1,
+                game_id="pg_game",
+                server_version=1,
+                player_index=0,
+                event_type="human_action",
+                payload_json=json.dumps(
+                    {
+                        "player_index": 0,
+                        "card_index": 7,
+                        "observation": {"my_turn": True, "valid_actions": [7], "game_over": False},
+                        "reward": 0,
+                        "done": False,
+                        "next_observation": {"my_turn": False, "valid_actions": [], "game_over": False},
+                        "client_decision_time_ms": 250,
+                    }
+                ),
+            )
+        ]
+
+
 def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
     """
     Caso principale: backend in `BRISCOLA_EVENT_LOG_MODE=dataset` logga `human_action`
@@ -58,10 +114,28 @@ def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
             {
                 "player_index": 0,
                 "card_index": 1,
-                "observation": {"type": "observation", "game_over": False, "my_turn": True, "valid_actions": [1]},
+                "observation": {
+                    "type": "observation",
+                    "game_over": False,
+                    "my_turn": True,
+                    "valid_actions": [1],
+                    "players": [
+                        {"index": 0, "name": "Nome Libero", "points": 0, "hand_size": 2},
+                        {"index": 1, "name": "Giocatore AI", "points": 0, "hand_size": 3},
+                    ],
+                },
                 "reward": 0,
                 "done": False,
-                "next_observation": {"type": "observation", "game_over": False, "my_turn": False, "valid_actions": []},
+                "next_observation": {
+                    "type": "observation",
+                    "game_over": False,
+                    "my_turn": False,
+                    "valid_actions": [],
+                    "players": [
+                        {"index": 0, "name": "Nome Libero", "points": 0, "hand_size": 2},
+                        {"index": 1, "name": "Giocatore AI", "points": 0, "hand_size": 3},
+                    ],
+                },
                 "client_observed_server_version": 0,
                 "client_decision_time_ms": 1234,
             },
@@ -91,9 +165,43 @@ def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
     assert rec["is_ai"] is False
     assert rec["action"] == {"card_index": 1}
     assert rec["observation"]["my_turn"] is True
+    assert rec["observation"]["players"][0]["name"] == "player_0"
+    assert rec["observation"]["players"][1]["name"] == "player_1"
     assert isinstance(rec["next_observation"], dict)
+    assert rec["next_observation"]["players"][0]["name"] == "player_0"
     assert rec["client"]["observed_server_version"] == 0
     assert rec["client"]["decision_time_ms"] == 1234
+
+
+def test_export_reads_postgres_reader_when_database_url_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Con `database_url` l'exporter deve usare il reader Postgres, senza richiedere un DB SQLite."""
+    out_path = tmp_path / "dataset.jsonl"
+    fake_reader = _FakePostgresReader()
+
+    def fake_open_reader(*, sqlite_path: Path | None, database_url: str | None) -> _FakePostgresReader:
+        assert sqlite_path is None
+        assert database_url == "postgresql://fake/db"
+        return fake_reader
+
+    monkeypatch.setattr(_mod, "open_event_log_reader", fake_open_reader)
+
+    cfg = ExportConfig(
+        db_path=None,
+        database_url="postgresql://fake/db",
+        out_path=out_path,
+        player_index=0,
+        include_ai=False,
+        include_next_state=True,
+        only_completed_games=True,
+    )
+    counters = export_dataset(cfg)
+
+    assert fake_reader.closed is True
+    assert counters["records_written"] == 1
+    records = _read_jsonl(out_path)
+    assert records[0]["game_id"] == "pg_game"
+    assert records[0]["metadata"]["client_id"] == "client_anon"
+    assert records[0]["action"] == {"card_index": 7}
 
 
 def test_export_skips_incomplete_games_by_default(tmp_path: Path) -> None:

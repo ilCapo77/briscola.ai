@@ -54,6 +54,7 @@ from .dto import (
     TrickResultDTO,
 )
 from .event_log import EventLogProtocol, build_event_log, parse_event_db_path, resolve_database_url
+from .event_log_privacy import sanitize_dataset_payload
 from .game_store import (
     AiSeatConfig,
     GameSession,
@@ -751,16 +752,18 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
             _safe_log_event(
                 game_id,
                 "human_action",
-                {
-                    "player_index": action.player_index,
-                    "card_index": action.card_index,
-                    "observation": observation_before,
-                    "reward": reward,
-                    "done": bool(new_state.game_over is True),
-                    "next_observation": next_observation,
-                    "client_observed_server_version": action.client_observed_server_version,
-                    "client_decision_time_ms": action.client_decision_time_ms,
-                },
+                sanitize_dataset_payload(
+                    {
+                        "player_index": action.player_index,
+                        "card_index": action.card_index,
+                        "observation": observation_before,
+                        "reward": reward,
+                        "done": bool(new_state.game_over is True),
+                        "next_observation": next_observation,
+                        "client_observed_server_version": action.client_observed_server_version,
+                        "client_decision_time_ms": action.client_decision_time_ms,
+                    }
+                ),
                 server_version=server_version,
                 player_index=action.player_index,
                 state=new_state,
