@@ -134,28 +134,36 @@ Decisione: `best_a2c_v3.npz` è la baseline consigliata. `best_a2c.npz` resta se
 
 ### 1. Consolidamento Del Nuovo Best
 
-Priorità alta, piccolo rischio. Stato: **in gran parte FATTO** — best v3 in produzione, default UI = best model, opzioni con modello mancante disabilitate. L'evaluation matrix leggera resta utile come check periodico.
+Stato: **FATTO (2026-06-28)**. `best_a2c_v3.npz` è presente localmente, esposto dal catalogo API
+come modello compatibile e indicato da `/version` come modello consigliato. I test mirati coprono anche
+il caso modello mancante/directory vuota, così la UI non espone opzioni rotte e la creazione partita non
+dipende da path arbitrari.
 
-- Verificare UI/API con `best_a2c_v3.npz` presente e selezionato.
-- Verificare comportamento UI/API quando `best_a2c_v3.npz` manca: non deve rompere creazione partita o catalogo.
-- Eseguire evaluation matrix leggera contro:
-  - `random`
-  - `greedy_points`
-  - `heuristic_v1`
-  - `heuristic_v2`
-  - `hybrid_endgame`
-  - `hybrid_endgame_best_a2c`
-  - vecchio `best_a2c`
-- Salvare JSON locali in `benchmarks/experiments/` e riportare solo sintesi stabile qui, se emergono regressioni.
-- Aggiornare README se serve una nota utente sul modello consigliato v3.
+Sintesi consolidamento:
+
+- Matrix `medium` con engine Numba contro baseline fast-compatible: circa `+45.6/+46.0` vs `random`,
+  `+42.3/+42.8` vs `greedy_points`, `+17.1/+17.3` vs `heuristic_v1`, `+13.9/+14.1` vs `heuristic_v2`
+  su suite standard/holdout.
+- Head-to-head `big` Numba contro vecchio `best_a2c`: `+0.01` standard, `+0.18` holdout. Vantaggio
+  piccolo ma non regressivo; considerare i due modelli quasi pari nel confronto diretto guarded.
+- Check domain `small` sugli agenti endgame: positivo vs `hybrid_endgame` (`+9.67/+8.56`), negativo
+  vs `hybrid_endgame_best_a2c` (`-1.62/-2.38`), coerente con l'agente ibrido che aggiunge solver finale.
+- Decision-quality `medium` Numba vs `heuristic_v1`: `+17.20` avg diff, `trump_overkill_rate=0.0%`,
+  `trump_waste_rate=0.1%`.
+- Artefatti locali salvati in `benchmarks/experiments/*2026-06-28*.json` (gitignored). README non richiede
+  aggiornamenti aggiuntivi: il modello consigliato v3 è già documentato nel piano e nel runtime.
 
 ### 2. Raccolta Dati In Produzione (Postgres)
 
-Priorità media; serve solo se si vuole costruire il dataset da partite umane reali.
+Stato: **Postgres già attivo in produzione**. La raccolta dati procede, ma il volume è ancora basso;
+l'uso dei dati umani per training/evaluation è quindi posticipato.
 
-- Collegare Neon all'app (→ `DATABASE_URL`) e impostare `BRISCOLA_EVENT_LOG_MODE=dataset` (il consenso è già gestito: checkbox UI + enforcement backend).
-- Aggiornare `scripts/export_dataset.py` per leggere anche da **Postgres** (oggi legge solo SQLite) → export JSONL del dataset umano.
-- Verificare privacy: niente PII, `client_id` pseudonimo, solo partite consenzienti/complete.
+- Mantenere attivo l'event log Postgres in produzione.
+- Non basare ancora training o promozioni modello sui dati umani: dataset troppo piccolo/lento.
+- Aggiornare `scripts/export_dataset.py` per leggere anche da **Postgres** solo quando il volume raccolto
+  giustifica l'uso del dataset umano.
+- Prima dell'uso ML, verificare privacy e qualità: niente PII, `client_id` pseudonimo, solo partite
+  consenzienti/complete.
 
 ### 3. Self-Improvement V3 In Stile League
 
