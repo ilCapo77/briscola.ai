@@ -97,7 +97,7 @@ MODEL_SPECS: list[ModelSpec] = [
         progress_score=17.50188,
         h2h_source="benchmarks/experiments/a2c_v3_league_seed301_1m_numba/head_to_head_best_a2c_v3_big_numba.json",
         h2h_score=0.35628,
-        decision="Promoted as recommended local/webapp model; cloud release asset still required.",
+        decision="Promoted as recommended local/webapp/cloud model.",
         notes="League v3 1M run warm-started from best_a2c_v3 with best_a2c_v3 in the opponent mix.",
     ),
 ]
@@ -184,10 +184,10 @@ MILESTONES: list[dict[str, Any]] = [
         "date": "2026-06-28",
         "model_id": "best_a2c_v4",
         "type": "promoted",
-        "decision": "Promote v4 as the recommended local/webapp model.",
+        "decision": "Promote v4 as the recommended local/webapp/cloud model.",
         "why": "It beats best_a2c_v3 head-to-head and does not regress against heuristic_v1.",
         "evidence": "Big vs best_a2c_v3 +0.45/+0.36; big vs heuristic_v1 +17.43/+17.50.",
-        "impact": "Frontend/server default now points to v4; cloud still needs release asset provisioning.",
+        "impact": "Frontend/server/cloud default now points to v4 via release asset provisioning.",
         "source": "data/models/best_a2c_v4.npz + a2c_v3_league_seed301_1m_numba",
     },
 ]
@@ -527,8 +527,8 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v4 is the recommended local/webapp model: it improves big holdout vs heuristic_v1 "
-                "and beats best_a2c_v3 head-to-head on both big suites. Cloud still needs release asset provisioning."
+                "best_a2c_v4 is the recommended local/webapp/cloud model: it improves big holdout vs "
+                "heuristic_v1 and beats best_a2c_v3 head-to-head on both big suites."
             ],
             [],
             ["Quick comparison"],

@@ -89,6 +89,7 @@ L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 - `src/briscola_ai/frontend/static/` – UI (HTML/CSS/JS), immagini carte in `assets/cards/`
 - `tests/` – unit + integrazione API/WS (pytest)
 - `scripts/` – simulazione, self‑play, export, training, evaluation, benchmark
+- `docs/reports/model_progress.xlsx` – report Excel curato dei modelli significativi e delle milestone di promozione
 - `PLAN.md` – stato corrente e prossime azioni (fonte di verità). `data/` e `benchmarks/` sono artefatti locali (gitignored).
 
 ### I tre motori dello stesso gioco (dominio · fast · numba)
@@ -290,7 +291,8 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 Il modello consigliato è **`data/models/best_a2c_v4.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v3` nel confronto head‑to‑head big e non peggiora l'holdout vs `heuristic_v1`. `best_a2c_v3.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v4 è in `PLAN.md`.
 
-Per il deploy cloud, pubblica `best_a2c_v4.npz` come release asset e configura:
+La release `v0.10.0` usa `best_a2c_v4.npz` come modello consigliato anche in cloud. Per un nuovo deploy/release
+di modello, pubblica il `.npz` come release asset e configura:
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v4.npz
@@ -299,6 +301,22 @@ BRISCOLA_MODEL_SHA256=bd3c7612c4a4314f5757472f9fcbffb7c5385cc3661d468a1fafc9341a
 ```
 
 Il provisioning scarica solo il modello consigliato: su ambienti con disco limitato (es. 512 MB) evita di rendere disponibili troppi `.npz` contemporaneamente. Se vuoi mantenere anche `best_a2c_v3.npz` selezionabile online, caricalo nella stessa directory modelli solo se il budget disco lo consente.
+
+### Report progressione modelli
+
+Il report Excel curato vive in `docs/reports/model_progress.xlsx` ed è generato da:
+
+```bash
+uv run python scripts/build_model_report.py
+```
+
+Serve a tracciare solo i modelli **significativi**: best ufficiali, teacher/anchor importanti e candidati scartati
+che spiegano una decisione. La prima tab contiene una dashboard con curva di progressione dei best; le altre tab
+riportano milestone, dettagli modello, prove di promozione, decision quality, candidati scartati e fonti dati.
+
+Aggiornalo quando promuovi un nuovo best o quando un esperimento importante cambia una decisione. Non usarlo come dump
+di tutti i run: gli esperimenti locali restano in `benchmarks/experiments/` (gitignored), mentre il report conserva la
+narrazione sintetica e verificabile.
 
 Esempio di confronto testa‑a‑testa tra due modelli:
 
