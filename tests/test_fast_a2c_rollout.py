@@ -362,6 +362,75 @@ def test_train_a2c_fast_numba_rollout_supports_v3_bc_model_in_opponent_mix(tmp_p
     ]
 
 
+def test_train_a2c_saves_update_aligned_checkpoints(tmp_path: Path) -> None:
+    """I run lunghi possono salvare checkpoint confrontabili dopo update completi."""
+    out_path = tmp_path / "a2c_final.npz"
+    checkpoint_dir = tmp_path / "checkpoints"
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--out",
+            str(out_path),
+            "--rollout-engine",
+            "fast",
+            "--fast-rollout",
+            "numba",
+            "--opponent",
+            "random",
+            "--num-games",
+            "4",
+            "--seed",
+            "123",
+            "--hidden-dim",
+            "8",
+            "--update-every",
+            "2",
+            "--log-every",
+            "1",
+            "--checkpoint-games",
+            "2,4",
+            "--checkpoint-dir",
+            str(checkpoint_dir),
+            "--checkpoint-prefix",
+            "scale_test",
+            "--metrics-mode",
+            "summary",
+            "--inference-overkill-guard",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    checkpoint_2 = checkpoint_dir / "scale_test_2.npz"
+    checkpoint_4 = checkpoint_dir / "scale_test_4.npz"
+    assert out_path.exists()
+    assert checkpoint_2.exists()
+    assert checkpoint_4.exists()
+
+    with np.load(checkpoint_2, allow_pickle=False) as data:
+        metadata_2 = json.loads(str(data["metadata_json"]))
+    with np.load(out_path, allow_pickle=False) as data:
+        final_metadata = json.loads(str(data["metadata_json"]))
+
+    assert metadata_2["checkpoint"] == {"games": 2, "final_num_games": 4}
+    assert metadata_2["train"]["num_games"] == 2
+    assert metadata_2["train"]["requested_num_games"] == 4
+    assert metadata_2["inference_overkill_guard"] is True
+    assert "metrics" not in metadata_2
+    assert metadata_2["metrics_summary"]["count"] == 1
+
+    assert "checkpoint" not in final_metadata
+    assert final_metadata["train"]["num_games"] == 4
+    assert final_metadata["train"]["requested_num_games"] == 4
+    assert final_metadata["inference_overkill_guard"] is True
+    assert "metrics" not in final_metadata
+    assert final_metadata["metrics_summary"]["count"] == 2
+
+
 class _LinearAnchor:
     """Anchor minimale per testare la regolarizzazione nel batch backprop."""
 

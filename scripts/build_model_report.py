@@ -113,6 +113,19 @@ MODEL_SPECS: list[ModelSpec] = [
         decision="Promoted as recommended model for the v0.11.0 release.",
         notes="League v5 1M run warm-started from best_a2c_v4 with best_a2c_v4 in the opponent mix.",
     ),
+    ModelSpec(
+        model_id="best_a2c_v6",
+        path=_rel("data/models/best_a2c_v6.npz"),
+        role="official best",
+        status="promoted",
+        order=5,
+        progress_source="benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/eval_5m_vs_heuristic_v1_big_numba.json",
+        progress_score=18.40148,
+        h2h_source="benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/eval_5m_vs_best_a2c_v5_big_holdout_numba.json",
+        h2h_score=0.45866,
+        decision="Promoted as recommended model for the v0.12.0 release.",
+        notes="Scaling v6 5M run warm-started from best_a2c_v5 with best_a2c_v5 in the opponent mix.",
+    ),
 ]
 
 
@@ -218,6 +231,23 @@ MILESTONES: list[dict[str, Any]] = [
         ),
         "impact": "Frontend/server default now points to v5; cloud rollout needs the v0.11.0 asset URL in env.",
         "source": "data/models/best_a2c_v5.npz + a2c_v5_seed401_1m_numba",
+    },
+    {
+        "order": 8,
+        "date": "2026-06-28",
+        "model_id": "best_a2c_v6",
+        "type": "promoted",
+        "decision": "Promote v6 as the recommended model for v0.12.0.",
+        "why": (
+            "The 1M/3M/5M scaling curve improved monotonically, and the 5M checkpoint beat best_a2c_v5 "
+            "on both standard and holdout suites without quality regressions."
+        ),
+        "evidence": (
+            "5M big vs best_a2c_v5 +0.46; holdout big vs best_a2c_v5 +0.46; "
+            "big vs heuristic_v1 +18.40; decision-quality +18.58, overkill 0.0%, waste 0.07%."
+        ),
+        "impact": "Frontend/server default now points to v6; cloud rollout needs the v0.12.0 asset URL in env.",
+        "source": "data/models/best_a2c_v6.npz + a2c_v6_scaling_seed501_5m_numba",
     },
 ]
 
@@ -326,6 +356,11 @@ def decision_quality_rows() -> list[dict[str, Any]]:
             "best_a2c_v5",
             "Best A2C v5",
             "benchmarks/experiments/a2c_v5_seed401_1m_numba/decision_quality_vs_heuristic_v1_big_numba.json",
+        ),
+        (
+            "best_a2c_v6",
+            "Best A2C v6",
+            "benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/quality_5m_vs_heuristic_v1_big_numba.json",
         ),
     ]
     rows = []
@@ -451,6 +486,30 @@ def promotion_rows() -> list[dict[str, Any]]:
             opponent="best_a2c_v4",
         )
     )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/eval_5m_vs_heuristic_v1_big_numba.json",
+            model_id="best_a2c_v6",
+            label="Best A2C v6",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/eval_5m_vs_best_a2c_v5_big_numba.json",
+            model_id="best_a2c_v6",
+            label="Best A2C v6",
+            opponent="best_a2c_v5",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/eval_5m_vs_best_a2c_v5_big_holdout_numba.json",
+            model_id="best_a2c_v6",
+            label="Best A2C v6",
+            opponent="best_a2c_v5_holdout",
+        )
+    )
     return rows
 
 
@@ -554,7 +613,8 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
     models = model_rows()
     promotion = promotion_rows()
     quality = decision_quality_rows()
-    progress_models = [m for m in models if m["model_id"] in {"best_a2c", "best_a2c_v3", "best_a2c_v4", "best_a2c_v5"}]
+    progress_model_ids = {"best_a2c", "best_a2c_v3", "best_a2c_v4", "best_a2c_v5", "best_a2c_v6"}
+    progress_models = [m for m in models if m["model_id"] in progress_model_ids]
 
     dashboard: list[list[Any]] = [
         ["Briscola AI - Model Progress Report"],
@@ -577,8 +637,8 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v5 is the recommended v0.11.0 model: it improves big holdout vs "
-                "heuristic_v1 and beats best_a2c_v4 head-to-head."
+                "best_a2c_v6 is the recommended v0.12.0 model: the 5M scaling checkpoint improves "
+                "big holdout vs heuristic_v1 and beats best_a2c_v5 head-to-head on standard and holdout suites."
             ],
             [],
             ["Quick comparison"],

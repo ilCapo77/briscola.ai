@@ -247,7 +247,7 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     assert models
 
     assert "models_dir" not in payload  # non vogliamo esporre path server-side
-    assert payload["recommended_model"] == "best_a2c_v5.npz"
+    assert payload["recommended_model"] == "best_a2c_v6.npz"
     by_id = {m["id"]: m for m in models}
     assert "compatible_v1.npz" in by_id
     assert "compatible_v2.npz" in by_id
@@ -933,7 +933,7 @@ def test_version_endpoint_reports_versions_and_model_presence() -> None:
         body = resp.json()
         assert "code_version" in body
         assert "rules_version" in body
-        assert body["recommended_model"] == "best_a2c_v5.npz"
+        assert body["recommended_model"] == "best_a2c_v6.npz"
         assert isinstance(body["recommended_model_present"], bool)
         assert "models_dir" in body
 

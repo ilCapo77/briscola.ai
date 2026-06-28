@@ -898,6 +898,33 @@ def main() -> int:
     parser.add_argument("--gamma", type=float, default=1.0, help="Fattore di sconto per return-to-go (default: 1.0).")
     parser.add_argument("--update-every", type=int, default=20, help="Aggiorna i pesi ogni N partite (batch).")
     parser.add_argument("--log-every", type=int, default=200, help="Stampa metriche ogni N update.")
+    parser.add_argument(
+        "--checkpoint-games",
+        default="",
+        help=(
+            "Lista separata da virgole di conteggi partita a cui salvare checkpoint `.npz` "
+            "(es. `1000000,3000000,5000000`). Ogni valore deve essere multiplo di `--update-every`."
+        ),
+    )
+    parser.add_argument(
+        "--checkpoint-dir",
+        default="",
+        help="Directory per i checkpoint intermedi. Default: directory di `--out`.",
+    )
+    parser.add_argument(
+        "--checkpoint-prefix",
+        default="",
+        help="Prefisso filename checkpoint. Default: stem di `--out`.",
+    )
+    parser.add_argument(
+        "--metrics-mode",
+        choices=["full", "summary"],
+        default="full",
+        help=(
+            "Come salvare le metriche nel metadata_json. `full` mantiene ogni update; "
+            "`summary` salva solo conteggio/prima/ultima riga, utile per run multi-milione."
+        ),
+    )
     parser.add_argument("--seat-fair", action="store_true", help="Alterna la seat della policy (riduce bias player0).")
     args = parser.parse_args()
 
@@ -933,6 +960,26 @@ def main() -> int:
         )
 
     out_path = Path(args.out)
+    raw_checkpoint_games = str(args.checkpoint_games).strip()
+    checkpoint_games: set[int] = set()
+    if raw_checkpoint_games:
+        for raw_item in raw_checkpoint_games.split(","):
+            item = raw_item.strip()
+            if not item:
+                continue
+            try:
+                checkpoint_game = int(item)
+            except ValueError as exc:
+                raise ValueError(f"Checkpoint non valido in --checkpoint-games: {item!r}") from exc
+            if checkpoint_game <= 0:
+                raise ValueError("--checkpoint-games deve contenere solo valori > 0")
+            if checkpoint_game > int(args.num_games):
+                raise ValueError("--checkpoint-games non può superare --num-games")
+            if checkpoint_game % int(args.update_every) != 0:
+                raise ValueError("Ogni checkpoint deve essere multiplo di --update-every, per salvare dopo un update.")
+            checkpoint_games.add(checkpoint_game)
+    checkpoint_dir = Path(str(args.checkpoint_dir).strip()) if str(args.checkpoint_dir).strip() else out_path.parent
+    checkpoint_prefix = str(args.checkpoint_prefix).strip() or out_path.stem
     encoder_version: EncoderVersion = str(args.encoder_version)
     rng_action = np.random.default_rng(args.seed)
     rng_game = np.random.default_rng(args.seed ^ 0x9E3779B9)
@@ -1091,6 +1138,119 @@ def main() -> int:
     use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba"
     numba_batch: NumbaA2CBatch | None = None
     numba_batch_offset = 0
+
+    # Metadati UI (opzionali ma utili per il dropdown dei modelli in frontend).
+    def _format_num_games(n: int) -> str:
+        if n >= 1_000_000:
+            return f"{n / 1_000_000:.1f}M"
+        if n >= 1_000:
+            return f"{n / 1_000:.0f}k"
+        return str(n)
+
+    def _format_checkpoint_suffix(n: int) -> str:
+        """Format a game count for compact checkpoint filenames."""
+        return _format_num_games(n).replace(".0", "").lower()
+
+    def _format_opponent_label() -> str:
+        if opponent_pool is not None:
+            parts = [f"{item.name} {float(item.prob):.2f}" for item in opponent_pool.items]
+            return "mix(" + ", ".join(parts) + ")"
+        return str(args.opponent).strip()
+
+    def _metrics_metadata() -> dict[str, object]:
+        """Return either full metric history or a compact summary for long runs."""
+        if str(args.metrics_mode) == "full":
+            return {"metrics": [asdict(m) for m in metrics]}
+        if not metrics:
+            return {"metrics_summary": {"mode": "summary", "count": 0}}
+        return {
+            "metrics_summary": {
+                "mode": "summary",
+                "count": len(metrics),
+                "first": asdict(metrics[0]),
+                "last": asdict(metrics[-1]),
+            }
+        }
+
+    def _build_metadata(*, trained_games: int, is_checkpoint: bool) -> dict[str, object]:
+        """Build metadata for a final model or an intermediate training checkpoint."""
+        observation_note = (
+            "Osservazione anti-cheat: Fast2PState numerico con feature equivalenti a PlayerObservation."
+            if rollout_engine == "fast"
+            else "Osservazione anti-cheat: PlayerObservation (vista parziale lecita)."
+        )
+        payload: dict[str, object] = {
+            "format": "mlp_a2c_shaped_v1",
+            "label": f"A2C shaped {_format_num_games(int(trained_games))} game",
+            "description_it": (
+                "Policy addestrata con A2C (actor-critic) con reward shaping (delta punti per mano), "
+                f"contro {_format_opponent_label()}. "
+                f"{observation_note}"
+            ),
+            "feature_dim": int(policy.feature_dim),
+            "hidden_dim": int(policy.hidden_dim),
+            "action_dim": 40,
+            "seed": int(args.seed),
+            "rollout_engine": rollout_engine,
+            "fast_encoder": fast_encoder if rollout_engine == "fast" else None,
+            "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
+            "opponent": str(args.opponent) if not opponent_mix_raw else None,
+            "opponent_model": str(args.opponent_model).strip() or None,
+            "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
+            "init": args.init.strip() or None,
+            "encoder": f"encode_observation_2p:{encoder_version}",
+            "encoder_version": encoder_version,
+            "reward_shaping": "turn_based_trick_delta_points",
+            "reward_shaping_overkill_penalty_mode": str(args.overkill_penalty_mode),
+            "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
+            "reward_shaping_overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
+            "bc_anchor_path": bc_anchor_path or None,
+            "bc_anchor_beta": float(args.bc_anchor_beta),
+            "inference_overkill_guard": bool(args.inference_overkill_guard),
+            "train": {
+                "algorithm": "a2c",
+                "optimizer": "adam",
+                "lr": float(args.lr),
+                "weight_decay": float(args.weight_decay),
+                "entropy_beta": float(args.entropy_beta),
+                "value_coef": float(args.value_coef),
+                "gamma": float(args.gamma),
+                "update_every": int(args.update_every),
+                "seat_fair": bool(args.seat_fair),
+                "num_games": int(trained_games),
+                "requested_num_games": int(args.num_games),
+            },
+        }
+        if is_checkpoint:
+            payload["checkpoint"] = {
+                "games": int(trained_games),
+                "final_num_games": int(args.num_games),
+            }
+        payload.update(_metrics_metadata())
+        return payload
+
+    def _save_model(path: Path, *, trained_games: int, is_checkpoint: bool) -> None:
+        """Save actor/critic weights plus metadata to `.npz`."""
+        path.parent.mkdir(parents=True, exist_ok=True)
+        payload = _build_metadata(trained_games=trained_games, is_checkpoint=is_checkpoint)
+        # Nota compatibilità: `w1/b1/w2/b2` (actor) rende il file caricabile da `bc_model`.
+        np.savez(
+            path,
+            w1=policy.w1,
+            b1=policy.b1,
+            w2=policy.w2,
+            b2=policy.b2,
+            wv=policy.wv,
+            bv=np.asarray([policy.bv], dtype=np.float32),
+            metadata_json=json.dumps(payload, ensure_ascii=False, indent=2),
+        )
+        kind = "checkpoint" if is_checkpoint else "model"
+        print(f"Saved {kind}: {path}")
+
+    def _checkpoint_path(trained_games: int) -> Path:
+        suffix = _format_checkpoint_suffix(trained_games)
+        return checkpoint_dir / f"{checkpoint_prefix}_{suffix}.npz"
+
     for game_idx in range(1, num_games + 1):
         policy_seat = (game_idx % 2) if args.seat_fair else 0
         game_seed = 0 if use_numba_batch_rollout else int(rng_game.integers(0, 2**32))
@@ -1423,6 +1583,9 @@ def main() -> int:
                     f"{anchor_hint}"
                 )
 
+            if game_idx in checkpoint_games:
+                _save_model(_checkpoint_path(game_idx), trained_games=game_idx, is_checkpoint=True)
+
             returns_buf.clear()
             wins = 0
             draws = 0
@@ -1432,84 +1595,7 @@ def main() -> int:
             anchor_ce_sum = 0.0
             anchor_ce_count = 0
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
-
-    # Metadati UI (opzionali ma utili per il dropdown dei modelli in frontend).
-    def _format_num_games(n: int) -> str:
-        if n >= 1_000_000:
-            return f"{n / 1_000_000:.1f}M"
-        if n >= 1_000:
-            return f"{n / 1_000:.0f}k"
-        return str(n)
-
-    def _format_opponent_label() -> str:
-        if opponent_pool is not None:
-            parts = [f"{item.name} {float(item.prob):.2f}" for item in opponent_pool.items]
-            return "mix(" + ", ".join(parts) + ")"
-        return str(args.opponent).strip()
-
-    ui_label = f"A2C shaped {_format_num_games(int(args.num_games))} game"
-    observation_note = (
-        "Osservazione anti-cheat: Fast2PState numerico con feature equivalenti a PlayerObservation."
-        if rollout_engine == "fast"
-        else "Osservazione anti-cheat: PlayerObservation (vista parziale lecita)."
-    )
-    ui_description_it = (
-        "Policy addestrata con A2C (actor-critic) con reward shaping (delta punti per mano), "
-        f"contro {_format_opponent_label()}. "
-        f"{observation_note}"
-    )
-    payload = {
-        "format": "mlp_a2c_shaped_v1",
-        "label": ui_label,
-        "description_it": ui_description_it,
-        "feature_dim": int(policy.feature_dim),
-        "hidden_dim": int(policy.hidden_dim),
-        "action_dim": 40,
-        "seed": int(args.seed),
-        "rollout_engine": rollout_engine,
-        "fast_encoder": fast_encoder if rollout_engine == "fast" else None,
-        "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
-        "opponent": str(args.opponent) if not opponent_mix_raw else None,
-        "opponent_model": str(args.opponent_model).strip() or None,
-        "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
-        "init": args.init.strip() or None,
-        "encoder": f"encode_observation_2p:{encoder_version}",
-        "encoder_version": encoder_version,
-        "reward_shaping": "turn_based_trick_delta_points",
-        "reward_shaping_overkill_penalty_mode": str(args.overkill_penalty_mode),
-        "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
-        "reward_shaping_overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
-        "bc_anchor_path": bc_anchor_path or None,
-        "bc_anchor_beta": float(args.bc_anchor_beta),
-        "inference_overkill_guard": bool(args.inference_overkill_guard),
-        "train": {
-            "algorithm": "a2c",
-            "optimizer": "adam",
-            "lr": float(args.lr),
-            "weight_decay": float(args.weight_decay),
-            "entropy_beta": float(args.entropy_beta),
-            "value_coef": float(args.value_coef),
-            "gamma": float(args.gamma),
-            "update_every": int(args.update_every),
-            "seat_fair": bool(args.seat_fair),
-            "num_games": int(args.num_games),
-        },
-        "metrics": [asdict(m) for m in metrics],
-    }
-
-    # Nota compatibilità: salviamo `w1/b1/w2/b2` (actor) così `bc_model` può usare il modello direttamente.
-    np.savez(
-        out_path,
-        w1=policy.w1,
-        b1=policy.b1,
-        w2=policy.w2,
-        b2=policy.b2,
-        wv=policy.wv,
-        bv=np.asarray([policy.bv], dtype=np.float32),
-        metadata_json=json.dumps(payload, ensure_ascii=False, indent=2),
-    )
-    print(f"Saved model: {out_path}")
+    _save_model(out_path, trained_games=num_games, is_checkpoint=False)
     return 0
 
 
