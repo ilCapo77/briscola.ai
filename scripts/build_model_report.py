@@ -22,6 +22,7 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "docs" / "reports" / "model_progress.xlsx"
+_XLSX_ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 
 
 @dataclass(frozen=True, slots=True)
@@ -1004,22 +1005,30 @@ def write_xlsx(sheets: dict[str, list[list[Any]]], out_path: Path) -> None:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     sheet_names = list(sheets)
     progress_row_count = dashboard_progress_row_count(sheets["Dashboard"])
+
+    def write_text(zf: zipfile.ZipFile, filename: str, content: str) -> None:
+        """Write one XML part with stable ZIP metadata so regeneration is deterministic."""
+        info = zipfile.ZipInfo(filename=filename, date_time=_XLSX_ZIP_TIMESTAMP)
+        info.compress_type = zipfile.ZIP_DEFLATED
+        zf.writestr(info, content.encode("utf-8"))
+
     with zipfile.ZipFile(out_path, "w", compression=zipfile.ZIP_DEFLATED) as zf:
-        zf.writestr("[Content_Types].xml", content_types_xml(len(sheet_names)))
-        zf.writestr("_rels/.rels", root_rels_xml())
-        zf.writestr("xl/workbook.xml", workbook_xml(sheet_names))
-        zf.writestr("xl/_rels/workbook.xml.rels", workbook_rels(sheet_names))
-        zf.writestr("xl/styles.xml", styles_xml())
+        write_text(zf, "[Content_Types].xml", content_types_xml(len(sheet_names)))
+        write_text(zf, "_rels/.rels", root_rels_xml())
+        write_text(zf, "xl/workbook.xml", workbook_xml(sheet_names))
+        write_text(zf, "xl/_rels/workbook.xml.rels", workbook_rels(sheet_names))
+        write_text(zf, "xl/styles.xml", styles_xml())
         for idx, name in enumerate(sheet_names, start=1):
-            zf.writestr(
+            write_text(
+                zf,
                 f"xl/worksheets/sheet{idx}.xml",
                 sheet_xml(sheets[name], sheet_name=name, drawing_rel=(name == "Dashboard")),
             )
             if name == "Dashboard":
-                zf.writestr(f"xl/worksheets/_rels/sheet{idx}.xml.rels", sheet_drawing_rels_xml())
-        zf.writestr("xl/drawings/drawing1.xml", drawing_xml())
-        zf.writestr("xl/drawings/_rels/drawing1.xml.rels", drawing_rels_xml())
-        zf.writestr("xl/charts/chart1.xml", chart_xml(progress_row_count))
+                write_text(zf, f"xl/worksheets/_rels/sheet{idx}.xml.rels", sheet_drawing_rels_xml())
+        write_text(zf, "xl/drawings/drawing1.xml", drawing_xml())
+        write_text(zf, "xl/drawings/_rels/drawing1.xml.rels", drawing_rels_xml())
+        write_text(zf, "xl/charts/chart1.xml", chart_xml(progress_row_count))
 
 
 def main() -> int:

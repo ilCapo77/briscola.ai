@@ -106,4 +106,8 @@ Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Aggi
     git push <remote> vX.Y.Z
     ```
     Nota: `get_code_version()` (footer UI, `/version`, cache-busting) legge la versione da `pyproject.toml` anche in editable, quindi non serve reinstallare per vederla aggiornata.
+  - **Report modelli per ogni release**: a ogni nuova release rigenera `docs/reports/model_progress.xlsx` con
+    `uv run python scripts/build_model_report.py`. Controlla esplicitamente il foglio Dashboard e in particolare il
+    grafico di progressione: deve includere il nuovo best/versione promossa e il range del grafico deve arrivare
+    all'ultima riga dei modelli ufficiali.
 - PR: descrivi il change, includi passi di riproduzione per i bug, e screenshot per cambi UI (`src/briscola_ai/frontend/static/`).
