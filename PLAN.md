@@ -168,19 +168,72 @@ BRISCOLA_MODEL_SHA256=b047a319c3505936d11127a3a2e29b9ca3a2b93676569a2ea8ce186a5e
 
 Baseline da battere: `best_a2c_v6.npz`.
 
-- Esperimento scaling A2C da v5 completato e promosso a v6 (seed 501, fast+numba, checkpoint 1M/3M/5M, guard inference ON):
-  - 1M vs v5 big: `+0.03`; vs `heuristic_v1`: `+17.93`; overkill `0.0%`, waste `0.07%`;
-  - 3M vs v5 big: `+0.22`; vs `heuristic_v1`: `+18.18`; overkill `0.0%`, waste `0.09%`;
-  - 5M vs v5 big: `+0.46`; holdout vs v5 big: `+0.46`; vs `heuristic_v1`: `+18.40`;
-    decision-quality vs `heuristic_v1`: `+18.58`, overkill `0.0%`, waste `0.07%`.
-- Prima di cambiare architettura, provare un run A2C league più lungo o più mirato solo se c'è un segnale concreto
-  (errori qualitativi ripetuti, plateau contro v6, o metriche train/validation che indicano underfitting).
-- Criteri minimi di promozione:
-  - head-to-head positivo contro `best_a2c_v6` su big seat-fair;
-  - holdout vs `heuristic_v1` non peggiore;
-  - `trump_waste_rate` e `trump_overkill_rate` non peggiorano materialmente;
-  - niente promozione se il vantaggio è solo rumore statistico.
-- Aggiornare `docs/reports/model_progress.xlsx` solo per candidati significativi.
+Storico scaling (seed 501, fast+numba, checkpoint 1M/3M/5M, guard inference ON), promosso a v6:
+
+- 1M vs v5 big: `+0.03`; vs `heuristic_v1`: `+17.93`; overkill `0.0%`, waste `0.07%`;
+- 3M vs v5 big: `+0.22`; vs `heuristic_v1`: `+18.18`; overkill `0.0%`, waste `0.09%`;
+- 5M vs v5 big: `+0.46`; holdout vs v5 big: `+0.46`; vs `heuristic_v1`: `+18.40`;
+  decision-quality vs `heuristic_v1`: `+18.58`, overkill `0.0%`, waste `0.07%`.
+
+#### Ipotesi v7 concordata: league a popolazione (fictitious self-play)
+
+Motivazione (basata su dati, non inerzia):
+
+- **Costo crescente dello scaling puro.** v6 ha speso 5× le partite (5M vs 1M) per un guadagno (`+0.46`) della
+  stessa entità dei passi da 1M. La curva (1M `+0.03`, 3M `+0.22`, 5M `+0.46`) è ancora **monotona**, non un
+  plateau: il punto è che lo scaling puro ha **costo crescente** e non basta più come ipotesi primaria — "v7 =
+  stesso recipe, più partite" è la mossa per inerzia che questo piano sconsiglia.
+- **Debolezza metodologica da verificare.** Dalla v3 in poi il recipe è congelato (MLP `310→128→40`, encoder v3,
+  opponent-mix `{predecessore 0.4 / h2 0.3 / h1 0.2 / random 0.1}`, warm-start dal predecessore immediato che è
+  anche l'unico opponent appreso). Questo ottimizza per "battere il predecessore": **se** i matchup risultano non
+  transitivi nel round-robin (A>B, B>C ma C≈A), c'è rischio di **ciclare** anziché crescere in forza assoluta. Il
+  segnale che lo suggerisce è che le vittorie H2H sono marginali e ambigue — es. v3 vs v2: big standard `+0.00814`
+  (wins `48433` vs `48683`, draws `2884` → in conteggio vittorie v3 *perde di poco*), big holdout `+0.18258`
+  (wins `48741` vs `48339`). La decision-quality è ormai satura (overkill `0.0%`, waste `0.07%`): gli errori
+  "facili" sono già risolti, i margini residui vengono dalla robustezza, non dalla scala.
+
+Ipotesi misurabile: addestrare v7 contro una **popolazione** dei best storici encoder v3 `{v3, v4, v5, v6}` +
+euristiche (invece del solo predecessore) produce una policy con **Elo round-robin** più alto e **matchup peggiore
+migliore**, non solo un `+0.x` contro v6. (`best_a2c` v2 legacy è encoder v2/feature_dim 288: resta fuori dalla
+popolazione di training ma va incluso almeno in **valutazione** round-robin come ancoraggio storico, dato che a
+inference ciascun modello usa il proprio encoder.)
+
+Passi:
+
+- **Pre-validazione economica (prima di addestrare):** round-robin Elo tra i `.npz` esistenti `{v3, v4, v5, v6}` +
+  `best_a2c` (v2 legacy, ancoraggio) + `heuristic_v1`, per misurare *quanto* è non transitiva la famiglia attuale.
+  Se l'ordine non è coerentemente monotòno (A>B, B>C ma C≈A), l'ipotesi è confermata e vale addestrare.
+- **Screening league a popolazione (~200k partite)** con opponent-mix multi-modello, es.
+  `{v6:0.3, v5:0.15, v4:0.1, v3:0.05, heuristic_v2:0.2, heuristic_v1:0.1, random:0.1}`, warm-start da v6.
+- Solo se lo screening è positivo, run lungo (1M+) e valutazione completa.
+
+Costo implementativo da conoscere: il fast-rollout numba accetta oggi **un solo tipo di opponent modello per batch**
+(`scripts/train_a2c.py:1010`), e `evaluate_matrix.py` è single-model. Serve plumbing contenuto per campionare tra
+più `.npz` come opponent e per il round-robin. Cambiamento ben circoscritto, da fare con test fast/numba verdi
+prima/dopo.
+
+Criteri di promozione (rivisti per l'ipotesi popolazione):
+
+- **Elo round-robin** vs `{v3..v6}` + `heuristic_v1` superiore a v6 (criterio primario, non solo H2H vs v6);
+- **matchup peggiore** della popolazione non regredisce (no modello "rock" che batte v6 ma perde contro v4);
+- holdout vs `heuristic_v1` non peggiore;
+- `trump_waste_rate` e `trump_overkill_rate` non peggiorano materialmente;
+- **significatività statistica obbligatoria**: ogni vantaggio (H2H ed Elo) riportato con **intervallo di confidenza
+  bootstrap** (ricampionamento sulle partite); niente promozione se il CI tocca lo zero o se il delta è sotto una
+  soglia minima predefinita (es. `avg_diff` ≥ una frazione del rumore osservato a parità di modello). Il vantaggio
+  deve essere distinguibile dal rumore, non solo positivo in media.
+
+Aggiornare `docs/reports/model_progress.xlsx` solo per candidati significativi.
+
+#### Track parallelo a ceiling più alto: search a inference (PIMC/determinizzazione)
+
+Non è "training di v7" ma probabilmente il guadagno maggiore a lungo termine. Ipotesi: gli errori residui sono linee
+tattiche di metà/fine partita che una policy *memoryless* non vede. Una **ricerca determinizzata** (Perfect-Information
+Monte Carlo / ISMCTS) con v6 come valutatore alle foglie, attivata quando lo spazio delle carte ignote è piccolo
+(ultime ~6–10 carte), batte v6 in head-to-head. Riusa il solver endgame esatto già presente
+(`ai/endgame/solver.py`, oggi solo a mazzo vuoto) come caso terminale. Costo: nuovo modulo (determinizer + PIMC) +
+costo runtime (rilevante per la webapp). Cantiere separato dal "fai partire v7"; valutare dopo o in parallelo allo
+screening league.
 
 ### 3. PPO/GAE Solo Dopo Un Blocco Reale Di A2C
 

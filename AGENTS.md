@@ -27,6 +27,13 @@ Briscola end-to-end: motore di regole puro → backend HTTP/WS → UI → pipeli
 
 **Modelli locali (`.npz`)**: la UI seleziona un avversario `bc_model` da un catalogo server-side (`ai/models/catalog.py`). Il browser invia solo un `ai_model_id` (path relativo) tra quelli di `GET /api/ai/models`; il backend rifiuta path traversal e carica solo da `BRISCOLA_MODELS_DIR` (default `./data/models/`). I trainer salvano nei `.npz` i metadati (`label`, `description_it`, `feature_dim`).
 
+> **Nota peso `.npz`:** i pesi della MLP sono piccoli (~0.18 MB per v6). Non salvare l'intera storia `metrics`
+> nel `metadata_json` dei modelli da pubblicare come release asset o usare in cloud: `np.savez` non comprime e una
+> stringa JSON NumPy (`<U...`) può occupare circa 4 byte per carattere. I vecchi `best_a2c_v3/4/5.npz` pesano
+> 41–52 MB per questo motivo, mentre `best_a2c_v6.npz` pesa ~0.2 MB con metadata sintetici. Per run lunghi usare
+> metadata essenziali o `--metrics-mode summary`. La dimensione del file non indica capacità del modello né quantità
+> di training.
+
 **Pipeline ML** (vedi `README.md` e `PLAN.md` per il dettaglio): dominio testabile → backend/UI → event log (SQLite in locale, **Postgres** in cloud) → export JSONL versionato (`export_dataset.py`, oggi legge da SQLite) → self-play → valutazione offline riproducibile → training (BC/PG/A2C). `PLAN.md` è la **fonte di verità su cosa fare dopo**: è volutamente breve (stato corrente + prossime azioni), leggilo per intero prima di pianificare.
 
 ## Setup, Build, and Run
