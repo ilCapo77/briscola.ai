@@ -185,10 +185,20 @@ Esperimento seed301, 200k partite (2026-06-28):
   non migliora il best consolidato in modo chiaro. Artefatti in
   `benchmarks/experiments/a2c_v3_league_seed301_200k_numba/`.
 
+Esperimento seed302 conservativo, 200k partite (2026-06-28):
+
+- Config: warm-start `best_a2c_v3`, mix
+  `best_a2c_v3:0.3,heuristic_v2:0.3,heuristic_v1:0.3,random:0.1`, BC-anchor `bc_v3` beta `0.02`.
+- Medium Numba vs `best_a2c_v3`: `-0.12` standard, `+0.05` holdout.
+- Medium vs `heuristic_v1`: `+16.94/+16.95`, sotto il best consolidato.
+- Decisione: **non promuovere** e niente big; non supera il filtro medium.
+
 Prossimo esperimento consigliato:
 
-- run più lungo (es. 1M) o seed alternativo solo se si accetta il costo; altrimenti provare mix/anchor
-  più conservativi per preservare holdout vs `heuristic_v1`;
+- se si continua con A2C league, provare un run 1M solo su una config che al medium batte chiaramente
+  `best_a2c_v3` senza perdere holdout vs `heuristic_v1`;
+- in alternativa, rivedere obiettivo/mix: i run 200k mostrano miglioramenti head-to-head troppo piccoli
+  e facilmente compensati da regressioni sulle baseline;
 - valutare prima medium, poi big solo se medium è promettente.
 
 Criteri di promozione:
