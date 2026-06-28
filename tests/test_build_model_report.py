@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+import xml.etree.ElementTree as ET
+import zipfile
 from pathlib import Path
 
 
@@ -49,3 +51,32 @@ def test_dashboard_chart_range_tracks_all_progression_rows() -> None:
     assert count == 4
     assert "Dashboard!$A$6:$A$9" in chart
     assert "Dashboard!$B$6:$B$9" in chart
+
+
+def test_generated_xlsx_chart_reaches_latest_official_best(tmp_path: Path) -> None:
+    """The committed report workflow must keep the Dashboard chart aligned with the latest best model."""
+    out_path = tmp_path / "model_progress.xlsx"
+    sheets = build_model_report.build_workbook_data()
+    build_model_report.write_xlsx(sheets, out_path)
+
+    dashboard_rows = sheets["Dashboard"]
+    progress_count = build_model_report.dashboard_progress_row_count(dashboard_rows)
+    progress_models = [row[0] for row in dashboard_rows[5 : 5 + progress_count]]
+    expected_models = [
+        spec.model_id
+        for spec in build_model_report.MODEL_SPECS
+        if spec.role == "official best" and spec.status == "promoted" and spec.progress_score is not None
+    ]
+    first_progress_row = 6
+    last_progress_row = first_progress_row + len(expected_models) - 1
+
+    assert progress_models == expected_models
+    assert progress_models[-1] == "best_a2c_v6"
+
+    with zipfile.ZipFile(out_path) as zf:
+        chart_root = ET.fromstring(zf.read("xl/charts/chart1.xml"))
+    ns = {"c": "http://schemas.openxmlformats.org/drawingml/2006/chart"}
+    chart_ranges = {node.text for node in chart_root.findall(".//c:f", ns)}
+
+    assert f"Dashboard!$A${first_progress_row}:$A${last_progress_row}" in chart_ranges
+    assert f"Dashboard!$B${first_progress_row}:$B${last_progress_row}" in chart_ranges

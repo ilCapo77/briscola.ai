@@ -4,10 +4,10 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.12.0` (`pyproject.toml`).
+- Versione progetto: `0.12.1` (`pyproject.toml`).
 - Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
-- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. Release `v0.12.0` preparata con modello v6 come default; il rollout cloud richiede asset release v6 e aggiornamento env.
+- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. Release `v0.12.1` preparata con modello v6 come default; rollout cloud v6 verificato in produzione.
 - Anti-cheat: agenti e modelli ricevono `PlayerObservation`, non `GameState` completo.
 - Fast path: 2-player numerico Python/Numba per training/evaluation ad alto throughput.
 - Encoder supportati: v1, v2, v3.
@@ -119,8 +119,10 @@ roadmap; non usarlo come archivio di ogni run locale.
 - Cache-busting asset automatico (versione + mtime degli static).
 - Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone, preload immagini carte, spinner di avvio partita, footer su una riga con icona GitHub e versione software.
 - Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
-- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.12.0` preparata per `best_a2c_v6.npz`.
+- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.12.1` preparata per `best_a2c_v6.npz`.
 - **Deploy COMPLETATO** su FastAPI Cloud (Redis collegato): <https://briscolaai.fastapicloud.dev>. Postgres/event log e modalità dataset sono attivabili via `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset` quando serve raccogliere dataset umano.
+- Rollout cloud v6 completato e verificato: `/version` espone `recommended_model=best_a2c_v6.npz` e
+  `recommended_model_present=true`; la UI mostra la label v6.
 - Osservabilità/export cloud completati: produzione verificata con `DATABASE_URL` (Neon/Postgres), `BRISCOLA_EVENT_LOG_MODE=dataset` e `REDIS_URL`; `scripts/report_event_log.py` conta partite/consenso/finestre 24h-7d/qualità `human_action`; `scripts/export_dataset.py` legge SQLite o Postgres mantenendo JSONL v1 e sanifica i nomi giocatore (`player_0`, `player_1`, ...). Smoke export produzione validato: 18 partite complete / 360 record.
 
 ### Endgame E Strategia
@@ -145,20 +147,21 @@ roadmap; non usarlo come archivio di ogni run locale.
 
 ## Prossime Azioni Consigliate
 
-### 1. Rollout Cloud E Monitoraggio v6
+### 1. Monitoraggio Produzione v6
 
-Obiettivo: rendere `best_a2c_v6.npz` il modello consigliato anche in produzione, senza perdere tracciabilità.
+Obiettivo: osservare `best_a2c_v6.npz` in produzione senza avviare training per inerzia.
 
-- Configurare cloud con:
+- Produzione verificata con modello v6. Per nuovi rollout o per riallineare l'URL asset alla patch release usare:
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v6.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.12.0/best_a2c_v6.npz
+BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.12.1/best_a2c_v6.npz
 BRISCOLA_MODEL_SHA256=b047a319c3505936d11127a3a2e29b9ca3a2b93676569a2ea8ce186a5e29a951
 ```
 
-- Monitorare partite reali e feedback qualitativo, ma non usare dati umani per training finché il volume resta basso e la
-  qualità/privacy non sono state riverificate con `scripts/report_event_log.py`.
+- Monitorare partite reali, errori, abbandoni e feedback qualitativo.
+- Usare `scripts/report_event_log.py` per controllare aggregati e qualità del log senza stampare payload sensibili.
+- Non usare dati umani per training finché il volume resta basso e la qualità/privacy non sono state riverificate.
 - Non avviare v7 solo per inerzia: serve una nuova ipotesi misurabile.
 
 ### 2. Prossima Iterazione Modello (`best_a2c_v7`) Solo Con Ipotesi Nuova
