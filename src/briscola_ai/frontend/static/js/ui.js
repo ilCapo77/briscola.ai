@@ -17,6 +17,7 @@ const UI = (() => {
     const elements = {
         homeHero: document.getElementById('home-hero'),
         homeAbout: document.getElementById('home-about'),
+        startupLoading: document.getElementById('startup-loading'),
         gameSetup: document.getElementById('game-setup'),
         gameBoard: document.getElementById('game-board'),
         gameResult: document.getElementById('game-result'),
@@ -62,6 +63,7 @@ const UI = (() => {
 
     // Se true, richiediamo una checkbox esplicita prima di avviare la partita.
     let dataConsentRequired = false;
+    let gameStartupInProgress = false;
 
     const _updateAiAgentDescription = () => {
         const name = elements.aiAgentSelect?.value;
@@ -126,6 +128,10 @@ const UI = (() => {
 
     const _updateConsentUi = () => {
         if (!elements.startGameButton) return;
+        if (gameStartupInProgress) {
+            elements.startGameButton.disabled = true;
+            return;
+        }
         if (!dataConsentRequired) {
             elements.startGameButton.disabled = false;
             return;
@@ -159,6 +165,19 @@ const UI = (() => {
                 elements.aiModelDescription.textContent = desc;
             }
         }
+    };
+
+    const _setGameStartupLoading = (isLoading) => {
+        gameStartupInProgress = isLoading === true;
+        if (elements.startupLoading) {
+            elements.startupLoading.classList.toggle('hidden', !gameStartupInProgress);
+            elements.startupLoading.setAttribute('aria-hidden', String(!gameStartupInProgress));
+        }
+        document.body.classList.toggle('starting-game', gameStartupInProgress);
+        if (elements.startGameButton) {
+            elements.startGameButton.setAttribute('aria-busy', String(gameStartupInProgress));
+        }
+        _updateConsentUi();
     };
 
     /**
@@ -253,20 +272,26 @@ const UI = (() => {
     // --- Public API ---
 
     const init = (callbacks) => {
-        elements.gameForm.addEventListener('submit', (e) => {
+        elements.gameForm.addEventListener('submit', async (e) => {
             e.preventDefault();
+            if (gameStartupInProgress || !callbacks.onStartGame) return;
             const modelId = elements.aiModelSelect?.value || null;
             const modelMeta = modelId ? aiModelMetaById[modelId] : null;
-            callbacks.onStartGame?.({
-                playerName: elements.playerNameInput.value || 'Giocatore',
-                aiAgent: elements.aiAgentSelect?.value || 'random',
-                aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
-                aiModelId: modelId,
-                aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null,
-                aiModelCompatible: modelMeta?.is_compatible === true,
-                aiModelCompatibilityReasonIt: modelMeta?.compatibility_reason_it || null,
-                consentToDataCollection: elements.dataConsentCheckbox?.checked === true,
-            });
+            _setGameStartupLoading(true);
+            try {
+                await callbacks.onStartGame({
+                    playerName: elements.playerNameInput.value || 'Giocatore',
+                    aiAgent: elements.aiAgentSelect?.value || 'random',
+                    aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
+                    aiModelId: modelId,
+                    aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null,
+                    aiModelCompatible: modelMeta?.is_compatible === true,
+                    aiModelCompatibilityReasonIt: modelMeta?.compatibility_reason_it || null,
+                    consentToDataCollection: elements.dataConsentCheckbox?.checked === true,
+                });
+            } finally {
+                _setGameStartupLoading(false);
+            }
         });
 
         elements.aiAgentSelect?.addEventListener('change', () => {
@@ -407,6 +432,7 @@ const UI = (() => {
     };
 
     const showGameSetup = () => {
+        _setGameStartupLoading(false);
         elements.homeHero?.classList.remove('hidden');
         elements.homeAbout?.classList.remove('hidden');
         elements.gameSetup.classList.remove('hidden');

@@ -34,6 +34,10 @@ body {
     user-select: none;
 }
 
+body.starting-game {
+    overflow: hidden;
+}
+
 input,
 select,
 textarea,
@@ -187,6 +191,64 @@ button:disabled {
     background: var(--border-color);
     cursor: not-allowed;
     transform: none;
+}
+
+/* Overlay mostrato mentre il backend crea la partita e il frontend prepara gli asset iniziali. */
+.startup-loading {
+    position: fixed;
+    inset: 0;
+    z-index: 1000;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(8, 12, 24, 0.72);
+    backdrop-filter: blur(3px);
+}
+
+.startup-loading-content {
+    display: grid;
+    justify-items: center;
+    gap: 10px;
+    width: min(320px, 100%);
+    padding: 22px 24px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 12px;
+    background: rgba(18, 26, 44, 0.92);
+    box-shadow: 0 16px 40px rgba(0, 0, 0, 0.35);
+    text-align: center;
+}
+
+.startup-spinner {
+    width: 46px;
+    height: 46px;
+    border: 4px solid rgba(255, 255, 255, 0.22);
+    border-top-color: var(--secondary-color);
+    border-radius: 50%;
+    animation: startup-spin 0.85s linear infinite;
+}
+
+.startup-loading-title {
+    color: var(--text-color);
+    font-size: 1rem;
+    font-weight: 700;
+}
+
+.startup-loading-detail {
+    color: var(--text-muted);
+    font-size: 0.9rem;
+}
+
+@keyframes startup-spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .startup-spinner {
+        animation-duration: 1.6s;
+    }
 }
 
 /* Game info */

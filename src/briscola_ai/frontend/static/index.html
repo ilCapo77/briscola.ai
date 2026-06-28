@@ -154,6 +154,14 @@
         </footer>
     </div>
 
+    <div id="startup-loading" class="startup-loading hidden" role="status" aria-live="polite" aria-hidden="true">
+        <div class="startup-loading-content">
+            <div class="startup-spinner" aria-hidden="true"></div>
+            <div class="startup-loading-title">Preparazione partita...</div>
+            <div class="startup-loading-detail">Caricamento tavolo e IA</div>
+        </div>
+    </div>
+
     <script>
         // Modalità realtime decisa dal server: "polling" in cloud multi-replica (Redis attivo),
         // "ws" in locale. Il default e' sovrascrivibile con ?polling=1 / ?ws=1 nell'URL.

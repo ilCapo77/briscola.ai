@@ -4,10 +4,10 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.9.0` (`pyproject.toml`).
+- Versione progetto: `0.10.0` (`pyproject.toml`).
 - Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
-- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>.
+- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. La UI mostra uno spinner durante l'avvio partita mentre backend e asset iniziali vengono preparati.
 - Anti-cheat: agenti e modelli ricevono `PlayerObservation`, non `GameState` completo.
 - Fast path: 2-player numerico Python/Numba per training/evaluation ad alto throughput.
 - Encoder supportati: v1, v2, v3.
@@ -106,7 +106,7 @@ selezionabili per confronto/regressioni se presenti nella directory modelli.
 - Event log **Postgres** opzionale (`PostgresEventLog`, factory `build_event_log` su `DATABASE_URL`); stesso schema dell'SQLite.
 - Provisioning modello allo startup (`BRISCOLA_MODEL_URL` + sha256); endpoint `/health` e `/version`; shim `main:app` per `fastapi run`.
 - Cache-busting asset automatico (versione + mtime degli static).
-- Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone, preload immagini carte, footer su una riga con icona GitHub e versione software.
+- Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone, preload immagini carte, spinner di avvio partita, footer su una riga con icona GitHub e versione software.
 - Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
 - Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.5.0` con asset `best_a2c_v3.npz` usata dal provisioning.
 - **Deploy COMPLETATO** su FastAPI Cloud (Redis collegato): <https://briscolaai.fastapicloud.dev>. Resta opzionale attivare Postgres/Neon (`DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`) per la raccolta dati.
