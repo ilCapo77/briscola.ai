@@ -164,7 +164,7 @@ BRISCOLA_MODEL_SHA256=b047a319c3505936d11127a3a2e29b9ca3a2b93676569a2ea8ce186a5e
 - Non usare dati umani per training finché il volume resta basso e la qualità/privacy non sono state riverificate.
 - Non avviare v7 solo per inerzia: serve una nuova ipotesi misurabile.
 
-### 2. Prossima Iterazione Modello (`best_a2c_v7`) Solo Con Ipotesi Nuova
+### 2. Prossima Iterazione IA (PIMC Prima Di `best_a2c_v7`)
 
 Baseline da battere: `best_a2c_v6.npz`.
 
@@ -175,71 +175,68 @@ Storico scaling (seed 501, fast+numba, checkpoint 1M/3M/5M, guard inference ON),
 - 5M vs v5 big: `+0.46`; holdout vs v5 big: `+0.46`; vs `heuristic_v1`: `+18.40`;
   decision-quality vs `heuristic_v1`: `+18.58`, overkill `0.0%`, waste `0.07%`.
 
-#### Ipotesi v7 concordata: league a popolazione (fictitious self-play)
+#### Direzione v7: search a inference prima di altro self-play
 
-Motivazione (basata su dati, non inerzia):
+Esito della pre-validazione round-robin:
 
-- **Costo crescente dello scaling puro.** v6 ha speso 5× le partite (5M vs 1M) per un guadagno (`+0.46`) della
-  stessa entità dei passi da 1M. La curva (1M `+0.03`, 3M `+0.22`, 5M `+0.46`) è ancora **monotona**, non un
-  plateau: il punto è che lo scaling puro ha **costo crescente** e non basta più come ipotesi primaria — "v7 =
-  stesso recipe, più partite" è la mossa per inerzia che questo piano sconsiglia.
-- **Debolezza metodologica da verificare.** Dalla v3 in poi il recipe è congelato (MLP `310→128→40`, encoder v3,
-  opponent-mix `{predecessore 0.4 / h2 0.3 / h1 0.2 / random 0.1}`, warm-start dal predecessore immediato che è
-  anche l'unico opponent appreso). Questo ottimizza per "battere il predecessore": **se** i matchup risultano non
-  transitivi nel round-robin (A>B, B>C ma C≈A), c'è rischio di **ciclare** anziché crescere in forza assoluta. Il
-  segnale che lo suggerisce è che le vittorie H2H sono marginali e ambigue — es. v3 vs v2: big standard `+0.00814`
-  (wins `48433` vs `48683`, draws `2884` → in conteggio vittorie v3 *perde di poco*), big holdout `+0.18258`
-  (wins `48741` vs `48339`). La decision-quality è ormai satura (overkill `0.0%`, waste `0.07%`): gli errori
-  "facili" sono già risolti, i margini residui vengono dalla robustezza, non dalla scala.
+- **Scaling policy-only quasi saturo.** v6 ha speso 5× le partite (5M vs 1M) per arrivare a `+0.46` punti medi su v5
+  a big. Il vantaggio esiste, ma è piccolo rispetto al costo.
+- **Ipotesi anti-ciclo non confermata.** Aggiunto `scripts/evaluate_round_robin.py` e valutata la famiglia
+  `{best_a2c_v2, v3, v4, v5, v6, heuristic_v1}`. Il round-robin mostra una famiglia monotona/transitiva: v6 resta
+  primo, v5 secondo, nessun ciclo A>B, B>C, C>A confidente.
+- **CI/gate implementati.** Il round-robin riporta CI Wilson sullo score rate, CI analitica sull'`avg_diff` quando è
+  disponibile la varianza per-partita, e il detector dei cicli considera un arco A>B solo se la CI è interamente oltre
+  `0.5`. Nota di robustezza: con `--suite both`, in futuro aggregare per coppia prima di cercare cicli eviterebbe
+  archi contraddittori se standard e holdout divergessero.
+- **v6 > v5 è piccolo ma credibile a big.** Follow-up v5-v6 standard+holdout, `100k` partite per suite: score v6
+  aggregato `0.5080` (CI95 `0.5058..0.5102`), avg diff `+0.46` (CI95 `+0.34..+0.58`).
 
-Ipotesi misurabile: addestrare v7 contro una **popolazione** dei best storici encoder v3 `{v3, v4, v5, v6}` +
-euristiche (invece del solo predecessore) produce una policy con **Elo round-robin** più alto e **matchup peggiore
-migliore**, non solo un `+0.x` contro v6. (`best_a2c` v2 legacy è encoder v2/feature_dim 288: resta fuori dalla
-popolazione di training ma va incluso almeno in **valutazione** round-robin come ancoraggio storico, dato che a
-inference ciascun modello usa il proprio encoder.)
+Conclusione: non fare `best_a2c_v7` come "stesso recipe, più partite" e non trattare più la population league come
+ipotesi primaria. La motivazione specifica anti-ciclo è venuta meno; resta solo un possibile test di robustezza.
 
-Passi:
+Ipotesi primaria misurabile: una **ricerca determinizzata a inference** (PIMC/ISMCTS leggero) con v6 come policy o
+valutatore alle foglie, attivata quando lo spazio delle carte ignote è piccolo, batte v6 puro in head-to-head con un
+vantaggio statisticamente distinguibile e un costo runtime accettabile per la webapp.
 
-- **Pre-validazione economica (prima di addestrare):** round-robin Elo tra i `.npz` esistenti `{v3, v4, v5, v6}` +
-  `best_a2c` (v2 legacy, ancoraggio) + `heuristic_v1`, per misurare *quanto* è non transitiva la famiglia attuale.
-  Se l'ordine non è coerentemente monotòno (A>B, B>C ma C≈A), l'ipotesi è confermata e vale addestrare.
-- **Screening league a popolazione (~200k partite)** con opponent-mix multi-modello, es.
-  `{v6:0.3, v5:0.15, v4:0.1, v3:0.05, heuristic_v2:0.2, heuristic_v1:0.1, random:0.1}`, warm-start da v6.
-- Solo se lo screening è positivo, run lungo (1M+) e valutazione completa.
+Passi consigliati:
 
-Costo implementativo da conoscere: il fast-rollout numba accetta oggi **un solo tipo di opponent modello per batch**
-(`scripts/train_a2c.py:1010`), e `evaluate_matrix.py` è single-model. Serve plumbing contenuto per campionare tra
-più `.npz` come opponent e per il round-robin. Cambiamento ben circoscritto, da fare con test fast/numba verdi
-prima/dopo.
+- Prototipo offline PIMC/determinizzazione 2-player:
+  - generare determinizzazioni compatibili con informazione pubblica + mano del player;
+  - usare v6 per scegliere/valutare rollout o foglie;
+  - riusare il solver endgame esatto (`ai/endgame/solver.py`) quando il mazzo è vuoto;
+  - attivare la search solo nel finale o semi-finale (es. ultime ~6–10 carte ignote), con budget fisso.
+- Valutazione head-to-head PIMC(v6) vs v6:
+  - standard + holdout;
+  - CI su score e `avg_diff`;
+  - budget runtime misurato, perché il collo di bottiglia non è più training ma latenza in app.
+- Solo se PIMC(v6) batte v6 con CI positiva e latenza accettabile, decidere se integrarlo come nuovo agente UI o usarlo
+  per generare teacher/target più forti.
 
-Criteri di promozione (rivisti per l'ipotesi popolazione):
+Screening population league declassato a opzionale:
 
-- **Elo round-robin** vs `{v3..v6}` + `heuristic_v1` superiore a v6 (criterio primario, non solo H2H vs v6);
-- **matchup peggiore** della popolazione non regredisce (no modello "rock" che batte v6 ma perde contro v4);
+- Si può ancora fare uno screening economico (~200k partite) come test di robustezza, non come direzione principale.
+- Opponent-mix indicativo: `{v6:0.3, v5:0.15, v4:0.1, v3:0.05, heuristic_v2:0.2, heuristic_v1:0.1, random:0.1}`,
+  warm-start da v6.
+- Kill criterion: fermarsi se non migliora l'Elo round-robin vs `{v3..v6}` + `heuristic_v1` con CI positiva, o se il
+  matchup peggiore regredisce. Niente run 1M+ senza segnale nello screening.
+- Costo implementativo: il fast-rollout numba accetta oggi **un solo tipo di opponent modello per batch**
+  (`scripts/train_a2c.py:1010`). Il plumbing round-robin è stato aggiunto; resta da implementare il campionamento
+  multi-`.npz` nel training prima di poter fare davvero fictitious self-play.
+
+Criteri generali di promozione:
+
+- vantaggio riportato con **intervallo di confidenza** coerente con la metrica (Wilson/analitico quando basta,
+  bootstrap se servono risultati per-partita);
+- niente promozione se il CI tocca lo zero/0.5 o se il delta è sotto una soglia minima predefinita;
 - holdout vs `heuristic_v1` non peggiore;
 - `trump_waste_rate` e `trump_overkill_rate` non peggiorano materialmente;
-- **significatività statistica obbligatoria**: ogni vantaggio (H2H ed Elo) riportato con **intervallo di confidenza
-  bootstrap** (ricampionamento sulle partite); niente promozione se il CI tocca lo zero o se il delta è sotto una
-  soglia minima predefinita (es. `avg_diff` ≥ una frazione del rumore osservato a parità di modello). Il vantaggio
-  deve essere distinguibile dal rumore, non solo positivo in media.
-
-Aggiornare `docs/reports/model_progress.xlsx` solo per candidati significativi.
-
-#### Track parallelo a ceiling più alto: search a inference (PIMC/determinizzazione)
-
-Non è "training di v7" ma probabilmente il guadagno maggiore a lungo termine. Ipotesi: gli errori residui sono linee
-tattiche di metà/fine partita che una policy *memoryless* non vede. Una **ricerca determinizzata** (Perfect-Information
-Monte Carlo / ISMCTS) con v6 come valutatore alle foglie, attivata quando lo spazio delle carte ignote è piccolo
-(ultime ~6–10 carte), batte v6 in head-to-head. Riusa il solver endgame esatto già presente
-(`ai/endgame/solver.py`, oggi solo a mazzo vuoto) come caso terminale. Costo: nuovo modulo (determinizer + PIMC) +
-costo runtime (rilevante per la webapp). Cantiere separato dal "fai partire v7"; valutare dopo o in parallelo allo
-screening league.
+- aggiornare `docs/reports/model_progress.xlsx` solo per candidati significativi.
 
 ### 3. PPO/GAE Solo Dopo Un Blocco Reale Di A2C
 
 Priorità bassa per ora.
 
-- Valutare PPO/GAE solo se A2C league da v6 non produce miglioramenti ripetibili.
+- Valutare PPO/GAE solo se né il search PIMC né un eventuale screening league producono miglioramenti ripetibili.
 - Tenere l'esperimento piccolo e isolato, con test fast/numba verdi prima e dopo.
 - Non introdurre DQN per ora: action mask, parziale osservabilità e self-play rendono più coerente continuare con policy-gradient.
 

@@ -7,7 +7,7 @@ array NumPy, i wrapper Python restituiscono oggetti leggibili per training/eval.
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import numpy as np
 
@@ -26,6 +26,7 @@ class NumbaMLPRolloutSummary:
     draws: int
     sum_policy: int
     sum_opponent: int
+    sum_sq_point_diff_policy_minus_opponent: float | None = field(default=None, compare=False)
 
     def to_match_stats(self) -> MatchStats:
         """Converte il summary nel DTO statistico standard."""
@@ -62,6 +63,7 @@ class NumbaMLPRolloutSummary:
             avg_point_diff_agent_a_minus_agent_b=(
                 (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
             ),
+            sum_sq_point_diff_agent_a_minus_agent_b=self.sum_sq_point_diff_policy_minus_opponent,
         )
 
 
@@ -84,6 +86,7 @@ class NumbaDecisionQualitySummary:
     num_trump_overkill: int
     num_second_hand_trump_wins_low_lead_points: int
     num_trump_overkill_low_lead_points: int
+    sum_sq_point_diff_policy_minus_opponent: float | None = field(default=None, compare=False)
 
     def to_seat_fair_stats(self) -> SeatFairStats:
         """Converte match aggregato nel DTO seat-fair standard."""
@@ -99,6 +102,7 @@ class NumbaDecisionQualitySummary:
             avg_point_diff_agent_a_minus_agent_b=(
                 (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
             ),
+            sum_sq_point_diff_agent_a_minus_agent_b=self.sum_sq_point_diff_policy_minus_opponent,
         )
 
 

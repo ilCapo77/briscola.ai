@@ -67,6 +67,22 @@ class SeatFairStats:
     avg_points_agent_a: float
     avg_points_agent_b: float
     avg_point_diff_agent_a_minus_agent_b: float
+    sum_sq_point_diff_agent_a_minus_agent_b: float | None = None
+
+    @property
+    def sample_std_point_diff_agent_a_minus_agent_b(self) -> float | None:
+        """
+        Deviazione standard campionaria del diff punti per partita, se disponibile.
+
+        Il campo e' opzionale per mantenere compatibili i path che oggi producono solo aggregati.
+        Quando disponibile, abilita una CI analitica sul margine medio A-B.
+        """
+        if self.sum_sq_point_diff_agent_a_minus_agent_b is None or self.num_games <= 1:
+            return None
+        sum_diff = self.avg_point_diff_agent_a_minus_agent_b * self.num_games
+        numerator = self.sum_sq_point_diff_agent_a_minus_agent_b - (sum_diff * sum_diff / self.num_games)
+        variance = max(0.0, numerator / (self.num_games - 1))
+        return variance**0.5
 
 
 def _winner_index_2p(state: GameState) -> Optional[int]:
@@ -208,6 +224,7 @@ def evaluate_seat_fair_match_2p(
     sum_a = 0
     sum_b = 0
     sum_diff = 0
+    sum_sq_diff = 0
 
     for i in range(num_pairs):
         game_seed = seeds[i]
@@ -217,7 +234,9 @@ def evaluate_seat_fair_match_2p(
         p0, p1 = s1.players[0].points, s1.players[1].points
         sum_a += p0
         sum_b += p1
-        sum_diff += p0 - p1
+        diff = p0 - p1
+        sum_diff += diff
+        sum_sq_diff += diff * diff
         w = _winner_index_2p(s1)
         if w is None:
             draws += 1
@@ -232,7 +251,9 @@ def evaluate_seat_fair_match_2p(
         # Qui A è player 1.
         sum_a += p1
         sum_b += p0
-        sum_diff += p1 - p0
+        diff = p1 - p0
+        sum_diff += diff
+        sum_sq_diff += diff * diff
         w = _winner_index_2p(s2)
         if w is None:
             draws += 1
@@ -252,4 +273,5 @@ def evaluate_seat_fair_match_2p(
         avg_points_agent_a=sum_a / num_games if num_games else 0.0,
         avg_points_agent_b=sum_b / num_games if num_games else 0.0,
         avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
+        sum_sq_point_diff_agent_a_minus_agent_b=float(sum_sq_diff),
     )

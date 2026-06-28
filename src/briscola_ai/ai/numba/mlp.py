@@ -283,6 +283,8 @@ def evaluate_mlp_policy_numba_2p(
         draws = int(np.count_nonzero(winners < 0))
         sum_policy = int(np.sum(policy_points))
         sum_opponent = int(np.sum(opponent_points))
+        point_diffs = policy_points.astype(np.int64) - opponent_points.astype(np.int64)
+        sum_sq_diff: float | None = float(np.sum(point_diffs * point_diffs))
     else:
         wins_policy, wins_opponent, draws, sum_policy, sum_opponent = _evaluate_mlp_policy_numba(
             w1_arr,
@@ -301,6 +303,7 @@ def evaluate_mlp_policy_numba_2p(
             bool(deterministic),
             bool(policy_overkill_guard),
         )
+        sum_sq_diff = None
     return NumbaMLPRolloutSummary(
         num_games=num_games,
         policy_name=policy_name,
@@ -310,6 +313,7 @@ def evaluate_mlp_policy_numba_2p(
         draws=int(draws),
         sum_policy=int(sum_policy),
         sum_opponent=int(sum_opponent),
+        sum_sq_point_diff_policy_minus_opponent=sum_sq_diff,
     )
 
 

@@ -649,7 +649,7 @@ def _evaluate_policy_match_numba(
 @njit(cache=True)
 def _evaluate_policy_seat_fair_numba(
     agent_a_code: int, agent_b_code: int, num_games: int, seed: int
-) -> tuple[int, int, int, int, int, int]:
+) -> tuple[int, int, int, int, int, int, int]:
     """Valuta due policy Numba in modalità seat-fair e aggrega i risultati."""
     wins_a = 0
     wins_b = 0
@@ -657,6 +657,7 @@ def _evaluate_policy_seat_fair_numba(
     sum_a = 0
     sum_b = 0
     sum_diff = 0
+    sum_sq_diff = 0
     num_pairs = num_games // 2
 
     for pair_index in range(num_pairs):
@@ -665,7 +666,9 @@ def _evaluate_policy_seat_fair_numba(
         p0, p1, winner = _play_policy_game_numba(agent_a_code, agent_b_code, game_seed)
         sum_a += p0
         sum_b += p1
-        sum_diff += p0 - p1
+        diff = p0 - p1
+        sum_diff += diff
+        sum_sq_diff += diff * diff
         if winner == 0:
             wins_a += 1
         elif winner == 1:
@@ -676,7 +679,9 @@ def _evaluate_policy_seat_fair_numba(
         p0, p1, winner = _play_policy_game_numba(agent_b_code, agent_a_code, game_seed)
         sum_a += p1
         sum_b += p0
-        sum_diff += p1 - p0
+        diff = p1 - p0
+        sum_diff += diff
+        sum_sq_diff += diff * diff
         if winner == 0:
             wins_b += 1
         elif winner == 1:
@@ -684,7 +689,7 @@ def _evaluate_policy_seat_fair_numba(
         else:
             draws += 1
 
-    return wins_a, wins_b, draws, sum_a, sum_b, sum_diff
+    return wins_a, wins_b, draws, sum_a, sum_b, sum_diff, sum_sq_diff
 
 
 def warm_up_numba() -> None:
@@ -760,7 +765,7 @@ def evaluate_numba_seat_fair_match_2p(
         raise ValueError("num_games deve essere >= 0")
     if num_games % 2 != 0:
         raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari.")
-    wins_a, wins_b, draws, sum_a, sum_b, sum_diff = _evaluate_policy_seat_fair_numba(
+    wins_a, wins_b, draws, sum_a, sum_b, sum_diff, sum_sq_diff = _evaluate_policy_seat_fair_numba(
         numba_agent_code(agent_a_name),
         numba_agent_code(agent_b_name),
         num_games,
@@ -776,4 +781,5 @@ def evaluate_numba_seat_fair_match_2p(
         avg_points_agent_a=sum_a / num_games if num_games else 0.0,
         avg_points_agent_b=sum_b / num_games if num_games else 0.0,
         avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
+        sum_sq_point_diff_agent_a_minus_agent_b=float(sum_sq_diff),
     )

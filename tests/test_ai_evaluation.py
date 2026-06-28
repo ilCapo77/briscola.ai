@@ -22,6 +22,7 @@ from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, Heuristic
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 from briscola_ai.ai.fast.evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
+from briscola_ai.ai.numba.core import evaluate_numba_seat_fair_match_2p, play_policy_game_numba
 
 
 def test_evaluate_match_is_deterministic_for_fixed_seed() -> None:
@@ -129,6 +130,80 @@ def test_fast_seat_fair_matches_domain_for_supported_agents(agent0_name, domain_
     fast_stats = evaluate_fast_seat_fair_match_2p(agent0_name, "random", num_games=100, seed=456)
 
     assert fast_stats == domain_stats
+
+
+def test_seat_fair_sum_sq_diff_matches_domain_and_fast() -> None:
+    """Il nuovo campo varianza deve restare equivalente tra domain e fast."""
+    num_games = 100
+    seed = 456
+    game_seeds = list(range(seed, seed + num_games // 2))
+
+    domain_stats = evaluate_seat_fair_match_2p(
+        HeuristicAgentV2(),
+        HeuristicAgentV1(),
+        num_games=num_games,
+        seed=seed,
+        game_seeds=game_seeds,
+    )
+    fast_stats = evaluate_fast_seat_fair_match_2p(
+        "heuristic_v2",
+        "heuristic_v1",
+        num_games=num_games,
+        seed=seed,
+        game_seeds=game_seeds,
+    )
+
+    assert fast_stats == domain_stats
+    assert domain_stats.sum_sq_point_diff_agent_a_minus_agent_b is not None
+    assert domain_stats.sample_std_point_diff_agent_a_minus_agent_b is not None
+
+
+def test_numba_seat_fair_sum_sq_diff_matches_manual_core_aggregation() -> None:
+    """Il campo varianza Numba deve coincidere con l'aggregazione manuale dello stesso core."""
+    num_games = 100
+    seed = 456
+    wins_a = wins_b = draws = 0
+    sum_a = sum_b = sum_diff = sum_sq_diff = 0
+
+    for pair_index in range(num_games // 2):
+        game_seed = seed + pair_index
+
+        p0, p1, winner = play_policy_game_numba("heuristic_v2", "heuristic_v1", seed=game_seed)
+        sum_a += p0
+        sum_b += p1
+        diff = p0 - p1
+        sum_diff += diff
+        sum_sq_diff += diff * diff
+        if winner == 0:
+            wins_a += 1
+        elif winner == 1:
+            wins_b += 1
+        else:
+            draws += 1
+
+        p0, p1, winner = play_policy_game_numba("heuristic_v1", "heuristic_v2", seed=game_seed)
+        sum_a += p1
+        sum_b += p0
+        diff = p1 - p0
+        sum_diff += diff
+        sum_sq_diff += diff * diff
+        if winner == 0:
+            wins_b += 1
+        elif winner == 1:
+            wins_a += 1
+        else:
+            draws += 1
+
+    stats = evaluate_numba_seat_fair_match_2p("heuristic_v2", "heuristic_v1", num_games=num_games, seed=seed)
+
+    assert stats.wins_agent_a == wins_a
+    assert stats.wins_agent_b == wins_b
+    assert stats.draws == draws
+    assert stats.avg_points_agent_a == pytest.approx(sum_a / num_games)
+    assert stats.avg_points_agent_b == pytest.approx(sum_b / num_games)
+    assert stats.avg_point_diff_agent_a_minus_agent_b == pytest.approx(sum_diff / num_games)
+    assert stats.sum_sq_point_diff_agent_a_minus_agent_b == float(sum_sq_diff)
+    assert stats.sample_std_point_diff_agent_a_minus_agent_b is not None
 
 
 def test_fast_evaluation_rejects_unsupported_agents() -> None:

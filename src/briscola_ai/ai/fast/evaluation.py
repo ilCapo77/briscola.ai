@@ -416,6 +416,7 @@ def evaluate_fast_seat_fair_match_2p(
     sum_a = 0
     sum_b = 0
     sum_diff = 0
+    sum_sq_diff = 0
 
     for i in range(num_pairs):
         game_seed = seeds[i]
@@ -424,7 +425,9 @@ def evaluate_fast_seat_fair_match_2p(
         p0, p1 = s1.points[0], s1.points[1]
         sum_a += p0
         sum_b += p1
-        sum_diff += p0 - p1
+        diff = p0 - p1
+        sum_diff += diff
+        sum_sq_diff += diff * diff
         w = _winner_index_fast_2p(s1)
         if w is None:
             draws += 1
@@ -437,7 +440,9 @@ def evaluate_fast_seat_fair_match_2p(
         p0, p1 = s2.points[0], s2.points[1]
         sum_a += p1
         sum_b += p0
-        sum_diff += p1 - p0
+        diff = p1 - p0
+        sum_diff += diff
+        sum_sq_diff += diff * diff
         w = _winner_index_fast_2p(s2)
         if w is None:
             draws += 1
@@ -456,4 +461,5 @@ def evaluate_fast_seat_fair_match_2p(
         avg_points_agent_a=sum_a / num_games if num_games else 0.0,
         avg_points_agent_b=sum_b / num_games if num_games else 0.0,
         avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
+        sum_sq_point_diff_agent_a_minus_agent_b=float(sum_sq_diff),
     )
