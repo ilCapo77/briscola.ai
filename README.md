@@ -269,6 +269,10 @@ Strumenti aggiuntivi:
 - `scripts/evaluate_decision_quality.py` – metriche di **stile**, non solo forza:
   - `trump_waste_rate`: gioca briscola pur avendo una risposta vincente **non‑briscola**;
   - `trump_overkill_rate`: quando vince con briscola, usa una briscola più costosa del necessario.
+- `scripts/evaluate_pimc.py` – prototipo offline PIMC/determinizzazione sopra un modello `.npz`: confronta search vs
+  modello puro, control solver (`v6 + solver endgame`) o un'altra config PIMC, con CI su score/avg diff e metriche di
+  costo per mossa di search. Serve a valutare sia un eventuale agente live sia l'uso PIMC come teacher per distillare
+  un futuro `best_a2c_v7`.
 - **Guard anti‑overkill** (`inference_overkill_guard`): post‑processing che, da secondo di mano, gioca la briscola vincente **minima**. Attivabile dai metadati del modello (i trainer lo salvano con `--inference-overkill-guard`) o, per A/B, con `BRISCOLA_BC_OVERKILL_GUARD=1`. È deterministico: verifica sempre l’impatto con le metriche.
 
 ### Performance (fast path Python/Numba)

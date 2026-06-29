@@ -200,17 +200,43 @@ vantaggio statisticamente distinguibile e un costo runtime accettabile per la we
 
 Passi consigliati:
 
-- Prototipo offline PIMC/determinizzazione 2-player:
+- Prototipo offline PIMC/determinizzazione 2-player: **avviato**.
   - generare determinizzazioni compatibili con informazione pubblica + mano del player;
   - usare v6 per scegliere/valutare rollout o foglie;
   - riusare il solver endgame esatto (`ai/endgame/solver.py`) quando il mazzo è vuoto;
   - attivare la search solo nel finale o semi-finale (es. ultime ~6–10 carte ignote), con budget fisso.
-- Valutazione head-to-head PIMC(v6) vs v6:
-  - standard + holdout;
-  - CI su score e `avg_diff`;
-  - budget runtime misurato, perché il collo di bottiglia non è più training ma latenza in app.
-- Solo se PIMC(v6) batte v6 con CI positiva e latenza accettabile, decidere se integrarlo come nuovo agente UI o usarlo
-  per generare teacher/target più forti.
+- Implementazione iniziale: `PIMCAgent` in `ai/agents/pimc.py` + `scripts/evaluate_pimc.py`. Smoke run locale
+  `PIMC(v6)` vs v6 (`20` partite, `4` determinizzazioni, max unknown `8`) completata: score `0.5250`, avg diff
+  `+5.70`, CI95 score `0.3205..0.7215`, CI95 avg diff `-4.60..+16.00`. Non è evidenza statistica, solo verifica
+  end-to-end. La strumentazione runtime misura le sole mosse in cui PIMC cerca davvero: in questa smoke `50` search
+  move, `~0.020s/search_move` (`~0.05s/game` medio, diluito dal fallback).
+- Sweep preliminare con seed fisso `777`, `1000` partite/config:
+  - control `max_unknown=0`: score `0.5185` (CI95 `0.4875..0.5493`), avg diff `+1.59` (CI95 `-0.06..+3.23`),
+    `search=0`, `coerced_moves=0`. Nota: questo non è un null test puro, perché `PIMCAgent` usa comunque il solver
+    esatto a mazzo vuoto prima del gate `max_unknown`; misura quindi `v6 + solver endgame` contro v6 puro. Il `+1.59`
+    va letto come beneficio preliminare del solver endgame, non come bias dell'harness;
+  - `8×8`: avg diff `+3.89` (CI95 `+2.24..+5.54`), `0.039s/search_move`;
+  - `16×8`: avg diff `+4.71` (CI95 `+3.08..+6.34`), `0.079s/search_move`;
+  - `16×10`: avg diff `+4.99` (CI95 `+3.37..+6.61`), `0.083s/search_move` → miglior segnale forza finora;
+  - `16×12`: avg diff `+4.19` (CI95 `+2.56..+5.83`), `0.118s/search_move` → più costoso e meno forte;
+  - blocco `32×*` sospeso dopo costo eccessivo osservato su `32×8` (interrotto senza JSON): non Pareto per una prima
+    decisione UI/offline. Nessuna config completata ha avuto `coerced_moves > 0`.
+- Esperimento decisivo completato: `PIMC(v6, 16×10)` contro control solver (`v6 + solver endgame`, `max_unknown=0`),
+  `2000` partite, seed `777`: score `0.5635` (CI95 `0.5417..0.5851`), avg diff `+3.59` (CI95 `+2.48..+4.70`),
+  `0.0805s/search_move`, `coerced_moves=0` su entrambi i lati. La determinizzazione aggiunge valore reale anche al
+  netto del solver endgame. Il costo percepito lato utente è probabilmente basso; il vincolo reale è CPU server sotto
+  concorrenza.
+- Pareto diretto completato: `PIMC(v6, 16×8)` contro `PIMC(v6, 16×10)`, `2000` partite, seed `777`: score `0.5130`
+  (CI95 `0.4911..0.5349`), avg diff `+0.25` (CI95 `-0.85..+1.35`) a favore di `16×8`, quindi nessuna evidenza che
+  `16×10` sia più forte. `16×8` fa `5013` search move contro `7000` del `16×10` nella stessa run: candidato Pareto
+  per un eventuale agente live.
+- Caveat: questi vantaggi sono misurati contro v6. In UI contro umani il modello avversario usato nei rollout è
+  mis-specificato; non spacciare questi numeri come forza attesa contro giocatori umani.
+- Asse primario successivo: usare PIMC come **teacher offline** e distillare un `best_a2c_v7` veloce:
+  - generare posizioni da self-play/replay v6, soprattutto finale e semi-finale;
+  - etichettare le mosse con `PIMC(v6, 16×8)` e solver endgame quando applicabile;
+  - allenare BC/policy distillation warm-start da v6, mantenendo guard inference e feature encoder v3;
+  - promuovere solo se v7 batte v6 e control solver con CI positiva, senza regressioni su holdout/decision-quality.
 
 Screening population league declassato a opzionale:
 
