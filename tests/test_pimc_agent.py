@@ -9,8 +9,11 @@ e scelta valida quando la search è attiva.
 from __future__ import annotations
 
 import random
+from pathlib import Path
 
-from briscola_ai.ai.agents import HeuristicAgentV1, HeuristicAgentV2
+import numpy as np
+
+from briscola_ai.ai.agents import HeuristicAgentV1, HeuristicAgentV2, build_agent, list_agent_specs
 from briscola_ai.ai.agents.hybrid_endgame import reconstruct_endgame_state
 from briscola_ai.ai.agents.pimc import (
     PIMCAgent,
@@ -19,7 +22,9 @@ from briscola_ai.ai.agents.pimc import (
     rollout_to_terminal,
     unknown_live_card_count,
 )
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.endgame.solver import solve_endgame
+from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.domain.card_id import card_to_id
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
@@ -33,6 +38,35 @@ class _InvalidIndexAgent:
 
     def choose_card_index(self, observation, *, rng: random.Random) -> int:
         return 999
+
+
+def _write_linear_bc_model(path: Path, *, bias_action: int = 0) -> None:
+    """Salva un modello lineare minimale per testare varianti PIMC con modello selezionato."""
+    d = int(FEATURE_DIM_2P_V1)
+    w = np.zeros((d, 40), dtype=np.float32)
+    b = np.zeros((40,), dtype=np.float32)
+    b[bias_action] = 1.0
+    np.savez(path, w=w, b=b, metadata_json=f'{{"format":"linear_softmax_bc_v1","feature_dim":{d}}}')
+
+
+def test_bc_model_pimc_16x8_variant_uses_selected_model(tmp_path: Path) -> None:
+    """La variante UI PIMC usa il `.npz` selezionato e blocca la config Pareto 16×8."""
+    model_path = tmp_path / "selected_model.npz"
+    _write_linear_bc_model(model_path)
+
+    assert "bc_model_pimc_16x8" in {spec.name for spec in list_agent_specs()}
+
+    agent = build_agent("bc_model_pimc_16x8", model_path=model_path)
+
+    assert isinstance(agent, PIMCAgent)
+    assert agent.name == "bc_model_pimc_16x8"
+    assert agent.num_determinizations == 16
+    assert agent.max_unknown_cards == 8
+    assert agent.use_endgame_solver is True
+    assert isinstance(agent.fallback, BCModelAgent)
+    assert isinstance(agent.rollout_agent, BCModelAgent)
+    assert agent.fallback.model_path == model_path
+    assert agent.rollout_agent.model_path == model_path
 
 
 def _play_with_heuristics_until(*, seed: int, max_deck_size: int) -> GameState:

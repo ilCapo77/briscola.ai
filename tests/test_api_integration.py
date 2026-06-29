@@ -199,12 +199,14 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert "heuristic_v2" in by_name
     assert "bc_model" in by_name
     assert "bc_model_hybrid_endgame" in by_name
+    assert "bc_model_pimc_16x8" in by_name
 
     assert isinstance(by_name["heuristic_v1"].get("description_it"), str)
     assert by_name["heuristic_v1"]["description_it"]
     assert isinstance(by_name["heuristic_v2"].get("description_it"), str)
     assert by_name["heuristic_v2"]["description_it"]
     assert by_name["bc_model_hybrid_endgame"]["requires_model_selection"] is True
+    assert by_name["bc_model_pimc_16x8"]["requires_model_selection"] is True
 
 
 def test_list_ai_agents_reports_availability(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -227,11 +229,14 @@ def test_list_ai_agents_reports_availability(monkeypatch: pytest.MonkeyPatch, tm
     assert by_name["bc_model"]["available"] is False
     assert by_name["bc_model_hybrid_endgame"]["available"] is False
     assert by_name["bc_model_hybrid_endgame"]["requires_model_selection"] is True
+    assert by_name["bc_model_pimc_16x8"]["available"] is False
+    assert by_name["bc_model_pimc_16x8"]["requires_model_selection"] is True
 
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "best_a2c_v6.npz", feature_dim=310)
     by_name_with_model = {a["name"]: a for a in client.get("/ai/agents").json()["agents"]}
     assert by_name_with_model["bc_model"]["available"] is True
     assert by_name_with_model["bc_model_hybrid_endgame"]["available"] is True
+    assert by_name_with_model["bc_model_pimc_16x8"]["available"] is True
 
 
 def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -414,6 +419,67 @@ def test_create_game_supports_bc_model_hybrid_endgame_with_ai_model_id(
             "num_players": 2,
             "player_names": ["A", "B"],
             "ai_agent": "bc_model_hybrid_endgame",
+            "ai_model_id": "bad_model.npz",
+        },
+    )
+    assert bad.status_code == 400
+    assert "feature_dim" in bad.json()["detail"]
+
+
+def test_create_game_supports_bc_model_pimc_16x8_with_ai_model_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`bc_model_pimc_16x8` deve usare lo stesso path sicuro degli altri agenti `.npz`."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "best_a2c_v6.npz", feature_dim=310)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "bad_model.npz", feature_dim=10)
+
+    client = TestClient(server.app)
+
+    missing = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["A", "B"], "ai_agent": "bc_model_pimc_16x8"},
+    )
+    assert missing.status_code == 400
+    assert "ai_model_id" in missing.json()["detail"]
+
+    traversal = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_pimc_16x8",
+            "ai_model_id": "../best_a2c_v6.npz",
+        },
+    )
+    assert traversal.status_code == 400
+    assert "path traversal" in traversal.json()["detail"].lower()
+
+    ok = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_pimc_16x8",
+            "ai_model_id": "best_a2c_v6.npz",
+        },
+    )
+    assert ok.status_code == 200
+    payload = ok.json()
+    assert payload["ai_agent"] == "bc_model_pimc_16x8"
+    assert payload["ai_model_id"] == "best_a2c_v6.npz"
+    session = _get_session(payload["game_id"])
+    assert session is not None
+    assert session.ai_seats[1].agent_name == "bc_model_pimc_16x8"
+    assert session.ai_seats[1].model_id == "best_a2c_v6.npz"
+
+    bad = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_pimc_16x8",
             "ai_model_id": "bad_model.npz",
         },
     )

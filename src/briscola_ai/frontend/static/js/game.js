@@ -455,7 +455,10 @@ document.addEventListener('DOMContentLoaded', () => {
             const aiModelId = config.aiModelId || null;
             const aiModelCompatible = config.aiModelCompatible === true;
             const aiModelCompatibilityReasonIt = config.aiModelCompatibilityReasonIt || null;
-            const agentRequiresModel = aiAgent === 'bc_model' || aiAgent === 'bc_model_hybrid_endgame';
+            const agentRequiresModel =
+                config.aiAgentRequiresModelSelection === true ||
+                aiAgent === 'bc_model' ||
+                aiAgent === 'bc_model_hybrid_endgame';
 
             // Il nome del player entra negli snapshot e nei messaggi di partita
             // (es. "X vince!"): teniamolo corto anche quando il modello selezionato

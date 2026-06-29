@@ -202,6 +202,7 @@ L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in ver
 - `hybrid_endgame_best_a2c` – modello `best_a2c` nel mid‑game + solver nel finale.
 - `bc_model` – modello locale `.npz` (BC/PG/A2C), encoder dedotto dai metadati.
 - `bc_model_hybrid_endgame` – modello locale `.npz` scelto dalla UI + **solver esatto** nel finale.
+- `bc_model_pimc_16x8` – modello locale `.npz` scelto dalla UI + PIMC 16×8 nel semi‑finale + solver esatto nel finale.
 
 Il **solver endgame** (`ai/endgame/solver.py`) calcola la mossa ottima esatta con minimax a mazzo vuoto; l’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
 
@@ -346,7 +347,7 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 Il modello consigliato è **`data/models/best_a2c_v6.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v5` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. In UI, quando disponibile, il default è `bc_model_hybrid_endgame`: usa il modello consigliato durante la partita e il solver esatto a mazzo vuoto. `best_a2c_v5.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v6 è in `PLAN.md`.
 
-Il codice `v0.13.0` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
+Il codice `v0.14.0` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Espone anche `bc_model_pimc_16x8` come avversario avanzato selezionabile. Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v6.npz

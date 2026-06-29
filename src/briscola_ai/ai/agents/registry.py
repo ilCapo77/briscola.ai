@@ -15,6 +15,7 @@ from ..models.bc_model import BCModelAgent
 from ..models.catalog import get_models_dir_from_env, resolve_model_path
 from .base import Agent, AgentSpec
 from .hybrid_endgame import HybridEndgameAgent
+from .pimc import PIMCAgent
 from .rule_based import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
 
 _AGENT_BUILDERS: dict[str, type[Agent]] = {
@@ -44,6 +45,16 @@ BC_MODEL_HYBRID_ENDGAME_SPEC = AgentSpec(
     ),
 )
 
+BC_MODEL_PIMC_16X8_SPEC = AgentSpec(
+    name="bc_model_pimc_16x8",
+    label="Modello locale + PIMC finale",
+    description_it=(
+        "Usa il modello `.npz` scelto dalla UI come fallback e policy di simulazione, il solver esatto a mazzo vuoto "
+        "e una search PIMC con 16 determinizzazioni quando restano al massimo 8 carte vive ignote. "
+        "È più forte ma più costoso lato CPU: usalo come avversario avanzato selezionabile."
+    ),
+)
+
 BEST_A2C_SPEC = AgentSpec(
     name="best_a2c",
     label="Best A2C (locale)",
@@ -55,7 +66,15 @@ BEST_A2C_SPEC = AgentSpec(
 )
 
 _BEST_A2C_DEFAULT_MODEL_ID = "best_a2c.npz"
-_SELECTED_MODEL_AGENT_NAMES = frozenset({BC_MODEL_SPEC.name, BC_MODEL_HYBRID_ENDGAME_SPEC.name})
+_PIMC_16X8_DETERMINIZATIONS = 16
+_PIMC_16X8_MAX_UNKNOWN_CARDS = 8
+_SELECTED_MODEL_AGENT_NAMES = frozenset(
+    {
+        BC_MODEL_SPEC.name,
+        BC_MODEL_HYBRID_ENDGAME_SPEC.name,
+        BC_MODEL_PIMC_16X8_SPEC.name,
+    }
+)
 
 HYBRID_ENDGAME_BEST_A2C_SPEC = AgentSpec(
     name="hybrid_endgame_best_a2c",
@@ -84,6 +103,7 @@ def list_agent_specs() -> list[AgentSpec]:
         HybridEndgameAgent.spec,
         HYBRID_ENDGAME_BEST_A2C_SPEC,
         BC_MODEL_HYBRID_ENDGAME_SPEC,
+        BC_MODEL_PIMC_16X8_SPEC,
         BC_MODEL_SPEC,
     ]
 
@@ -148,6 +168,19 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
         return HybridEndgameAgent(
             fallback=BCModelAgent.from_npz(model_path),
             name="bc_model_hybrid_endgame",
+        )
+
+    if name == "bc_model_pimc_16x8":
+        if model_path is None:
+            raise ValueError("Agente 'bc_model_pimc_16x8' richiede `model_path` (file .npz)")
+        model_agent = BCModelAgent.from_npz(model_path)
+        return PIMCAgent(
+            rollout_agent=model_agent,
+            fallback=model_agent,
+            num_determinizations=_PIMC_16X8_DETERMINIZATIONS,
+            max_unknown_cards=_PIMC_16X8_MAX_UNKNOWN_CARDS,
+            use_endgame_solver=True,
+            name="bc_model_pimc_16x8",
         )
 
     try:

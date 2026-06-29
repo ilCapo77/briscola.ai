@@ -270,6 +270,25 @@ MILESTONES: list[dict[str, Any]] = [
         ),
         "source": "src/briscola_ai/ai/agents/registry.py + PLAN.md",
     },
+    {
+        "order": 10,
+        "date": "2026-06-29",
+        "model_id": "best_a2c_v6",
+        "type": "runtime_option",
+        "decision": "Expose PIMC(v6, 16x8) as an advanced selectable UI opponent for v0.14.0.",
+        "why": (
+            "PIMC adds measurable value over v6 + solver, but costs CPU, so it should be testable by humans "
+            "without replacing the lower-risk default."
+        ),
+        "evidence": (
+            "PIMC(v6,16x10) beat control_solver(v6) at 2000 games; direct Pareto run found no evidence "
+            "that 16x10 was stronger than 16x8."
+        ),
+        "impact": (
+            "UI can select bc_model_pimc_16x8(best_a2c_v6); default remains bc_model_hybrid_endgame(best_a2c_v6)."
+        ),
+        "source": "src/briscola_ai/ai/agents/registry.py + scripts/evaluate_pimc.py + PLAN.md",
+    },
 ]
 
 

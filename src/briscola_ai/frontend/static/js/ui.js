@@ -356,13 +356,15 @@ const UI = (() => {
             const modelId = elements.aiModelSelect?.value || null;
             const modelMeta = modelId ? aiModelMetaById[modelId] : null;
             const playerName = _currentPlayerName();
+            const aiAgent = elements.aiAgentSelect?.value || 'random';
             _writeStoredPlayerName(playerName);
             _setGameStartupLoading(true);
             try {
                 await callbacks.onStartGame({
                     playerName,
-                    aiAgent: elements.aiAgentSelect?.value || 'random',
+                    aiAgent,
                     aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
+                    aiAgentRequiresModelSelection: _agentRequiresModelSelection(aiAgent),
                     aiModelId: modelId,
                     aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null,
                     aiModelCompatible: modelMeta?.is_compatible === true,
