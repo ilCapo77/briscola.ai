@@ -20,6 +20,7 @@ from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
 from briscola_ai.backend import server
+from briscola_ai.backend.event_log import EventLog, EventLogConfig
 from briscola_ai.backend.game_store import GameSession, InMemoryGameSessionStore
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.state import GameState, PlayerState
@@ -585,6 +586,83 @@ def test_play_action_rejects_ai_controlled_player(monkeypatch: pytest.MonkeyPatc
     )
     assert blocked.status_code == 400
     assert "controllato dall'IA" in blocked.json()["detail"]
+
+
+def test_dataset_mode_logs_ai_action_for_audit(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """In modalità dataset salviamo anche una mossa IA minimale e sanificata per audit PIMC."""
+
+    async def _no_auto_ai(*_args, **_kwargs) -> None:
+        return None
+
+    monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "dataset")
+    monkeypatch.setattr(server, "_maybe_ai_turn", _no_auto_ai)
+
+    db_path = tmp_path / "events.sqlite3"
+    log = EventLog(EventLogConfig(path=str(db_path)))
+    server.app.state.event_log = log
+    try:
+        client = TestClient(server.app)
+        create = client.post(
+            "/games",
+            json={
+                "num_players": 2,
+                "player_names": ["Nome Umano", "Nome IA"],
+                "ai_agent": "random",
+                "consent_to_data_collection": True,
+            },
+        )
+        assert create.status_code == 200
+        game_id = create.json()["game_id"]
+
+        obs = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+        action = client.post(
+            f"/games/{game_id}/actions",
+            json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},
+        )
+        assert action.status_code == 200
+
+        async def _run_one_ai_turn() -> None:
+            async with server.game_store.lock(game_id):
+                session = await server.game_store.get(game_id)
+                assert session is not None
+                await server._execute_ai_turn_locked(session, human_player_index=0)
+
+        asyncio.run(_run_one_ai_turn())
+    finally:
+        log.close()
+        server.app.state.event_log = None
+
+    import sqlite3
+
+    conn = sqlite3.connect(db_path)
+    try:
+        rows = conn.execute(
+            "SELECT event_type, payload_json FROM events WHERE game_id = ? ORDER BY id;",
+            (game_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    by_type = {event_type: json.loads(payload_json) for event_type, payload_json in rows}
+    assert "human_action" in by_type
+    assert "ai_action" in by_type
+    assert "ai_card_reveal" not in by_type  # dataset mode resta minimale: niente evento realtime nel DB.
+    assert "action_play_card" not in by_type
+
+    ai_payload = by_type["ai_action"]
+    assert ai_payload["is_ai"] is True
+    assert ai_payload["ai_agent"] == "random"
+    assert ai_payload["ai_model_id"] is None
+    assert isinstance(ai_payload["card_index"], int)
+    assert isinstance(ai_payload["observation"], dict)
+    assert isinstance(ai_payload["next_observation"], dict)
+    assert isinstance(ai_payload["result"], dict)
+    assert ai_payload["decision_trace"] is None
+    assert ai_payload["observation"]["players"][0]["name"] == "player_0"
+    assert ai_payload["observation"]["players"][1]["name"] == "player_1"
 
 
 def test_main_app_serves_ui_and_mounts_api() -> None:

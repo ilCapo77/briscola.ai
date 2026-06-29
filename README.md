@@ -212,7 +212,11 @@ Avviando `briscola-server` viene scritto un event log su `./data/briscola_events
 
 Due modalità di logging:
 - `debug` (default): completa, utile per troubleshooting;
-- `dataset`: pensata per raccogliere partite **umane** tenendo il DB piccolo — salva un evento `human_action` self‑contained (observation → action → reward/done → next_observation) + marker `game_finished`, **non** salva `player_names` (privacy), usa un `client_id` pseudonimo per split per‑giocatore, ed esige il **consenso** (checkbox UI; il backend rifiuta `POST /api/games` senza consenso).
+- `dataset`: pensata per raccogliere partite **umane** tenendo il DB piccolo — salva eventi self-contained
+  `human_action` e `ai_action` (observation → action → reward/done → next_observation) + marker `game_finished`,
+  **non** salva `player_names` (privacy), usa un `client_id` pseudonimo per split per‑giocatore, ed esige il
+  **consenso** (checkbox UI; il backend rifiuta `POST /api/games` senza consenso). `ai_action` include una traccia
+  minimale `decision_trace` per distinguere fallback/solver/search PIMC senza salvare payload realtime.
 
 Export in JSONL (schema v1, pensato per il 2‑player):
 
@@ -234,6 +238,14 @@ Report aggregato dell'event log (nessun payload/client_id stampato):
 ```bash
 python scripts/report_event_log.py --db ./data/briscola_events.sqlite3
 DATABASE_URL=... python scripts/report_event_log.py --json
+```
+
+Audit aggregato delle partite per versione/agente/modello, utile per capire se le partite PIMC sono nel DB e se il
+log contiene anche eventi IA auditabili:
+
+```bash
+DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.15.0 --show-games
+DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_16x8 --json
 ```
 
 **Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://briscolaai.fastapicloud.dev>.
@@ -347,7 +359,7 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 Il modello consigliato è **`data/models/best_a2c_v6.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v5` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. In UI, quando disponibile, il default è `bc_model_hybrid_endgame`: usa il modello consigliato durante la partita e il solver esatto a mazzo vuoto. `best_a2c_v5.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v6 è in `PLAN.md`.
 
-Il codice `v0.14.1` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Espone anche `bc_model_pimc_16x8` come avversario avanzato selezionabile. Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
+Il codice `v0.15.0` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Espone anche `bc_model_pimc_16x8` come avversario avanzato selezionabile e salva `ai_action` in modalità dataset per auditare le mosse IA/PIMC. Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v6.npz

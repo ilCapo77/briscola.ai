@@ -149,9 +149,9 @@ def _safe_log_event(
     if mode == "off":
         return
     if mode == "dataset":
-        # In modalità dataset riduciamo il DB tenendo solo gli eventi utili al dataset umano
-        # (escludiamo lifecycle WS e gli eventi di gioco non necessari).
-        allowed = {"game_created", "human_action", "game_finished", "game_aborted"}
+        # In modalità dataset riduciamo il DB tenendo solo eventi utili al dataset/debug privacy-safe:
+        # mosse umane self-contained e, per audit IA, mosse IA self-contained con ObservationDTO sanificata.
+        allowed = {"game_created", "human_action", "ai_action", "game_finished", "game_aborted"}
         if event_type not in allowed:
             return
 
@@ -391,6 +391,48 @@ def _is_ai_controlled_player(session: GameSession, player_index: int) -> bool:
     del player controllato dall'IA.
     """
     return player_index in session.ai_seats
+
+
+def _pimc_decision_trace(agent: Agent) -> dict[str, Any] | None:
+    """
+    Restituisce una traccia minimale della decisione PIMC appena eseguita, se disponibile.
+
+    L'agente viene ricostruito per mossa, quindi i contatori `metrics` appartengono alla singola
+    decisione corrente. Non salviamo punteggi interni o determinizzazioni: bastano ramo usato e
+    contatori per distinguere fallback, solver e search nei log di produzione.
+    """
+    metrics = getattr(agent, "metrics", None)
+    if metrics is None:
+        return None
+
+    search_decisions = int(getattr(metrics, "search_decisions", 0))
+    solver_decisions = int(getattr(metrics, "endgame_solver_decisions", 0))
+    fallback_decisions = int(getattr(metrics, "fallback_decisions", 0))
+    coerced_moves = int(getattr(metrics, "coerced_moves", 0))
+    failed_determinizations = int(getattr(metrics, "failed_determinizations", 0))
+    successful_determinizations = int(getattr(metrics, "successful_determinizations", 0))
+    total_search_seconds = float(getattr(metrics, "total_search_seconds", 0.0))
+
+    if search_decisions > 0:
+        decision_type = "search"
+    elif solver_decisions > 0:
+        decision_type = "solver"
+    elif fallback_decisions > 0:
+        decision_type = "fallback"
+    else:
+        decision_type = "unknown"
+
+    return {
+        "agent_kind": "pimc",
+        "decision_type": decision_type,
+        "search_decisions": search_decisions,
+        "endgame_solver_decisions": solver_decisions,
+        "fallback_decisions": fallback_decisions,
+        "coerced_moves": coerced_moves,
+        "successful_determinizations": successful_determinizations,
+        "failed_determinizations": failed_determinizations,
+        "search_seconds": total_search_seconds,
+    }
 
 
 def _display_name_for_player(session: GameSession, player_index: int) -> str:
@@ -886,6 +928,15 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
     seat_cfg = session.ai_seats.get(ai_player_index)
     agent = _agent_for_seat(seat_cfg) if seat_cfg is not None else None
 
+    observation_before: dict | None = None
+    if _get_event_log_mode() == "dataset":
+        try:
+            observation_before = build_observation_dto(state, ai_player_index, session.version).model_dump()
+        except Exception:
+            observation_before = None
+
+    decision_trace: dict[str, Any] | None = None
+    action_coerced = False
     if agent is None:
         card_index = rng.randrange(len(valid_actions))
     else:
@@ -893,7 +944,9 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
         card_index = agent.choose_card_index(observation, rng=rng)
         if card_index not in valid_actions:
             # Fallback di sicurezza: se un agente ritorna un indice invalido, non blocchiamo la partita.
+            action_coerced = True
             card_index = rng.randrange(len(valid_actions))
+        decision_trace = _pimc_decision_trace(agent)
 
     selected_card = state.players[ai_player_index].hand[card_index]
 
@@ -944,6 +997,44 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
         trick_cards=trick_cards_dto,
         captured_cards=captured_cards_dto,
     )
+
+    if _get_event_log_mode() == "dataset":
+        reward = 0
+        if step_result.trick_completed:
+            trick_points = sum(card.rank.points for card, _ in step_result.trick_cards)
+            winner = step_result.trick_winner
+            if isinstance(winner, int):
+                reward = trick_points if winner == ai_player_index else -trick_points
+
+        next_observation: dict | None = None
+        try:
+            next_observation = build_observation_dto(new_state, ai_player_index, server_version).model_dump()
+        except Exception:
+            next_observation = None
+
+        _safe_log_event(
+            game_id,
+            "ai_action",
+            sanitize_dataset_payload(
+                {
+                    "is_ai": True,
+                    "player_index": ai_player_index,
+                    "ai_agent": seat_cfg.agent_name if seat_cfg is not None else None,
+                    "ai_model_id": seat_cfg.model_id if seat_cfg is not None else None,
+                    "card_index": card_index,
+                    "action_coerced": action_coerced,
+                    "observation": observation_before,
+                    "reward": reward,
+                    "done": bool(new_state.game_over is True),
+                    "next_observation": next_observation,
+                    "result": ai_action_result_dto.model_dump(exclude_none=True),
+                    "decision_trace": decision_trace,
+                }
+            ),
+            server_version=server_version,
+            player_index=ai_player_index,
+            state=new_state,
+        )
 
     # Se la mano è stata completata, invia notifica speciale
     if step_result.trick_completed:
