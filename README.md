@@ -248,6 +248,15 @@ DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.15.0 -
 DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_16x8 --json
 ```
 
+Export dettagliato delle singole mosse IA/PIMC auditabili, con `decision_trace`, observation lecita e
+`next_observation` sanificate:
+
+```bash
+DATABASE_URL=... python scripts/export_ai_actions.py \
+  --ai-agent bc_model_pimc_16x8 \
+  --out ./data/prod_pimc_ai_actions.jsonl
+```
+
 **Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://briscolaai.fastapicloud.dev>.
 
 ### Simulazioni e self‑play (headless)

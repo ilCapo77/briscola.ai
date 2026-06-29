@@ -160,8 +160,9 @@ BRISCOLA_MODEL_SHA256=b047a319c3505936d11127a3a2e29b9ca3a2b93676569a2ea8ce186a5e
 ```
 
 - Monitorare partite reali, errori, abbandoni e feedback qualitativo.
-- Usare `scripts/report_event_log.py` per controllare aggregati/qualità del log e `scripts/audit_event_log_games.py`
-  per verificare versione, `ai_agent`, `ai_model_id` e auditabilità delle mosse IA senza stampare payload sensibili.
+- Usare `scripts/report_event_log.py` per controllare aggregati/qualità del log, `scripts/audit_event_log_games.py`
+  per verificare versione/agente/modello/auditabilità e `scripts/export_ai_actions.py` per ispezionare singole
+  mosse IA/PIMC auditabili senza stampare payload grezzi o campi sensibili.
 - Dopo il deploy della patch `ai_action`, giocare nuove partite PIMC: le partite già raccolte in modalità dataset
   prima della patch identificano l'agente ma non contengono mosse IA auditabili.
 - Non usare dati umani per training finché il volume resta basso e la qualità/privacy non sono state riverificate.
