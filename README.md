@@ -347,7 +347,7 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 Il modello consigliato è **`data/models/best_a2c_v6.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v5` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. In UI, quando disponibile, il default è `bc_model_hybrid_endgame`: usa il modello consigliato durante la partita e il solver esatto a mazzo vuoto. `best_a2c_v5.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v6 è in `PLAN.md`.
 
-Il codice `v0.14.0` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Espone anche `bc_model_pimc_16x8` come avversario avanzato selezionabile. Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
+Il codice `v0.14.1` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Espone anche `bc_model_pimc_16x8` come avversario avanzato selezionabile. Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v6.npz

@@ -4,10 +4,10 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.14.0` (`pyproject.toml`).
+- Versione progetto: `0.14.1` (`pyproject.toml`).
 - Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
-- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. Release cloud corrente verificata con modello v6; `v0.14.0` aggiunge il default runtime `v6 + solver endgame` e PIMC 16×8 selezionabile.
+- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. Release cloud corrente verificata con modello v6; `v0.14.1` include default runtime `v6 + solver endgame`, PIMC 16×8 selezionabile e fix contrasto dropdown Windows.
 - Anti-cheat: agenti e modelli ricevono `PlayerObservation`, non `GameState` completo.
 - Fast path: 2-player numerico Python/Numba per training/evaluation ad alto throughput.
 - Encoder supportati: v1, v2, v3.
@@ -119,7 +119,7 @@ roadmap; non usarlo come archivio di ogni run locale.
 - Cache-busting asset automatico (versione + mtime degli static).
 - Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone, preload immagini carte, spinner di avvio partita, footer su una riga con icona GitHub e versione software.
 - Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
-- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.12.1` pubblicata con `best_a2c_v6.npz`. `v0.13.0` cambia il default runtime a `bc_model_hybrid_endgame`; `v0.14.0` aggiunge `bc_model_pimc_16x8` come opzione avanzata, sempre senza nuovo asset modello.
+- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.12.1` pubblicata con `best_a2c_v6.npz`. `v0.13.0` cambia il default runtime a `bc_model_hybrid_endgame`; `v0.14.0` aggiunge `bc_model_pimc_16x8`; `v0.14.1` corregge il contrasto dropdown su Windows, sempre senza nuovo asset modello.
 - **Deploy COMPLETATO** su FastAPI Cloud (Redis collegato): <https://briscolaai.fastapicloud.dev>. Postgres/event log e modalità dataset sono attivabili via `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset` quando serve raccogliere dataset umano.
 - Rollout cloud `v0.12.1`/v6 completato e verificato: `/version` espone `recommended_model=best_a2c_v6.npz` e
   `recommended_model_present=true`; la UI mostra la label v6.
