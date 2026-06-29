@@ -57,6 +57,7 @@ def test_generate_pimc_teacher_dataset_is_bc_compatible(tmp_path: Path) -> None:
     )
 
     assert counters["records_written"] == 8
+    assert "records_written_search_strong_reliable_disagree" in counters
     records = _read_jsonl(out_path)
     assert len(records) == 8
 
@@ -66,7 +67,20 @@ def test_generate_pimc_teacher_dataset_is_bc_compatible(tmp_path: Path) -> None:
         assert record["is_ai"] is True
         assert record["next_observation"] is None
         assert record["generation"]["unknown_live_cards"] <= 6
+        assert record["generation"]["strong_margin_min"] == 2.0
+        assert record["generation"]["reliable_margin_ci_low_min"] == 0.0
+        assert record["reference"]["agent"] == base_agent.name
+        assert isinstance(record["reference"]["card_index"], int)
+        assert isinstance(record["reference"]["disagrees_with_teacher"], bool)
         assert record["teacher"]["decision_type"] in {"search", "endgame_solver", "fallback"}
+        if record["teacher"]["decision_type"] == "search":
+            diagnostics = record["teacher"]["search_diagnostics"]
+            assert isinstance(diagnostics, dict)
+            assert diagnostics["best_card_index"] == record["action"]["card_index"]
+            assert isinstance(diagnostics["action_values"], list)
+            assert diagnostics["paired_margin_sample_count"] == len(diagnostics["paired_margin_samples"])
+        else:
+            assert record["teacher"]["search_diagnostics"] is None
 
         obs = record["observation"]
         action = record["action"]["card_index"]

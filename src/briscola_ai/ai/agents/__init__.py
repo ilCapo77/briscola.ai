@@ -8,7 +8,14 @@ divisa per responsabilita' nei moduli interni.
 
 from .base import Agent, AgentSpec
 from .hybrid_endgame import HybridEndgameAgent, can_solve_endgame_from_observation, reconstruct_endgame_state
-from .pimc import PIMCAgent, determinize_observation, rollout_to_terminal, unknown_live_card_count
+from .pimc import (
+    PIMCActionValue,
+    PIMCAgent,
+    PIMCSearchDiagnostics,
+    determinize_observation,
+    rollout_to_terminal,
+    unknown_live_card_count,
+)
 from .registry import (
     AI_AGENTS_COMMON_NOTE_IT,
     BC_MODEL_HYBRID_ENDGAME_SPEC,
@@ -35,7 +42,9 @@ __all__ = [
     "HeuristicAgentV1",
     "HeuristicAgentV2",
     "HybridEndgameAgent",
+    "PIMCActionValue",
     "PIMCAgent",
+    "PIMCSearchDiagnostics",
     "RandomAgent",
     "agent_uses_selected_model",
     "build_agent",

@@ -16,6 +16,11 @@ Per default le partite avanzano con il modello base (es. v6), non con il teacher
 e salviamo anche le posizioni fuori finestra search: li' il teacher delega al fallback
 v6. Il dataset risultante e' quindi "v6 ovunque + correzioni PIMC nel finale", piu'
 sicuro per fine-tuning rispetto a sole etichette di finale.
+
+Per gli esempi `decision_type=search`, il record include anche la diagnostica PIMC
+(`margin`, SE, CI e delta paired per determinizzazione). Questo permette di contare
+prima del training quante correzioni sono davvero affidabili, evitando di allenare
+su argmax rumorosi.
 """
 
 from __future__ import annotations
@@ -47,6 +52,8 @@ class PIMCTeacherDatasetConfig:
     player_index: int | None = None
     include_fallback_examples: bool = True
     advance_with_teacher: bool = False
+    strong_margin_min: float = 2.0
+    reliable_margin_ci_low_min: float = 0.0
     schema_version: int = 1
 
 
@@ -79,14 +86,40 @@ def _choose_teacher_action(
     observation,
     *,
     rng: random.Random,
-) -> tuple[int, str]:
-    """Ritorna `(card_index, decision_type)` per l'etichetta teacher."""
+) -> tuple[int, str, dict[str, Any] | None]:
+    """Ritorna `(card_index, decision_type, search_diagnostics)` per l'etichetta teacher."""
     if isinstance(teacher, PIMCAgent):
         before = asdict(teacher.metrics)
         card_index = _safe_card_index(teacher, observation, rng=rng)
         after = asdict(teacher.metrics)
-        return card_index, _pimc_decision_type(before, after)
-    return _safe_card_index(teacher, observation, rng=rng), "agent"
+        decision_type = _pimc_decision_type(before, after)
+        diagnostics = asdict(teacher.last_search_diagnostics) if teacher.last_search_diagnostics is not None else None
+        return card_index, decision_type, diagnostics
+    return _safe_card_index(teacher, observation, rng=rng), "agent", None
+
+
+def _diagnostic_float(diagnostics: dict[str, Any] | None, key: str) -> float | None:
+    if diagnostics is None:
+        return None
+    value = diagnostics.get(key)
+    return float(value) if isinstance(value, (int, float)) else None
+
+
+def _is_strong_reliable_search(
+    *,
+    config: PIMCTeacherDatasetConfig,
+    decision_type: str,
+    disagrees_with_reference: bool,
+    diagnostics: dict[str, Any] | None,
+) -> bool:
+    """Criterio pre-registrato per contare esempi search utili prima del retrain."""
+    if decision_type != "search" or not disagrees_with_reference:
+        return False
+    margin = _diagnostic_float(diagnostics, "margin")
+    ci_low = _diagnostic_float(diagnostics, "margin_ci95_low")
+    if margin is None or ci_low is None:
+        return False
+    return margin >= float(config.strong_margin_min) and ci_low >= float(config.reliable_margin_ci_low_min)
 
 
 def _make_record(
@@ -102,8 +135,12 @@ def _make_record(
     unknown_cards: int,
     teacher: Agent,
     teacher_decision_type: str,
+    teacher_search_diagnostics: dict[str, Any] | None,
+    reference_agent_name: str,
+    reference_card_index: int,
 ) -> dict[str, Any]:
     """Costruisce una riga JSONL compatibile con `train_bc.py` piu' metadati di audit."""
+    disagrees_with_reference = int(card_index) != int(reference_card_index)
     return {
         "schema_version": int(config.schema_version),
         "dataset_kind": "pimc_teacher",
@@ -121,6 +158,12 @@ def _make_record(
             "name": teacher.name,
             "decision_type": teacher_decision_type,
             "max_unknown_cards": int(config.max_unknown_cards),
+            "search_diagnostics": teacher_search_diagnostics,
+        },
+        "reference": {
+            "agent": reference_agent_name,
+            "card_index": int(reference_card_index),
+            "disagrees_with_teacher": disagrees_with_reference,
         },
         "generation": {
             "seed": int(config.seed),
@@ -129,6 +172,8 @@ def _make_record(
             "cards_remaining_in_deck": int(observation_dto["cards_remaining_in_deck"]),
             "include_fallback_examples": bool(config.include_fallback_examples),
             "advance_with_teacher": bool(config.advance_with_teacher),
+            "strong_margin_min": float(config.strong_margin_min),
+            "reliable_margin_ci_low_min": float(config.reliable_margin_ci_low_min),
         },
     }
 
@@ -165,6 +210,7 @@ def generate_pimc_teacher_dataset(
     rng_games = random.Random(config.seed)
     rng_teacher = random.Random(config.seed ^ 0xA5A5A5A5)
     rng_play = random.Random(config.seed ^ 0x5A5A5A5A)
+    rng_reference = random.Random(config.seed ^ 0x6A09E667)
 
     counters: dict[str, int | float] = {
         "games_started": 0,
@@ -178,6 +224,10 @@ def generate_pimc_teacher_dataset(
         "records_written_endgame_solver": 0,
         "records_written_fallback": 0,
         "records_written_other": 0,
+        "records_written_search_disagree_reference": 0,
+        "records_written_search_margin_ge_min": 0,
+        "records_written_search_reliable_margin": 0,
+        "records_written_search_strong_reliable_disagree": 0,
         "records_skipped_player": 0,
         "records_skipped_outside_pimc_window": 0,
         "records_skipped_invalid_teacher": 0,
@@ -221,15 +271,17 @@ def generate_pimc_teacher_dataset(
                 if player_matches and (unknown_cards <= config.max_unknown_cards or config.include_fallback_examples):
                     counters["eligible_positions"] += 1
                     try:
-                        teacher_action, decision_type = _choose_teacher_action(
+                        teacher_action, decision_type, search_diagnostics = _choose_teacher_action(
                             teacher,
                             observation,
                             rng=rng_teacher,
                         )
+                        reference_action = _safe_card_index(play_agent, observation, rng=rng_reference)
                     except ValueError:
                         counters["records_skipped_invalid_teacher"] += 1
                     else:
                         dto = build_observation_dto(state, player_index=player, server_version=server_version)
+                        disagrees_with_reference = int(teacher_action) != int(reference_action)
                         record = _make_record(
                             config=config,
                             game_id=game_id,
@@ -242,11 +294,29 @@ def generate_pimc_teacher_dataset(
                             unknown_cards=unknown_cards,
                             teacher=teacher,
                             teacher_decision_type=decision_type,
+                            teacher_search_diagnostics=search_diagnostics,
+                            reference_agent_name=play_agent.name,
+                            reference_card_index=reference_action,
                         )
                         out.write(json.dumps(record, ensure_ascii=False, sort_keys=True) + "\n")
                         counters["records_written"] += 1
                         if decision_type == "search":
                             counters["records_written_search"] += 1
+                            margin = _diagnostic_float(search_diagnostics, "margin")
+                            ci_low = _diagnostic_float(search_diagnostics, "margin_ci95_low")
+                            if disagrees_with_reference:
+                                counters["records_written_search_disagree_reference"] += 1
+                            if margin is not None and margin >= float(config.strong_margin_min):
+                                counters["records_written_search_margin_ge_min"] += 1
+                            if ci_low is not None and ci_low >= float(config.reliable_margin_ci_low_min):
+                                counters["records_written_search_reliable_margin"] += 1
+                            if _is_strong_reliable_search(
+                                config=config,
+                                decision_type=decision_type,
+                                disagrees_with_reference=disagrees_with_reference,
+                                diagnostics=search_diagnostics,
+                            ):
+                                counters["records_written_search_strong_reliable_disagree"] += 1
                         elif decision_type == "endgame_solver":
                             counters["records_written_endgame_solver"] += 1
                         elif decision_type == "fallback":
@@ -324,6 +394,18 @@ def _build_cli_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="Avanza le partite con la mossa teacher nelle posizioni etichettate; default: avanza con il modello base.",
     )
+    parser.add_argument(
+        "--strong-margin-min",
+        type=float,
+        default=2.0,
+        help="Soglia margine best-second per contare una correzione search forte. Default: 2.0 punti.",
+    )
+    parser.add_argument(
+        "--reliable-margin-ci-low-min",
+        type=float,
+        default=0.0,
+        help="Soglia CI95 lower bound del margine per contare una correzione search affidabile. Default: 0.0.",
+    )
     return parser
 
 
@@ -350,6 +432,8 @@ def main() -> int:
         player_index=args.player_index,
         include_fallback_examples=not args.only_pimc_window,
         advance_with_teacher=args.advance_with_teacher,
+        strong_margin_min=args.strong_margin_min,
+        reliable_margin_ci_low_min=args.reliable_margin_ci_low_min,
     )
 
     counters = generate_pimc_teacher_dataset(config, teacher=teacher, play_agent=base_agent)

@@ -23,6 +23,7 @@ import random
 import time
 from dataclasses import dataclass, field
 from functools import lru_cache
+from math import sqrt
 from typing import ClassVar
 
 from ...domain.card_id import card_to_id, id_to_card
@@ -58,6 +59,53 @@ class PIMCSearchStats:
         if self.search_decisions <= 0:
             return 0.0
         return self.search_elapsed_seconds / self.search_decisions
+
+
+@dataclass(frozen=True, slots=True)
+class PIMCActionValue:
+    """Valore stimato da PIMC per una singola carta giocabile."""
+
+    card_index: int
+    mean_score: float | None
+    rollout_count: int
+
+
+@dataclass(frozen=True, slots=True)
+class PIMCSearchDiagnostics:
+    """
+    Diagnostica dell'ultima decisione search PIMC.
+
+    `margin` e `margin_standard_error` sono calcolati sul confronto best-vs-second
+    usando delta paired per determinizzazione. Sono pensati per dataset teacher:
+    un margine alto ma con SE alta non va trattato come correzione affidabile.
+    """
+
+    best_card_index: int
+    second_card_index: int | None
+    best_mean_score: float
+    second_mean_score: float | None
+    margin: float | None
+    margin_standard_error: float | None
+    margin_z: float | None
+    margin_ci95_low: float | None
+    margin_ci95_high: float | None
+    paired_margin_sample_count: int
+    paired_margin_samples: tuple[float, ...]
+    action_values: tuple[PIMCActionValue, ...]
+    successful_determinizations: int
+    failed_determinizations: int
+    completed_rollouts: int
+    failed_rollouts: int
+
+
+def _standard_error(values: list[float]) -> float | None:
+    """Errore standard campionario della media, o `None` con meno di 2 campioni."""
+    n = len(values)
+    if n <= 1:
+        return None
+    mean = sum(values) / n
+    variance = sum((value - mean) ** 2 for value in values) / (n - 1)
+    return sqrt(variance / n)
 
 
 def _onehot_ids(raw: tuple[int, ...], *, name: str) -> set[int]:
@@ -355,10 +403,17 @@ class PIMCAgent:
     use_endgame_solver: bool = True
     name: str = "pimc"
     metrics: PIMCSearchStats = field(default_factory=PIMCSearchStats, repr=False, compare=False)
+    last_search_diagnostics: PIMCSearchDiagnostics | None = field(
+        default=None,
+        init=False,
+        repr=False,
+        compare=False,
+    )
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
         if not observation.hand:
             raise ValueError("Mano vuota: nessuna azione possibile")
+        object.__setattr__(self, "last_search_diagnostics", None)
         self.metrics.total_decisions += 1
         try:
             _validate_pimc_observation(observation)
@@ -386,6 +441,11 @@ class PIMCAgent:
         legal_indices = list(range(len(observation.hand)))
         scores = [0.0 for _ in legal_indices]
         counts = [0 for _ in legal_indices]
+        per_determinization_scores: list[list[float | None]] = []
+        local_successful_determinizations = 0
+        local_failed_determinizations = 0
+        local_completed_rollouts = 0
+        local_failed_rollouts = 0
 
         determinizations = max(1, int(self.num_determinizations))
         try:
@@ -395,8 +455,11 @@ class PIMCAgent:
                     sampled_state = determinize_observation(observation, rng=sample_rng)
                 except ValueError:
                     self.metrics.failed_determinizations += 1
+                    local_failed_determinizations += 1
                     continue
                 self.metrics.successful_determinizations += 1
+                local_successful_determinizations += 1
+                sample_scores: list[float | None] = [None for _ in legal_indices]
 
                 for local_pos, card_index in enumerate(legal_indices):
                     next_state, result = step(
@@ -416,12 +479,17 @@ class PIMCAgent:
                         )
                     except RuntimeError:
                         self.metrics.failed_rollouts += 1
+                        local_failed_rollouts += 1
                         continue
                     self.metrics.completed_rollouts += 1
+                    local_completed_rollouts += 1
                     player_points = final_state.players[observation.player_index].points
                     opponent_points = final_state.players[1 - observation.player_index].points
-                    scores[local_pos] += float(player_points - opponent_points)
+                    score = float(player_points - opponent_points)
+                    sample_scores[local_pos] = score
+                    scores[local_pos] += score
                     counts[local_pos] += 1
+                per_determinization_scores.append(sample_scores)
         finally:
             self.metrics.search_elapsed_seconds += time.perf_counter() - search_started
 
@@ -429,8 +497,63 @@ class PIMCAgent:
             self.metrics.fallback_decisions += 1
             return _safe_agent_card_index(self.fallback, observation, rng=rng, metrics=self.metrics)
 
+        valid_positions = [pos for pos, count in enumerate(counts) if count > 0]
         best_pos = max(
-            range(len(legal_indices)),
-            key=lambda pos: (scores[pos] / counts[pos] if counts[pos] else float("-inf"), -legal_indices[pos]),
+            valid_positions,
+            key=lambda pos: (scores[pos] / counts[pos], -legal_indices[pos]),
+        )
+        second_pos = (
+            max(
+                (pos for pos in valid_positions if pos != best_pos),
+                key=lambda pos: (scores[pos] / counts[pos], -legal_indices[pos]),
+                default=None,
+            )
+            if len(valid_positions) >= 2
+            else None
+        )
+        action_values = tuple(
+            PIMCActionValue(
+                card_index=card_index,
+                mean_score=(scores[pos] / counts[pos]) if counts[pos] else None,
+                rollout_count=counts[pos],
+            )
+            for pos, card_index in enumerate(legal_indices)
+        )
+        best_mean = scores[best_pos] / counts[best_pos]
+        second_mean = (scores[second_pos] / counts[second_pos]) if second_pos is not None else None
+        margin = best_mean - second_mean if second_mean is not None else None
+        paired_margin_samples: list[float] = []
+        if second_pos is not None:
+            for sample_scores in per_determinization_scores:
+                best_sample = sample_scores[best_pos]
+                second_sample = sample_scores[second_pos]
+                if best_sample is not None and second_sample is not None:
+                    paired_margin_samples.append(best_sample - second_sample)
+
+        margin_se = _standard_error(paired_margin_samples)
+        margin_z = (margin / margin_se) if margin is not None and margin_se is not None and margin_se != 0.0 else None
+        margin_ci95_low = margin - 1.96 * margin_se if margin is not None and margin_se is not None else None
+        margin_ci95_high = margin + 1.96 * margin_se if margin is not None and margin_se is not None else None
+        object.__setattr__(
+            self,
+            "last_search_diagnostics",
+            PIMCSearchDiagnostics(
+                best_card_index=legal_indices[best_pos],
+                second_card_index=legal_indices[second_pos] if second_pos is not None else None,
+                best_mean_score=best_mean,
+                second_mean_score=second_mean,
+                margin=margin,
+                margin_standard_error=margin_se,
+                margin_z=margin_z,
+                margin_ci95_low=margin_ci95_low,
+                margin_ci95_high=margin_ci95_high,
+                paired_margin_sample_count=len(paired_margin_samples),
+                paired_margin_samples=tuple(paired_margin_samples),
+                action_values=action_values,
+                successful_determinizations=local_successful_determinizations,
+                failed_determinizations=local_failed_determinizations,
+                completed_rollouts=local_completed_rollouts,
+                failed_rollouts=local_failed_rollouts,
+            ),
         )
         return legal_indices[best_pos]

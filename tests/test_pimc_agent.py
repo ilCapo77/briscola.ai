@@ -179,6 +179,17 @@ def test_pimc_returns_valid_card_when_search_is_active() -> None:
     assert agent.metrics.successful_determinizations > 0
     assert agent.metrics.completed_rollouts > 0
     assert agent.metrics.seconds_per_search_decision > 0.0
+    assert agent.last_search_diagnostics is not None
+    diagnostics = agent.last_search_diagnostics
+    assert diagnostics.best_card_index == choice
+    assert len(diagnostics.action_values) == len(observation.hand)
+    assert diagnostics.successful_determinizations == agent.num_determinizations
+    assert diagnostics.completed_rollouts == agent.metrics.completed_rollouts
+    assert diagnostics.margin is not None
+    assert diagnostics.paired_margin_sample_count == len(diagnostics.paired_margin_samples)
+    if diagnostics.margin_standard_error is not None:
+        assert diagnostics.margin_ci95_low is not None
+        assert diagnostics.margin_ci95_high is not None
 
 
 def test_pimc_uses_exact_solver_when_deck_is_empty() -> None:
@@ -196,6 +207,7 @@ def test_pimc_uses_exact_solver_when_deck_is_empty() -> None:
 
     assert agent.choose_card_index(observation, rng=random.Random(4)) == expected
     assert agent.metrics.endgame_solver_decisions == 1
+    assert agent.last_search_diagnostics is None
 
 
 def test_rollout_to_terminal_handles_invalid_rollout_index_defensively() -> None:

@@ -263,6 +263,15 @@ Passi consigliati:
     con `train_bc.py` e, di default, fa avanzare le partite con v6 per mantenere la distribuzione stati del modello base;
   - il dataset deve includere anche esempi fuori finestra search: in quelle posizioni PIMC delega al fallback v6, quindi
     l'obiettivo diventa "v6 ovunque + correzioni PIMC nel finale" invece di sole etichette di finale;
+  - aggiornata diagnostica teacher: `PIMCAgent` espone per ogni decisione search valori medi per carta, margine
+    best-second, delta paired per determinizzazione, SE e CI95 del margine; il generatore salva questi campi e conta
+    i disaccordi `PIMC != v6` forti+affidabili (`margin >= --strong-margin-min` e CI lower bound >=
+    `--reliable-margin-ci-low-min`). Prossimo gate: prima di qualunque retrain, generare abbastanza partite per
+    misurare se esistono davvero `15k..30k` disaccordi search ad alto margine/affidabilità. Smoke diagnostico
+    `5k`, `64` determinizzazioni, `u=8`, seed `20260630`: `2275` search, `2725` solver, `1062` search in disaccordo
+    con v6; `424` search forti+affidabili con soglia `margin>=2` e CI low `>=0` (`310` se CI low `>=2`). Segnale
+    presente ma non abbondante: per arrivare a `15k` esempi utili servono circa `175k` record in finestra PIMC con
+    queste soglie, salvo cambiare soglia/config teacher.
   - mini-confronto teacher `16×8` vs `64×12`, `200` partite, seed `777`: score `0.5150` (CI95 `0.4461..0.5833`),
     avg diff `+0.20` per `16×8` (CI95 `-3.23..+3.63`), `64×12` a `0.3226s/search_move`. Il test è sottodimensionato:
     non dimostra equivalenza e non esclude un vantaggio piccolo ma utile del teacher più pesante. Per il primo dataset
