@@ -248,6 +248,13 @@ Passi consigliati:
 - Implementazione PIMC app: aggiunto agente selezionabile `bc_model_pimc_16x8`, cioè modello `.npz` scelto dalla UI
   come fallback/rollout, solver a mazzo vuoto e PIMC con `16` determinizzazioni quando le carte vive ignote sono
   `<=8`. Non è default: serve come modalità avanzata per misurare costo CPU e feedback umano.
+- Follow-up "più mosse PIMC" dopo export produzione `ai_action`: in una partita reale `bc_model_pimc_16x8` ha prodotto
+  `15` fallback, `2` search e `3` solver. Test diretti con seed `20260629` non supportano l'allargamento della finestra:
+  `16×12` vs `16×8`, `500` partite, score `0.4900` (CI95 `0.4464..0.5337`), avg diff `-0.80`
+  (CI95 `-3.01..+1.40`), search `4.50` vs `2.50` per partita; `16×16` vs `16×8`, `300` partite, score `0.4917`
+  (CI95 `0.4356..0.5480`), avg diff `-0.21` (CI95 `-3.04..+2.61`), search `6.50` vs `2.45` per partita.
+  Conclusione operativa: più mosse search aumentano costo CPU ma non mostrano un vantaggio; mantenere `16×8` come
+  variante Pareto finché dati più forti non indicano il contrario.
 - Asse sperimentale successivo: usare PIMC come **teacher offline** e distillare solo le correzioni di **search** in un
   eventuale `best_a2c_v7` veloce:
   - generare posizioni da self-play/replay v6, soprattutto finale e semi-finale: script
