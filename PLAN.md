@@ -232,11 +232,54 @@ Passi consigliati:
   per un eventuale agente live.
 - Caveat: questi vantaggi sono misurati contro v6. In UI contro umani il modello avversario usato nei rollout è
   mis-specificato; non spacciare questi numeri come forza attesa contro giocatori umani.
-- Asse primario successivo: usare PIMC come **teacher offline** e distillare un `best_a2c_v7` veloce:
-  - generare posizioni da self-play/replay v6, soprattutto finale e semi-finale;
-  - etichettare le mosse con `PIMC(v6, 16×8)` e solver endgame quando applicabile;
-  - allenare BC/policy distillation warm-start da v6, mantenendo guard inference e feature encoder v3;
-  - promuovere solo se v7 batte v6 e control solver con CI positiva, senza regressioni su holdout/decision-quality.
+- Risultato deployabile indipendente: `control_solver(v6)` = `v6 + solver endgame` a runtime. Il solver è esatto,
+  anti-cheat, già validato e praticamente gratis; i numeri preliminari indicano un vantaggio di circa `+1.3..+1.6`
+  punti medi su v6 puro. Trattarlo come candidato a basso rischio: l'unità deployabile futura diventa **rete + solver
+  runtime**, non solo `.npz`. Non serve distillare il solver dentro la rete: la lineage di v6 discende già da teacher
+  con endgame solver, ma il vantaggio del solver non è sopravvissuto nei pesi.
+- Asse sperimentale successivo: usare PIMC come **teacher offline** e distillare solo le correzioni di **search** in un
+  eventuale `best_a2c_v7` veloce:
+  - generare posizioni da self-play/replay v6, soprattutto finale e semi-finale: script
+    `scripts/generate_pimc_teacher_dataset.py` implementato;
+  - etichettare le mosse con `PIMC(v6, 16×8)` e solver endgame quando applicabile; lo script salva JSONL compatibile
+    con `train_bc.py` e, di default, fa avanzare le partite con v6 per mantenere la distribuzione stati del modello base;
+  - il dataset deve includere anche esempi fuori finestra search: in quelle posizioni PIMC delega al fallback v6, quindi
+    l'obiettivo diventa "v6 ovunque + correzioni PIMC nel finale" invece di sole etichette di finale;
+  - mini-confronto teacher `16×8` vs `64×12`, `200` partite, seed `777`: score `0.5150` (CI95 `0.4461..0.5833`),
+    avg diff `+0.20` per `16×8` (CI95 `-3.23..+3.63`), `64×12` a `0.3226s/search_move`. Il test è sottodimensionato:
+    non dimostra equivalenza e non esclude un vantaggio piccolo ma utile del teacher più pesante. Per il primo dataset
+    usare comunque `16×8` come prima passata; rivalutare teacher più costosi solo dopo aver misurato il distillation gap
+    di v7, e con un confronto teacher a potenza adeguata se lo studente riesce a copiare bene `16×8`;
+  - micro-run completato: `data/pimc_teacher_v7_50k_seed777.jsonl` (`50k` esempi, gitignored) con `36,250` fallback/v6,
+    `6,250` search PIMC, `7,500` solver, `coerced_moves=0`; data path BC v3 verificato (`50000×310`);
+  - allenare BC/policy distillation warm-start da v6, mantenendo guard inference e feature encoder v3; `train_bc.py`
+    supporta ora `--init` MLP e `--bc-anchor ... --bc-anchor-beta ...` per preservare v6 durante il fine-tuning;
+  - primo candidato conservativo (`1` epoca, lr `1e-4`, anchor beta `0.05`) e' quasi pari a v6 su medium: avg diff
+    `+0.06` vs v6 (`10k` partite), ma perde contro `control_solver(v6)` (`-1.28`, CI95 `-2.44..-0.13`) e resta
+    molto sotto il teacher `PIMC(v6,16×8)` (`-3.92`, CI95 `-5.59..-2.26`, `1000` partite). Decision-quality vs
+    `heuristic_v1` resta pulita (`+17.96`, waste `0.1%`, overkill `0.0%`). Non promuovere;
+  - filtro disaccordi quantificato: solo `5,369/50,000` esempi sono veri `teacher != v6` (`3,017` search, `2,352`
+    solver; tutti i `36,250` fallback coincidono con v6). `train_bc.py` supporta `--filter-disagree-with-model` e usa
+    la mossa effettiva del modello, incluso overkill guard;
+  - retrain solo-disaccordi: recipe aggressiva (`10` epoche, lr `3e-4`, anchor `0.05`) impara disaccordi ma degrada
+    forte (`-4.01` vs v6). Recipe conservativa (`5` epoche, lr `1e-4`, anchor `0.20`) resta circa pari a v6 (`+0.17`)
+    ma perde ancora contro `control_solver(v6)` (`-1.18`, CI95 `-2.32..-0.04`) e resta molto sotto PIMC (`-3.69`,
+    CI95 `-5.30..-2.09`). Non promuovere;
+  - conclusione provvisoria: il collo di bottiglia e' la distillazione, non la forza del teacher. In particolare il
+    solver non va più trattato come comportamento da comprimere: va eseguito a runtime. La domanda utile diventa se una
+    rete `v7-search`, combinata con lo stesso solver runtime, batte `v6 + solver`;
+  - prossimo esperimento distillazione: generare un dataset **search-ricco** con più partite e/o `max_unknown` più largo,
+    puntando a circa `15k..30k` disaccordi search (`teacher.search != v6`). Tenere esempi v6/fallback come
+    copertura eventuale, ma usare soprattutto l'anchor CE a v6 come anti-dimenticanza: le etichette hard v6 rischiano
+    di ridiluire il segnale search. Pesare o sovracampionare i disaccordi search; ignorare i disaccordi solver come
+    target primario;
+  - protocollo pre-registrato per evitare cherry-picking: usare seed/config di validazione per scegliere la recipe, poi
+    confermare **un solo** candidato su seed held-out, seat-fair, `>=2000` partite (meglio `4000`). Solo la conferma
+    held-out entra nel piano come evidenza di promozione; le run di selezione restano diagnostiche;
+  - criterio di promozione v7: valutare `(v7-search + solver)` contro `(v6 + solver)` con CI95 positiva e materiale
+    sull'avg diff (lower bound `> +0.5` punti medi, non solo `> 0`), più gap vs PIMC teacher e decision-quality. Se a
+    potenza adeguata la CI include `0` o è negativa, chiudere l'idea "v7 distillato" come risultato negativo misurato e
+    usare `control_solver(v6)` come baseline deployabile, con PIMC live opzionale.
 
 Screening population league declassato a opzionale:
 

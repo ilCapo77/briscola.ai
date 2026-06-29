@@ -30,6 +30,11 @@ Supportiamo due varianti (stesso encoder, stessa action mask):
    - MLP minimale con 1 hidden layer + ReLU + testa lineare su 40 azioni
    - ottimizzazione con Adam (più stabile del SGD puro su reti non-lineari)
 
+Per distillazione/fine-tuning è possibile partire da un MLP esistente (`--init`)
+e aggiungere un anchor congelato (`--bc-anchor`, `--bc-anchor-beta`) per limitare
+la deriva rispetto al modello base. `--filter-disagree-with-model` permette di
+allenare solo sugli esempi in cui il teacher corregge davvero quel modello base.
+
 Nota didattica:
 Questo NON è un modello "forte". Serve come primo passo:
 encoder -> dataset -> training -> salvataggio -> (in futuro) integrazione in `evaluate_agents.py`.
@@ -46,6 +51,9 @@ import numpy as np
 
 from briscola_ai.ai.encoding.card_action_space import card_dto_to_action_id
 from briscola_ai.ai.encoding.observation_encoder import EncoderVersion, encode_observation_2p_with_version
+from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.domain.models import Card, Rank, Suit
+from briscola_ai.domain.observation import PlayerObservation
 
 
 @dataclass(frozen=True)
@@ -67,8 +75,83 @@ def _iter_jsonl(path: Path):
             yield json.loads(line)
 
 
+def _card_dto_to_domain(card: dict) -> Card:
+    """Converte un CardDTO JSON in `domain.Card`."""
+    if not isinstance(card, dict):
+        raise TypeError(f"CardDTO atteso come dict, ottenuto: {type(card)}")
+    suit = card.get("suit")
+    number = card.get("number")
+    if not isinstance(suit, str) or not isinstance(number, int):
+        raise ValueError(f"CardDTO invalido: suit={suit!r} number={number!r}")
+    try:
+        rank = next(rank for rank in Rank if int(rank.number) == int(number))
+    except StopIteration as exc:
+        raise ValueError(f"Numero carta fuori range: {number}") from exc
+    return Card(suit=Suit(suit), rank=rank)
+
+
+def _observation_dto_to_player_observation(obs: dict) -> PlayerObservation:
+    """
+    Ricostruisce una `PlayerObservation` da ObservationDTO per confrontare un modello anchor.
+
+    Serve solo per filtri dataset, quindi supporta il caso atteso: record action 2-player con
+    `my_turn=true`. Non usa né ricostruisce informazione nascosta.
+    """
+    if obs.get("num_players") != 2:
+        raise ValueError("Il filtro BC supporta solo observation 2-player")
+    player_index = int(obs.get("my_index", 0))
+    players = obs.get("players") or []
+    if not isinstance(players, list) or len(players) != 2:
+        raise ValueError("ObservationDTO senza lista players 2-player valida")
+
+    table_cards = []
+    for item in obs.get("table_cards") or []:
+        if not isinstance(item, dict):
+            continue
+        table_cards.append((_card_dto_to_domain(item["card"]), int(item["player_index"])))
+
+    current_turn = player_index if bool(obs.get("my_turn")) else -1
+    return PlayerObservation(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        player_index=player_index,
+        player_name=str(players[player_index].get("name", f"player_{player_index}")),
+        hand=tuple(_card_dto_to_domain(card) for card in (obs.get("my_hand") or [])),
+        trump_card=_card_dto_to_domain(obs["trump_card"]) if isinstance(obs.get("trump_card"), dict) else None,
+        deck_size=int(obs.get("cards_remaining_in_deck", 0)),
+        table_cards=tuple(table_cards),
+        current_turn=current_turn,
+        first_player=table_cards[0][1] if table_cards else current_turn,
+        game_over=bool(obs.get("game_over", False)),
+        winner_index=None,
+        winning_team=None,
+        players_points=tuple(int(player.get("points", 0)) for player in players),
+        players_hand_sizes=tuple(int(player.get("hand_size", 0)) for player in players),
+        seen_cards_onehot=tuple(int(v) for v in (obs.get("seen_cards_onehot") or [0] * 40)),
+        out_of_play_cards_onehot=tuple(int(v) for v in (obs.get("out_of_play_cards_onehot") or [0] * 40)),
+    )
+
+
+def _agent_action_id_from_observation(agent, obs: dict, *, rng: np.random.Generator) -> int:
+    """Calcola l'action_id scelto da un agente su una ObservationDTO."""
+    import random
+
+    observation = _observation_dto_to_player_observation(obs)
+    py_rng = random.Random(int(rng.integers(0, 2**32)))
+    card_index = int(agent.choose_card_index(observation, rng=py_rng))
+    hand = obs.get("my_hand") or []
+    if not 0 <= card_index < len(hand):
+        raise ValueError(f"Agente filtro ha prodotto card_index invalido: {card_index}")
+    return card_dto_to_action_id(hand[card_index])
+
+
 def _build_training_examples(
-    path: Path, *, encoder_version: EncoderVersion
+    path: Path,
+    *,
+    encoder_version: EncoderVersion,
+    disagreement_agent=None,
+    disagreement_seed: int = 0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
     Carica esempi dal JSONL export.
@@ -81,6 +164,7 @@ def _build_training_examples(
     features_list: list[list[float]] = []
     masks_list: list[list[bool]] = []
     targets: list[int] = []
+    disagreement_rng = np.random.default_rng(disagreement_seed)
 
     for rec in _iter_jsonl(path):
         obs = rec.get("observation")
@@ -109,6 +193,13 @@ def _build_training_examples(
         if not encoded.action_mask[y]:
             # Sanity: il target deve essere sempre una carta in mano.
             continue
+        if disagreement_agent is not None:
+            try:
+                baseline_y = _agent_action_id_from_observation(disagreement_agent, obs, rng=disagreement_rng)
+            except ValueError:
+                continue
+            if int(baseline_y) == int(y):
+                continue
 
         features_list.append(encoded.features)
         masks_list.append(encoded.action_mask)
@@ -142,6 +233,45 @@ def _softmax(logits: np.ndarray) -> np.ndarray:
     return exp / np.sum(exp, axis=1, keepdims=True)
 
 
+def _anchor_probs_batch(x: np.ndarray, mask: np.ndarray, anchor: LoadedBCModel) -> np.ndarray:
+    """
+    Distribuzione target dell'anchor su un batch.
+
+    L'anchor è un modello `.npz` congelato. Lo valutiamo riga per riga perché può essere
+    lineare o MLP; il costo è accettabile per il fine-tuning BC didattico.
+    """
+    if x.shape[0] == 0:
+        return np.zeros((0, 40), dtype=np.float32)
+    logits = np.asarray([anchor.logits(row) for row in x], dtype=np.float32)
+    return _softmax(_masked_logits(logits, mask))
+
+
+def _add_anchor_regularization(
+    *,
+    x: np.ndarray,
+    mask: np.ndarray,
+    probs: np.ndarray,
+    dlogits: np.ndarray,
+    anchor: LoadedBCModel | None,
+    anchor_beta: float,
+) -> float:
+    """
+    Aggiunge in-place il gradiente della CE verso un anchor congelato.
+
+    Loss additiva:
+        beta * CE(anchor_probs, policy_probs)
+
+    Ritorna la CE non pesata, utile per includere il termine nella loss riportata.
+    """
+    if anchor is None or float(anchor_beta) <= 0.0 or x.shape[0] == 0:
+        return 0.0
+    anchor_probs = _anchor_probs_batch(x, mask, anchor)
+    anchor_ce = -np.sum(anchor_probs.astype(np.float64) * np.log(probs.astype(np.float64) + 1e-12), axis=1).mean()
+    dlogits += (float(anchor_beta) / float(x.shape[0])) * (probs - anchor_probs)
+    dlogits[~mask] = 0.0
+    return float(anchor_ce)
+
+
 def _accuracy(masked_logits: np.ndarray, y: np.ndarray) -> float:
     pred = np.argmax(masked_logits, axis=1)
     return float(np.mean(pred == y))
@@ -166,7 +296,16 @@ class TrainMetrics:
     val_acc: float
 
 
-def _loss_and_grad_linear(x: np.ndarray, mask: np.ndarray, y: np.ndarray, w: np.ndarray, b: np.ndarray):
+def _loss_and_grad_linear(
+    x: np.ndarray,
+    mask: np.ndarray,
+    y: np.ndarray,
+    w: np.ndarray,
+    b: np.ndarray,
+    *,
+    anchor: LoadedBCModel | None = None,
+    anchor_beta: float = 0.0,
+):
     """
     Cross-entropy mascherata + gradienti per softmax linear.
 
@@ -183,11 +322,20 @@ def _loss_and_grad_linear(x: np.ndarray, mask: np.ndarray, y: np.ndarray, w: np.
     loss = -np.log(probs[np.arange(bsz), y] + 1e-12).mean()
 
     # Gradienti
-    dlogits = probs
+    dlogits = probs.copy()
     dlogits[np.arange(bsz), y] -= 1.0
     dlogits /= float(bsz)
     # Azioni non valide: gradient ≈ 0 per costruzione (prob ~0), ma rendiamolo esplicito.
     dlogits[~mask] = 0.0
+    anchor_ce = _add_anchor_regularization(
+        x=x,
+        mask=mask,
+        probs=probs,
+        dlogits=dlogits,
+        anchor=anchor,
+        anchor_beta=float(anchor_beta),
+    )
+    loss += float(anchor_beta) * anchor_ce
 
     grad_w = x.T @ dlogits  # (D, 40)
     grad_b = np.sum(dlogits, axis=0)  # (40,)
@@ -209,6 +357,8 @@ def _loss_and_grad_mlp(
     b2: np.ndarray,
     *,
     weight_decay: float,
+    anchor: LoadedBCModel | None = None,
+    anchor_beta: float = 0.0,
 ):
     """
     Cross-entropy mascherata + gradienti per MLP 1-hidden-layer.
@@ -236,10 +386,19 @@ def _loss_and_grad_mlp(
     if weight_decay > 0.0:
         loss += 0.5 * float(weight_decay) * (float(np.sum(w1 * w1)) + float(np.sum(w2 * w2)))
 
-    dlogits = probs
+    dlogits = probs.copy()
     dlogits[np.arange(bsz), y] -= 1.0
     dlogits /= float(bsz)
     dlogits[~mask] = 0.0
+    anchor_ce = _add_anchor_regularization(
+        x=x,
+        mask=mask,
+        probs=probs,
+        dlogits=dlogits,
+        anchor=anchor,
+        anchor_beta=float(anchor_beta),
+    )
+    loss += float(anchor_beta) * anchor_ce
 
     grad_w2 = h.T @ dlogits  # (H, 40)
     grad_b2 = np.sum(dlogits, axis=0)  # (40,)
@@ -342,6 +501,30 @@ def main() -> int:
         default=0.0,
         help="L2 weight decay (solo per `--model mlp`, default: 0).",
     )
+    parser.add_argument(
+        "--init",
+        default="",
+        help="Warm-start da un modello `.npz` MLP compatibile (stesse feature); utile per fine-tuning da v6.",
+    )
+    parser.add_argument(
+        "--bc-anchor",
+        default="",
+        help="Modello `.npz` congelato usato come anchor CE per preservare il comportamento base.",
+    )
+    parser.add_argument(
+        "--bc-anchor-beta",
+        type=float,
+        default=0.0,
+        help="Peso della regolarizzazione CE verso `--bc-anchor`. Default: 0.",
+    )
+    parser.add_argument(
+        "--filter-disagree-with-model",
+        default="",
+        help=(
+            "Tiene solo esempi in cui il target del dataset differisce dalla mossa scelta da questo modello `.npz`. "
+            "Utile per fine-tuning da v6 su sole correzioni teacher."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG")
     parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione validation (0..1)")
     args = parser.parse_args()
@@ -349,6 +532,13 @@ def main() -> int:
     data_path = Path(args.data)
     out_path = Path(args.out)
     encoder_version: EncoderVersion = str(args.encoder_version)
+    init_path = str(args.init).strip()
+    bc_anchor_path = str(args.bc_anchor).strip()
+    filter_disagree_path = str(args.filter_disagree_with_model).strip()
+    if float(args.bc_anchor_beta) < 0.0:
+        raise ValueError("--bc-anchor-beta deve essere >= 0")
+    if float(args.bc_anchor_beta) > 0.0 and not bc_anchor_path:
+        raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
 
     # Metadati UI (opzionali ma utili per la selezione del modello in frontend).
     #
@@ -379,7 +569,13 @@ def main() -> int:
         )
         return label, description_it
 
-    x_all, mask_all, y_all = _build_training_examples(data_path, encoder_version=encoder_version)
+    disagreement_agent = BCModelAgent.from_npz(filter_disagree_path) if filter_disagree_path else None
+    x_all, mask_all, y_all = _build_training_examples(
+        data_path,
+        encoder_version=encoder_version,
+        disagreement_agent=disagreement_agent,
+        disagreement_seed=int(args.seed),
+    )
 
     rng = np.random.default_rng(args.seed)
     n = x_all.shape[0]
@@ -399,8 +595,27 @@ def main() -> int:
 
     metrics: list[TrainMetrics] = []
     ui_label, ui_description_it = _make_ui_metadata(model=str(args.model))
+    init_model: LoadedBCModel | None = None
+    if init_path:
+        init_model = load_bc_model_npz(Path(init_path))
+        if int(init_model.feature_dim) != int(d):
+            raise ValueError(
+                "Warm-start non compatibile con l'encoder corrente: "
+                f"init.feature_dim={int(init_model.feature_dim)} dataset.feature_dim={int(d)}."
+            )
+
+    bc_anchor: LoadedBCModel | None = None
+    if bc_anchor_path:
+        bc_anchor = load_bc_model_npz(Path(bc_anchor_path))
+        if int(bc_anchor.feature_dim) != int(d):
+            raise ValueError(
+                "BC-anchor non compatibile con l'encoder corrente: "
+                f"anchor.feature_dim={int(bc_anchor.feature_dim)} dataset.feature_dim={int(d)}."
+            )
 
     if args.model == "linear":
+        if init_model is not None:
+            raise ValueError("`--init` per `train_bc.py` è supportato solo con `--model mlp`.")
         # Inizializzazione pesi (piccola).
         w = rng.normal(loc=0.0, scale=0.01, size=(d, 40)).astype(np.float32)
         b = np.zeros((40,), dtype=np.float32)
@@ -409,7 +624,15 @@ def main() -> int:
             train_losses = []
             train_accs = []
             for batch in _iter_minibatches(x_train, mask_train, y_train, batch_size=args.batch_size, rng=rng):
-                loss, grad_w, grad_b, masked = _loss_and_grad_linear(batch.x, batch.mask, batch.y, w, b)
+                loss, grad_w, grad_b, masked = _loss_and_grad_linear(
+                    batch.x,
+                    batch.mask,
+                    batch.y,
+                    w,
+                    b,
+                    anchor=bc_anchor,
+                    anchor_beta=float(args.bc_anchor_beta),
+                )
                 w -= float(lr) * grad_w
                 b -= float(lr) * grad_b
 
@@ -417,7 +640,15 @@ def main() -> int:
                 train_accs.append(_accuracy(masked, batch.y))
 
             # Val (full batch: semplice).
-            val_loss, _, _, val_masked = _loss_and_grad_linear(x_val, mask_val, y_val, w, b)
+            val_loss, _, _, val_masked = _loss_and_grad_linear(
+                x_val,
+                mask_val,
+                y_val,
+                w,
+                b,
+                anchor=bc_anchor,
+                anchor_beta=float(args.bc_anchor_beta),
+            )
             val_acc = _accuracy(val_masked, y_val)
 
             row = TrainMetrics(
@@ -446,6 +677,10 @@ def main() -> int:
             "encoder": f"encode_observation_2p:{encoder_version}",
             "encoder_version": encoder_version,
             "inference_overkill_guard": bool(args.inference_overkill_guard),
+            "init": init_path or None,
+            "bc_anchor_path": bc_anchor_path or None,
+            "bc_anchor_beta": float(args.bc_anchor_beta),
+            "filter_disagree_with_model": filter_disagree_path or None,
             "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
             "metrics": [asdict(metric) for metric in metrics],
         }
@@ -453,15 +688,24 @@ def main() -> int:
         print(f"Saved model: {out_path}")
         return 0
 
-    if args.hidden_dim <= 0:
+    if init_model is None and args.hidden_dim <= 0:
         raise ValueError("--hidden-dim deve essere > 0")
 
-    # MLP: inizializzazione piccola (stile Xavier/He molto semplificata).
-    hdim = int(args.hidden_dim)
-    w1 = (rng.normal(loc=0.0, scale=0.02, size=(d, hdim))).astype(np.float32)
-    b1 = np.zeros((hdim,), dtype=np.float32)
-    w2 = (rng.normal(loc=0.0, scale=0.02, size=(hdim, 40))).astype(np.float32)
-    b2 = np.zeros((40,), dtype=np.float32)
+    if init_model is not None:
+        if not isinstance(init_model, MLPBCModel):
+            raise ValueError("`--init` deve puntare a un modello MLP (chiavi w1/b1/w2/b2).")
+        w1 = init_model.w1.copy()
+        b1 = init_model.b1.copy()
+        w2 = init_model.w2.copy()
+        b2 = init_model.b2.copy()
+        hdim = int(w1.shape[1])
+    else:
+        # MLP: inizializzazione piccola (stile Xavier/He molto semplificata).
+        hdim = int(args.hidden_dim)
+        w1 = (rng.normal(loc=0.0, scale=0.02, size=(d, hdim))).astype(np.float32)
+        b1 = np.zeros((hdim,), dtype=np.float32)
+        w2 = (rng.normal(loc=0.0, scale=0.02, size=(hdim, 40))).astype(np.float32)
+        b2 = np.zeros((40,), dtype=np.float32)
 
     # Adam state.
     st_w1 = _adam_init(w1)
@@ -484,6 +728,8 @@ def main() -> int:
                 w2,
                 b2,
                 weight_decay=float(args.weight_decay),
+                anchor=bc_anchor,
+                anchor_beta=float(args.bc_anchor_beta),
             )
             _adam_update(w1, gw1, state=st_w1, lr=lr, t=t)
             _adam_update(b1, gb1, state=st_b1, lr=lr, t=t)
@@ -503,6 +749,8 @@ def main() -> int:
             w2,
             b2,
             weight_decay=float(args.weight_decay),
+            anchor=bc_anchor,
+            anchor_beta=float(args.bc_anchor_beta),
         )
         val_acc = _accuracy(val_masked, y_val)
 
@@ -533,6 +781,10 @@ def main() -> int:
         "encoder": f"encode_observation_2p:{encoder_version}",
         "encoder_version": encoder_version,
         "inference_overkill_guard": bool(args.inference_overkill_guard),
+        "init": init_path or None,
+        "bc_anchor_path": bc_anchor_path or None,
+        "bc_anchor_beta": float(args.bc_anchor_beta),
+        "filter_disagree_with_model": filter_disagree_path or None,
         "train": {
             "model": "mlp",
             "optimizer": "adam",

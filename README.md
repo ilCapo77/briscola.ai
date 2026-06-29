@@ -287,7 +287,43 @@ Idea didattica: prima un modello supervisionato che **imita** un teacher (Behavi
 
 **Spazio azioni**: “40 carte + action mask” (il modello sceglie tra 40 classi; la mask abilita solo le carte in mano).
 
-**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3` (v3 richiede dataset con `out_of_play` popolato).
+**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3` (v3 richiede dataset con `out_of_play` popolato). Per fine-tuning controllato supporta `--init` da un MLP `.npz` compatibile e `--bc-anchor ... --bc-anchor-beta ...` per restare vicino a un modello congelato. Per esperimenti di distillazione può filtrare il dataset con `--filter-disagree-with-model`: tiene solo gli esempi in cui il teacher sceglie una carta diversa dal modello base.
+
+**Distillazione PIMC** (`scripts/generate_pimc_teacher_dataset.py`): genera un JSONL compatibile con BC del tipo
+"v6 ovunque + correzioni PIMC nel finale". Di default le partite avanzano con il modello base v6 e il teacher etichetta
+anche le posizioni fuori finestra search delegando al fallback v6; usa `--only-pimc-window` per salvare solo esempi di
+finale/semi-finale:
+
+```bash
+python scripts/generate_pimc_teacher_dataset.py \
+  --model ./data/models/best_a2c_v6.npz \
+  --out ./data/pimc_teacher_v7.jsonl \
+  --num-examples 50000 \
+  --determinizations 16 \
+  --max-unknown-cards 8
+
+python scripts/train_bc.py \
+  --data ./data/pimc_teacher_v7.jsonl \
+  --out ./data/models/pimc_distill_v7_candidate.npz \
+  --encoder-version v3 \
+  --model mlp \
+  --init ./data/models/best_a2c_v6.npz \
+  --bc-anchor ./data/models/best_a2c_v6.npz \
+  --bc-anchor-beta 0.01 \
+  --inference-overkill-guard
+
+# Variante diagnostica: addestra solo sulle correzioni teacher != v6.
+python scripts/train_bc.py \
+  --data ./data/pimc_teacher_v7.jsonl \
+  --out ./data/models/pimc_distill_v7_disagree_candidate.npz \
+  --encoder-version v3 \
+  --model mlp \
+  --init ./data/models/best_a2c_v6.npz \
+  --bc-anchor ./data/models/best_a2c_v6.npz \
+  --bc-anchor-beta 0.20 \
+  --filter-disagree-with-model ./data/models/best_a2c_v6.npz \
+  --inference-overkill-guard
+```
 
 **Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
 - **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.
