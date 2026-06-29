@@ -455,6 +455,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const aiModelId = config.aiModelId || null;
             const aiModelCompatible = config.aiModelCompatible === true;
             const aiModelCompatibilityReasonIt = config.aiModelCompatibilityReasonIt || null;
+            const agentRequiresModel = aiAgent === 'bc_model' || aiAgent === 'bc_model_hybrid_endgame';
 
             // Il nome del player entra negli snapshot e nei messaggi di partita
             // (es. "X vince!"): teniamolo corto anche quando il modello selezionato
@@ -466,10 +467,10 @@ document.addEventListener('DOMContentLoaded', () => {
                 throw new Error('Devi accettare la raccolta dati (anonima) per avviare la partita.');
             }
 
-            if (aiAgent === 'bc_model' && !aiModelId) {
+            if (agentRequiresModel && !aiModelId) {
                 throw new Error('Seleziona un modello (.npz) prima di avviare la partita.');
             }
-            if (aiAgent === 'bc_model' && !aiModelCompatible) {
+            if (agentRequiresModel && !aiModelCompatible) {
                 const reason = aiModelCompatibilityReasonIt ? `\n\nMotivo: ${aiModelCompatibilityReasonIt}` : '';
                 throw new Error(`Il modello selezionato non è compatibile.${reason}`);
             }
@@ -481,7 +482,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 client_id: _getClientId(),
                 consent_to_data_collection: config.consentToDataCollection === true,
             };
-            if (aiAgent === 'bc_model') {
+            if (agentRequiresModel) {
                 createPayload.ai_model_id = aiModelId;
             }
 

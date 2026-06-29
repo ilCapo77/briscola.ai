@@ -250,6 +250,26 @@ MILESTONES: list[dict[str, Any]] = [
         "impact": "Frontend/server default now points to v6; cloud rollout needs the v0.12.0 asset URL in env.",
         "source": "data/models/best_a2c_v6.npz + a2c_v6_scaling_seed501_5m_numba",
     },
+    {
+        "order": 9,
+        "date": "2026-06-29",
+        "model_id": "best_a2c_v6",
+        "type": "runtime_default",
+        "decision": "Make v6 + exact endgame solver the default UI opponent for v0.13.0.",
+        "why": (
+            "The solver is exact, anti-cheat, and effectively free at runtime; it preserves v6 during the game "
+            "and improves the fully-known endgame instead of trying to distill solver behavior into the network."
+        ),
+        "evidence": (
+            "control_solver(v6) / bc_model_hybrid_endgame equivalence; "
+            "PIMC max_unknown=0 sweep showed roughly +1.3..+1.6 avg diff vs v6."
+        ),
+        "impact": (
+            "Runtime default changes to bc_model_hybrid_endgame(best_a2c_v6); "
+            "model progression chart remains unchanged."
+        ),
+        "source": "src/briscola_ai/ai/agents/registry.py + PLAN.md",
+    },
 ]
 
 

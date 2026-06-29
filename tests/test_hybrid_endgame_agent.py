@@ -11,6 +11,9 @@ from __future__ import annotations
 
 import random
 from dataclasses import replace
+from pathlib import Path
+
+import numpy as np
 
 from briscola_ai.ai.agents import (
     HeuristicAgentV2,
@@ -20,6 +23,7 @@ from briscola_ai.ai.agents import (
     list_agent_specs,
     reconstruct_endgame_state,
 )
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.endgame.solver import solve_endgame
 from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.domain.card_id import card_to_id
@@ -49,6 +53,15 @@ class FixedFallbackAgent:
 def _all_cards() -> tuple[Card, ...]:
     """Mazzo completo nell'ordine canonico del dominio."""
     return tuple(Card(suit, rank) for suit in Suit for rank in Rank)
+
+
+def _write_linear_bc_model(path: Path, *, bias_action: int = 0) -> None:
+    """Salva un modello lineare minimale per testare fallback `.npz` dell'agente ibrido."""
+    d = int(FEATURE_DIM_2P_V1)
+    w = np.zeros((d, 40), dtype=np.float32)
+    b = np.zeros((40,), dtype=np.float32)
+    b[bias_action] = 1.0
+    np.savez(path, w=w, b=b, metadata_json=f'{{"format":"linear_softmax_bc_v1","feature_dim":{d}}}')
 
 
 def _partitioned_endgame_state(
@@ -277,12 +290,40 @@ def test_hybrid_endgame_best_a2c_variant_uses_model_fallback() -> None:
     assert isinstance(agent.fallback, BCModelAgent)
 
 
+def test_bc_model_hybrid_endgame_variant_uses_selected_model_fallback(tmp_path: Path) -> None:
+    """La variante UI usa il `.npz` selezionato come fallback e il solver solo nel finale."""
+    model_path = tmp_path / "selected_model.npz"
+    _write_linear_bc_model(model_path)
+
+    assert "bc_model_hybrid_endgame" in {spec.name for spec in list_agent_specs()}
+
+    agent = build_agent("bc_model_hybrid_endgame", model_path=model_path)
+    assert isinstance(agent, HybridEndgameAgent)
+    assert agent.name == "bc_model_hybrid_endgame"
+    assert isinstance(agent.fallback, BCModelAgent)
+    assert agent.fallback.model_path == model_path
+
+
 def test_hybrid_endgame_best_a2c_falls_back_to_model_before_endgame() -> None:
     """A mazzo non vuoto la variante deve delegare al modello best_a2c (non al solver)."""
     state = new_game_state(2, seed=42)
     observation = make_player_observation(state, player_index=0)
 
     agent = build_agent("hybrid_endgame_best_a2c")
+    model_choice = agent.fallback.choose_card_index(observation, rng=random.Random(7))
+    hybrid_choice = agent.choose_card_index(observation, rng=random.Random(7))
+
+    assert hybrid_choice == model_choice
+
+
+def test_bc_model_hybrid_endgame_falls_back_to_selected_model_before_endgame(tmp_path: Path) -> None:
+    """Prima del finale la nuova variante deve comportarsi come il modello selezionato."""
+    model_path = tmp_path / "selected_model.npz"
+    _write_linear_bc_model(model_path)
+    state = new_game_state(2, seed=42)
+    observation = make_player_observation(state, player_index=0)
+
+    agent = build_agent("bc_model_hybrid_endgame", model_path=model_path)
     model_choice = agent.fallback.choose_card_index(observation, rng=random.Random(7))
     hybrid_choice = agent.choose_card_index(observation, rng=random.Random(7))
 

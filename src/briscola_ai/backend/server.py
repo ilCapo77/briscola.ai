@@ -31,7 +31,7 @@ from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, build_agent, list_agent_specs
+from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, agent_uses_selected_model, build_agent, list_agent_specs
 from ..ai.models import (
     DEFAULT_MODEL_ID,
     get_models_dir_from_env,
@@ -375,9 +375,9 @@ def _agent_for_seat(cfg: AiSeatConfig) -> Agent:
 
     Nota: il caricamento dei modelli è cached, quindi ricostruire l'agente a ogni mossa è cheap.
     """
-    if cfg.agent_name == "bc_model":
+    if agent_uses_selected_model(cfg.agent_name):
         path = resolve_model_path(get_models_dir_from_env(), cfg.model_id or "")
-        return build_agent("bc_model", model_path=path)
+        return build_agent(cfg.agent_name, model_path=path)
     return build_agent(cfg.agent_name)
 
 
@@ -432,7 +432,8 @@ async def list_ai_agents():
     `available` dice se l'agente è realmente giocabile nel deploy corrente:
     - agenti che richiedono un modello "bundled" (`spec.requires_model_id`, es. `best_a2c.npz`) sono
       disponibili solo se quel file è presente nella directory modelli;
-    - `bc_model` è disponibile se esiste almeno un modello `.npz` compatibile nel catalogo;
+    - gli agenti che richiedono un modello scelto (`bc_model`, `bc_model_hybrid_endgame`) sono
+      disponibili se esiste almeno un modello `.npz` compatibile nel catalogo;
     - gli altri (random/greedy/euristiche/hybrid_endgame) sono sempre disponibili.
     La UI usa il flag per disabilitare le opzioni rotte (evita "manca il modello") e per scegliere
     un default sensato.
@@ -442,7 +443,8 @@ async def list_ai_agents():
 
     agents = []
     for spec in list_agent_specs():
-        if spec.name == "bc_model":
+        requires_model_selection = agent_uses_selected_model(spec.name)
+        if requires_model_selection:
             available = has_compatible_model
         elif spec.requires_model_id is not None:
             available = (models_dir / spec.requires_model_id).exists()
@@ -454,6 +456,7 @@ async def list_ai_agents():
                 "label": spec.label,
                 "description_it": spec.description_it,
                 "requires_model_id": spec.requires_model_id,
+                "requires_model_selection": requires_model_selection,
                 "available": available,
             }
         )
@@ -541,7 +544,7 @@ async def create_game(config: GameConfig):
         # Config IA (solo 2-player, come la UI attuale).
         ai_seats: dict[int, AiSeatConfig] = {}
         if config.num_players == 2:
-            if ai_agent_name == "bc_model":
+            if agent_uses_selected_model(ai_agent_name):
                 models_dir = get_models_dir_from_env()
                 # Validiamo il path del modello PRIMA di salvare la sessione (come prima).
                 model_path = resolve_model_path(models_dir, config.ai_model_id or "")
@@ -575,7 +578,7 @@ async def create_game(config: GameConfig):
                 "seed": seed,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
                 "ai_model_id": config.ai_model_id
-                if (config.num_players == 2 and ai_agent_name == "bc_model")
+                if (config.num_players == 2 and agent_uses_selected_model(ai_agent_name))
                 else None,
             }
         ]
@@ -592,7 +595,7 @@ async def create_game(config: GameConfig):
                 "is_team_game": state.is_team_game,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
                 "ai_model_id": config.ai_model_id
-                if (config.num_players == 2 and ai_agent_name == "bc_model")
+                if (config.num_players == 2 and agent_uses_selected_model(ai_agent_name))
                 else None,
                 "client_id": config.client_id,
                 "consent_to_data_collection": bool(config.consent_to_data_collection is True),
@@ -609,7 +612,9 @@ async def create_game(config: GameConfig):
             "is_team_game": state.is_team_game,
             "player_names": [p.name for p in state.players],
             "ai_agent": ai_agent_name if config.num_players == 2 else None,
-            "ai_model_id": config.ai_model_id if (config.num_players == 2 and ai_agent_name == "bc_model") else None,
+            "ai_model_id": config.ai_model_id
+            if (config.num_players == 2 and agent_uses_selected_model(ai_agent_name))
+            else None,
         }
     except ValueError as e:
         raise HTTPException(status_code=400, detail=str(e))

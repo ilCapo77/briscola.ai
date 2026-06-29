@@ -4,10 +4,10 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
 
 ## Stato Corrente
 
-- Versione progetto: `0.12.1` (`pyproject.toml`).
+- Versione progetto: `0.13.0` (`pyproject.toml`).
 - Runtime/tooling: Python 3.14, FastAPI, Pydantic v2, `ruff`, `mypy`, `pytest`. Deps runtime lazy per il cloud: `redis`, `psycopg`. Dev-only: `fakeredis`, `playwright`.
 - Dominio canonico: `src/briscola_ai/domain/`, con `GameState` immutabile e `step()` come transizione pura.
-- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. Release `v0.12.1` deployata con modello v6 come default; rollout cloud v6 verificato in produzione.
+- Backend/UI: HTTP + WebSocket, UI statica servita dal backend. Stato partita in `GameSessionStore` (in-memory in locale, **Redis** se `REDIS_URL`); realtime via **pub/sub** dello store; event log SQLite o **Postgres** (`DATABASE_URL`). **Deployato** su FastAPI Cloud: <https://briscolaai.fastapicloud.dev>. Release cloud corrente `v0.12.1` con modello v6 verificata; `v0.13.0` prepara il default runtime `v6 + solver endgame`.
 - Anti-cheat: agenti e modelli ricevono `PlayerObservation`, non `GameState` completo.
 - Fast path: 2-player numerico Python/Numba per training/evaluation ad alto throughput.
 - Encoder supportati: v1, v2, v3.
@@ -17,7 +17,7 @@ Questo file deve restare breve e utile per decidere cosa fare dopo. I dettagli s
   - v3: `FEATURE_DIM_2P_V3 = 310`
 - Modello consigliato: `data/models/best_a2c_v6.npz` (encoder v3, guard anti-overkill ON).
 - Modelli precedenti ancora utili per confronto/regressioni: `data/models/best_a2c_v5.npz`, `data/models/best_a2c_v4.npz`, `data/models/best_a2c_v3.npz`, `data/models/best_a2c.npz` (legacy encoder v2).
-- Default UI: avversario = modello consigliato (`bc_model` + `BRISCOLA_DEFAULT_MODEL_ID`, oggi `best_a2c_v6.npz`). `GET /api/ai/models` espone `recommended_model`; la UI seleziona quel modello se compatibile, altrimenti il `best_a2c_vN` più recente disponibile. `GET /api/ai/agents` espone `available`/`requires_model_id` e la UI disabilita gli avversari il cui modello bundle manca. Il default lato API resta `random` se non specificato. In cloud, per restare dentro il limite disco, mantenere solo pochi asset (v6 obbligatorio; v5 opzionale per confronto manuale).
+- Default UI: avversario = `bc_model_hybrid_endgame` + modello consigliato (`BRISCOLA_DEFAULT_MODEL_ID`, oggi `best_a2c_v6.npz`), cioè v6 durante la partita e solver esatto a mazzo vuoto. `GET /api/ai/models` espone `recommended_model`; la UI seleziona quel modello se compatibile, altrimenti il `best_a2c_vN` più recente disponibile. `GET /api/ai/agents` espone `available`/`requires_model_id`/`requires_model_selection` e la UI disabilita gli avversari non giocabili. Il default lato API resta `random` se non specificato. In cloud, per restare dentro il limite disco, mantenere solo pochi asset (v6 obbligatorio; v5 opzionale per confronto manuale).
 - Coverage badge README: manuale via Shields.io.
 
 Comandi quality gate:
@@ -119,7 +119,7 @@ roadmap; non usarlo come archivio di ogni run locale.
 - Cache-busting asset automatico (versione + mtime degli static).
 - Homepage didattica (tagline + "Cos'è" + link GitHub), punti IA nascosti (fairness), layout mobile fit-to-viewport, nota anti-cheat sotto il bottone, preload immagini carte, spinner di avvio partita, footer su una riga con icona GitHub e versione software.
 - Suite ermetica (`tests/conftest.py` azzera `REDIS_URL`/`DATABASE_URL`); store/event-log testati con `fakeredis`/connessione fake.
-- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.12.1` pubblicata e deployata con `best_a2c_v6.npz`.
+- Repo/release: history senza trailer `Co-Authored-By`; serie completa di tag di versione (`v0.1.0` → corrente) su GitHub; release `v0.12.1` pubblicata e deployata con `best_a2c_v6.npz`. `v0.13.0` cambia il default runtime a `bc_model_hybrid_endgame` senza nuovo asset modello.
 - **Deploy COMPLETATO** su FastAPI Cloud (Redis collegato): <https://briscolaai.fastapicloud.dev>. Postgres/event log e modalità dataset sono attivabili via `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset` quando serve raccogliere dataset umano.
 - Rollout cloud `v0.12.1`/v6 completato e verificato: `/version` espone `recommended_model=best_a2c_v6.npz` e
   `recommended_model_present=true`; la UI mostra la label v6.
@@ -237,6 +237,10 @@ Passi consigliati:
   punti medi su v6 puro. Trattarlo come candidato a basso rischio: l'unità deployabile futura diventa **rete + solver
   runtime**, non solo `.npz`. Non serve distillare il solver dentro la rete: la lineage di v6 discende già da teacher
   con endgame solver, ma il vantaggio del solver non è sopravvissuto nei pesi.
+- Implementazione app: aggiunto agente `bc_model_hybrid_endgame`, cioè modello `.npz` scelto dalla UI + solver esatto
+  a mazzo vuoto. La UI lo usa come default quando esiste un modello compatibile, mantenendo il selettore modello.
+  Prossimo passo prima del rollout: validazione seat-fair `bc_model_hybrid_endgame(best_a2c_v6)` vs `bc_model(best_a2c_v6)`
+  su `>=2000` partite e smoke manuale in locale/cloud.
 - Asse sperimentale successivo: usare PIMC come **teacher offline** e distillare solo le correzioni di **search** in un
   eventuale `best_a2c_v7` veloce:
   - generare posizioni da self-play/replay v6, soprattutto finale e semi-finale: script

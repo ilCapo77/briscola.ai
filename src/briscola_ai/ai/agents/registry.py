@@ -34,6 +34,16 @@ BC_MODEL_SPEC = AgentSpec(
     ),
 )
 
+BC_MODEL_HYBRID_ENDGAME_SPEC = AgentSpec(
+    name="bc_model_hybrid_endgame",
+    label="Modello locale + solver finale",
+    description_it=(
+        "Usa il modello `.npz` scelto dalla UI durante la partita e, a mazzo vuoto, passa al solver "
+        "esatto del finale ricostruito dalla sola osservazione pubblica. È la variante runtime "
+        "consigliata per testare il modello corrente con finale esatto."
+    ),
+)
+
 BEST_A2C_SPEC = AgentSpec(
     name="best_a2c",
     label="Best A2C (locale)",
@@ -45,6 +55,7 @@ BEST_A2C_SPEC = AgentSpec(
 )
 
 _BEST_A2C_DEFAULT_MODEL_ID = "best_a2c.npz"
+_SELECTED_MODEL_AGENT_NAMES = frozenset({BC_MODEL_SPEC.name, BC_MODEL_HYBRID_ENDGAME_SPEC.name})
 
 HYBRID_ENDGAME_BEST_A2C_SPEC = AgentSpec(
     name="hybrid_endgame_best_a2c",
@@ -72,8 +83,14 @@ def list_agent_specs() -> list[AgentSpec]:
         HeuristicAgentV2.spec,
         HybridEndgameAgent.spec,
         HYBRID_ENDGAME_BEST_A2C_SPEC,
+        BC_MODEL_HYBRID_ENDGAME_SPEC,
         BC_MODEL_SPEC,
     ]
+
+
+def agent_uses_selected_model(name: str) -> bool:
+    """Ritorna True se l'agente richiede un `model_id` scelto dal catalogo `.npz`."""
+    return name in _SELECTED_MODEL_AGENT_NAMES
 
 
 def _load_best_a2c_agent() -> BCModelAgent:
@@ -124,6 +141,14 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
         if model_path is None:
             raise ValueError("Agente 'bc_model' richiede `model_path` (file .npz)")
         return BCModelAgent.from_npz(model_path)
+
+    if name == "bc_model_hybrid_endgame":
+        if model_path is None:
+            raise ValueError("Agente 'bc_model_hybrid_endgame' richiede `model_path` (file .npz)")
+        return HybridEndgameAgent(
+            fallback=BCModelAgent.from_npz(model_path),
+            name="bc_model_hybrid_endgame",
+        )
 
     try:
         return _AGENT_BUILDERS[name]()

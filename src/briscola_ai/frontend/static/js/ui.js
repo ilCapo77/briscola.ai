@@ -7,6 +7,8 @@
 const UI = (() => {
     const CARD_ASSET_BASE = '/static/assets/cards';
     const DATA_CONSENT_STORAGE_KEY = 'briscola_data_collection_consent';
+    const PLAYER_NAME_STORAGE_KEY = 'briscola_player_name';
+    const DEFAULT_PLAYER_NAME = 'Giocatore';
 
     // Map rank names to numbers for image paths
     const RANK_TO_NUMBER = {
@@ -58,7 +60,7 @@ const UI = (() => {
     let aiAgentMetaByName = {};
     let aiAgentCommonNoteIt = '';
 
-    // Modelli locali selezionabili (solo per `bc_model`).
+    // Modelli locali selezionabili dagli agenti che richiedono un `.npz`.
     let aiModelMetaById = {};
     let recommendedAiModelId = '';
 
@@ -85,6 +87,43 @@ const UI = (() => {
         } catch (e) {
             // Il consenso viene comunque inviato nel payload della partita corrente.
         }
+    };
+
+    const _readStoredPlayerName = () => {
+        try {
+            const value = window.localStorage.getItem(PLAYER_NAME_STORAGE_KEY);
+            return typeof value === 'string' && value.trim().length > 0 ? value.trim() : '';
+        } catch (e) {
+            return '';
+        }
+    };
+
+    const _writeStoredPlayerName = (name) => {
+        try {
+            const value = typeof name === 'string' ? name.trim() : '';
+            if (value) {
+                window.localStorage.setItem(PLAYER_NAME_STORAGE_KEY, value);
+            } else {
+                window.localStorage.removeItem(PLAYER_NAME_STORAGE_KEY);
+            }
+        } catch (e) {
+            // Storage disabilitato: il nome resta valido per la partita corrente.
+        }
+    };
+
+    const _restorePlayerNameInput = () => {
+        if (!elements.playerNameInput) return;
+        const storedName = _readStoredPlayerName();
+        if (storedName) elements.playerNameInput.value = storedName;
+    };
+
+    const _currentPlayerName = () => {
+        const raw = elements.playerNameInput?.value || '';
+        return raw.trim() || DEFAULT_PLAYER_NAME;
+    };
+
+    const _handlePlayerNameChange = () => {
+        _writeStoredPlayerName(elements.playerNameInput?.value || '');
     };
 
     const _restoreDataConsentCheckbox = () => {
@@ -115,6 +154,11 @@ const UI = (() => {
         const id = model?.id || '';
         const filename = model?.filename || '';
         return Boolean(recommendedAiModelId) && (id === recommendedAiModelId || filename === recommendedAiModelId);
+    };
+
+    const _agentRequiresModelSelection = (agentName) => {
+        const meta = agentName ? aiAgentMetaByName[agentName] : null;
+        return meta?.requires_model_selection === true || agentName === 'bc_model' || agentName === 'bc_model_hybrid_endgame';
     };
 
     const _modelRecencyScore = (model) => {
@@ -174,13 +218,13 @@ const UI = (() => {
 
     const _updateAiModelUi = () => {
         const agentName = elements.aiAgentSelect?.value;
-        const isBcModel = agentName === 'bc_model';
+        const requiresModel = _agentRequiresModelSelection(agentName);
 
         if (elements.aiModelGroup) {
-            elements.aiModelGroup.classList.toggle('hidden', !isBcModel);
+            elements.aiModelGroup.classList.toggle('hidden', !requiresModel);
         }
 
-        if (!isBcModel) {
+        if (!requiresModel) {
             if (elements.aiModelDescription) elements.aiModelDescription.textContent = '';
             return;
         }
@@ -304,15 +348,19 @@ const UI = (() => {
     // --- Public API ---
 
     const init = (callbacks) => {
+        _restorePlayerNameInput();
+
         elements.gameForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (gameStartupInProgress || !callbacks.onStartGame) return;
             const modelId = elements.aiModelSelect?.value || null;
             const modelMeta = modelId ? aiModelMetaById[modelId] : null;
+            const playerName = _currentPlayerName();
+            _writeStoredPlayerName(playerName);
             _setGameStartupLoading(true);
             try {
                 await callbacks.onStartGame({
-                    playerName: elements.playerNameInput.value || 'Giocatore',
+                    playerName,
                     aiAgent: elements.aiAgentSelect?.value || 'random',
                     aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
                     aiModelId: modelId,
@@ -331,6 +379,7 @@ const UI = (() => {
             _updateAiModelUi();
         });
         elements.aiModelSelect?.addEventListener('change', _updateAiModelUi);
+        elements.playerNameInput?.addEventListener('change', _handlePlayerNameChange);
         elements.dataConsentCheckbox?.addEventListener('change', _handleDataConsentChange);
 
         elements.newGame.addEventListener('click', () => {
@@ -369,13 +418,14 @@ const UI = (() => {
             elements.aiAgentSelect.appendChild(option);
         });
 
-        // Default: il "modello migliore" (bc_model + modello consigliato) se disponibile; in caso
-        // contrario euristica v1; altrimenti il primo agente disponibile. Gli altri restano
+        // Default: il "modello migliore" con solver finale se disponibile; in caso contrario il modello
+        // puro, poi euristica v1; altrimenti il primo agente disponibile. Gli altri restano
         // selezionabili solo se l'utente vuole cambiare avversario.
         const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
         const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
         let defaultAgent;
-        if (isAvail('bc_model')) defaultAgent = 'bc_model';
+        if (isAvail('bc_model_hybrid_endgame')) defaultAgent = 'bc_model_hybrid_endgame';
+        else if (isAvail('bc_model')) defaultAgent = 'bc_model';
         else if (isAvail('heuristic_v1')) defaultAgent = 'heuristic_v1';
         else defaultAgent = firstAvailable || agents[0]?.name || 'random';
         elements.aiAgentSelect.value = defaultAgent;
