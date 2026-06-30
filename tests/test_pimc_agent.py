@@ -226,3 +226,102 @@ def test_rollout_to_terminal_handles_invalid_rollout_index_defensively() -> None
     assert final_state.game_over is True
     assert final_state.players[0].points + final_state.players[1].points == 120
     assert metrics.coerced_moves > 0
+
+
+def test_endgame_reconstruction_matches_real_solver_on_seed_suite() -> None:
+    """
+    Stress anti-cheat: su molti endgame reali il solver da observation deve scegliere come il solver reale.
+
+    Controlliamo sia lo stato a tavolo vuoto sia il caso "secondo di mano" ottenuto giocando la prima
+    carta della presa successiva. Il delta assoluto differisce perché la ricostruzione azzera le prese,
+    ma la mossa ottima e il delta futuro devono coincidere a meno del delta punti già acquisito.
+    """
+    for seed in range(100, 140):
+        state = _play_with_heuristics_until_deck_empty(seed=seed)
+
+        for cursor in (state, step(state, PlayCardAction(player_index=state.current_turn, card_index=0))[0]):
+            observation = make_player_observation(cursor, cursor.current_turn)
+            reconstructed = reconstruct_endgame_state(observation)
+
+            real_solution = solve_endgame(cursor)
+            reconstructed_solution = solve_endgame(reconstructed)
+            base_delta = cursor.players[0].points - cursor.players[1].points
+
+            assert reconstructed_solution.best_card_index == real_solution.best_card_index
+            assert real_solution.final_delta_p0_p1 == base_delta + reconstructed_solution.final_delta_p0_p1
+
+
+def test_determinize_observation_stress_preserves_public_invariants() -> None:
+    """
+    Stress della determinizzazione: ogni stato campionato deve rispettare informazione pubblica e unicità.
+
+    Questo non può provare che la distribuzione campionata sia "la migliore" strategicamente, ma blocca i
+    bug più pericolosi: leak di carte note, duplicati, deck/mani con size sbagliate e punteggi incoerenti.
+    """
+    for seed in range(200, 220):
+        state = _play_with_heuristics_until(seed=seed, max_deck_size=6)
+        observation = make_player_observation(state, state.current_turn)
+        my_hand_ids = {card_to_id(card) for card in observation.hand}
+        out_of_play_ids = {card_id for card_id, value in enumerate(observation.out_of_play_cards_onehot) if value}
+        table_ids = {card_to_id(card) for card, _player_index in observation.table_cards}
+
+        for sample in range(8):
+            determinized = determinize_observation(observation, rng=random.Random(seed * 1000 + sample))
+            opponent_index = 1 - observation.player_index
+            hidden_ids = {
+                *(card_to_id(card) for card in determinized.players[opponent_index].hand),
+                *(card_to_id(card) for card in determinized.deck),
+            }
+
+            assert determinized.current_turn == observation.current_turn
+            assert determinized.first_player == observation.first_player
+            assert determinized.table_cards == observation.table_cards
+            assert determinized.players[observation.player_index].hand == observation.hand
+            assert len(determinized.players[opponent_index].hand) == observation.players_hand_sizes[opponent_index]
+            assert len(determinized.deck) == observation.deck_size
+            assert tuple(player.points for player in determinized.players) == tuple(observation.players_points)
+            assert hidden_ids.isdisjoint(my_hand_ids)
+            assert hidden_ids.isdisjoint(out_of_play_ids)
+            assert table_ids.issubset(out_of_play_ids)
+
+            all_ids = _state_card_ids(determinized)
+            assert len(all_ids) == 40
+            assert len(set(all_ids)) == 40
+
+
+def test_pimc_search_stress_has_no_failed_or_coerced_moves() -> None:
+    """
+    Stress PIMC su stati semi-finali generati dal dominio.
+
+    Usiamo agenti euristici deterministici come fallback/rollout per rendere il test stabile. La search deve
+    attivarsi, scegliere sempre una carta valida e non accumulare determinizzazioni/rollout falliti né mosse
+    normalizzate difensivamente.
+    """
+    metrics = PIMCSearchStats()
+    agent = PIMCAgent(
+        rollout_agent=HeuristicAgentV2(),
+        fallback=HeuristicAgentV2(),
+        num_determinizations=4,
+        max_unknown_cards=10,
+        metrics=metrics,
+    )
+
+    for seed in range(300, 312):
+        state = _play_with_heuristics_until(seed=seed, max_deck_size=4)
+        observation = make_player_observation(state, state.current_turn)
+
+        choice = agent.choose_card_index(observation, rng=random.Random(seed ^ 0xA11CE))
+
+        assert 0 <= choice < len(observation.hand)
+        assert agent.last_search_diagnostics is not None
+        diagnostics = agent.last_search_diagnostics
+        assert diagnostics.best_card_index == choice
+        assert diagnostics.successful_determinizations == agent.num_determinizations
+        assert diagnostics.failed_determinizations == 0
+        assert diagnostics.failed_rollouts == 0
+        assert all(value.rollout_count == agent.num_determinizations for value in diagnostics.action_values)
+
+    assert metrics.search_decisions == 12
+    assert metrics.failed_determinizations == 0
+    assert metrics.failed_rollouts == 0
+    assert metrics.coerced_moves == 0

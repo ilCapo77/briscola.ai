@@ -248,6 +248,10 @@ Passi consigliati:
 - Implementazione PIMC app: aggiunto agente selezionabile `bc_model_pimc_16x8`, cioè modello `.npz` scelto dalla UI
   come fallback/rollout, solver a mazzo vuoto e PIMC con `16` determinizzazioni quando le carte vive ignote sono
   `<=8`. Non è default: serve come modalità avanzata per misurare costo CPU e feedback umano.
+- Hardening correttezza aggiunto: stress test su suite di seed reali verificano solver endgame reale vs ricostruito
+  da `PlayerObservation` anche secondo di mano, determinizzazioni PIMC senza duplicati/leak e PIMC search senza
+  determinizzazioni/rollout falliti né mosse normalizzate. Questi test alzano la fiducia sugli invarianti, ma non
+  trasformano PIMC in una garanzia di ottimalità.
 - Follow-up "più mosse PIMC" dopo export produzione `ai_action`: in una partita reale `bc_model_pimc_16x8` ha prodotto
   `15` fallback, `2` search e `3` solver. Test diretti con seed `20260629` non supportano l'allargamento della finestra:
   `16×12` vs `16×8`, `500` partite, score `0.4900` (CI95 `0.4464..0.5337`), avg diff `-0.80`
