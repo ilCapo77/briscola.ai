@@ -458,7 +458,8 @@ document.addEventListener('DOMContentLoaded', () => {
             const agentRequiresModel =
                 config.aiAgentRequiresModelSelection === true ||
                 aiAgent === 'bc_model' ||
-                aiAgent === 'bc_model_hybrid_endgame';
+                aiAgent === 'bc_model_hybrid_endgame' ||
+                aiAgent === 'bc_model_value_lookahead_8x8';
 
             // Il nome del player entra negli snapshot e nei messaggi di partita
             // (es. "X vince!"): teniamolo corto anche quando il modello selezionato

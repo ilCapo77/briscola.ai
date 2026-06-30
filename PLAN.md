@@ -5,13 +5,14 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.15.0`.
+- Versione progetto: `0.16.0`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
 - Modello consigliato: `best_a2c_v6.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
-- Default UI: `bc_model_hybrid_endgame` + modello consigliato, cioè v6 durante la partita e solver esatto a mazzo
-  vuoto.
-- Avversario avanzato selezionabile: `bc_model_pimc_16x8`, cioè PIMC(v6, 16 determinizzazioni, max 8 carte vive
-  ignote) + solver finale.
+- Default UI: `bc_model` + modello consigliato, cioè v6 puro. È la baseline più leggibile per giocatori umani e audit.
+- Seconda scelta vicina nel menu: `bc_model_value_lookahead_8x8`, cioè v6 + solver finale + V-lookahead depth-1
+  quando restano al massimo 8 carte vive ignote.
+- Altro avversario avanzato selezionabile: `bc_model_pimc_16x8`, cioè PIMC(v6, 16 determinizzazioni, max 8 carte
+  vive ignote) + solver finale.
 - Backend: FastAPI + WebSocket, stato in `GameSessionStore` (Redis in cloud), event log SQLite/Postgres.
 - Dataset cloud: `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`; in `v0.15.0` il backend salva anche eventi
   `ai_action` auditabili per mosse IA/PIMC.
@@ -38,7 +39,8 @@ Non fare un v7 solo replicando lo stesso recipe con più partite: lo scaling pol
 Il solver endgame 2-player a mazzo vuoto è esatto, usa `domain.step()` e viene eseguito solo dopo ricostruzione da
 `PlayerObservation`.
 
-Decisione: `v6 + solver` è il default prudente in produzione.
+Decisione: `v6 + solver` resta una variante runtime valida e a basso rischio, ma non è il default UI mentre raccogliamo
+feedback umano comparabile sul v6 puro e sugli agenti avanzati.
 
 ### PIMC È Utile Come Runtime, Non Come Modello Distillato
 
@@ -78,8 +80,8 @@ Stage 0 validato con dataset `v6 + solver`, `epsilon=0.10`, label pulita `v6-con
 - gate ranking vs diagnostica PIMC 64×8, 5000 record search: top1 `0.7276` vs reference v6 `0.5278`;
   strong/reliable top1 `0.8395` vs `0.6359`; pairwise `0.8016`, strong pairwise `0.8502`; `records_failed=0`.
 
-Decisione: procedere a Stage 1, cioè agente `v6 + solver + V-lookahead depth-1`, e misurarlo seat-fair contro
-`v6 + solver`. Non è ancora un nuovo best né un default UI.
+Decisione: esporre `v6 + solver + V-lookahead depth-1` come avversario selezionabile vicino a `bc_model`. Non è ancora
+un nuovo best `.npz` né il default UI.
 
 ### Population League Declassata
 
@@ -101,13 +103,14 @@ Stato:
 - il guard anti-overkill è attivo di default sulle sole decisioni V-lookahead; fallback e solver restano invariati;
 - held-out 4000 partite vs `v6 + solver`, seed diverso: avg diff `+2.65`, CI95 `+1.85..+3.45`; score rate `0.5421`,
   CI95 `0.5267..0.5575`; `0` determinizzazioni/leaf eval fallite; circa `0.016s` per mossa lookahead;
-- decision-quality small vs `heuristic_v1`: avg diff `+18.95` vs baseline `v6+solver` `+17.47`; trump waste `0.23%`
-  vs `0.20%`; trump overkill `11.51%` vs `11.60%`; low-lead overkill `0.22%` vs `0.46%`.
+- decision-quality medium vs `heuristic_v1`: avg diff `+20.09` vs baseline `v6+solver` `+18.60`; trump waste
+  `0.24%` vs `0.21%`; trump overkill `11.84%` vs `11.66%`; low-lead overkill `0.22%` vs `0.40%`.
 
 Fare:
 
-- confermare su benchmark quality più ampio se vogliamo promuoverlo a default;
-- decidere packaging/deploy: nuovo agente selezionabile prima, default solo dopo prova cloud/umana.
+- deployarlo come opzione selezionabile pubblicando il value model `value_v0_h128_clean50k_seed20260701.npz` come
+  release asset e impostando `BRISCOLA_VALUE_MODEL_URL`/`BRISCOLA_VALUE_MODEL_SHA256`;
+- farlo provare a giocatori umani e auditare eventuali mosse sospette.
 
 Non fare:
 
@@ -116,12 +119,12 @@ Non fare:
 
 ### 2. Monitoraggio Produzione E Audit PIMC
 
-Obiettivo: capire come si comportano `v6 + solver` e `PIMC(v6,16×8)` contro giocatori reali, senza usare ancora questi
-dati per training.
+Obiettivo: capire come si comportano v6 puro, V-lookahead e `PIMC(v6,16×8)` contro giocatori reali, senza usare ancora
+questi dati per training.
 
 Fare:
 
-- far giocare 10-20 partite umane contro `bc_model_pimc_16x8`;
+- far giocare 10-20 partite umane contro `bc_model_value_lookahead_8x8` e `bc_model_pimc_16x8`;
 - esportare/auditare le mosse IA con:
   - `scripts/audit_event_log_games.py`
   - `scripts/export_ai_actions.py`

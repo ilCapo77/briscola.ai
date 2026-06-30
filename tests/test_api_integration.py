@@ -19,6 +19,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
 from briscola_ai.backend import server
 from briscola_ai.backend.event_log import EventLog, EventLogConfig
 from briscola_ai.backend.game_store import GameSession, InMemoryGameSessionStore
@@ -134,6 +135,28 @@ def _write_dummy_bc_model_npz_with_feature_dim(
     np.savez(path, w1=w1, b1=b1, w2=w2, b2=b2, metadata_json=json.dumps(metadata, ensure_ascii=False))
 
 
+def _write_dummy_value_model_npz(path: Path) -> None:
+    """Crea un value model minimo: asset interno per `bc_model_value_lookahead_8x8`, non policy UI."""
+    d = int(FEATURE_DIM_2P_V3)
+    h = 4
+    metadata = {
+        "format": "value_mlp_v1",
+        "feature_dim": d,
+        "hidden_dim": h,
+        "encoder_version": "v3",
+        "target": "residual",
+        "target_scale": 120.0,
+    }
+    np.savez(
+        path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h,), dtype=np.float32),
+        b2=np.asarray([0.0], dtype=np.float32),
+        metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+
+
 def test_backend_root_healthcheck() -> None:
     """Smoke test: l'endpoint root del backend risponde e contiene un messaggio."""
     client = TestClient(server.app)
@@ -200,6 +223,7 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert "heuristic_v2" in by_name
     assert "bc_model" in by_name
     assert "bc_model_hybrid_endgame" in by_name
+    assert "bc_model_value_lookahead_8x8" in by_name
     assert "bc_model_pimc_16x8" in by_name
 
     assert isinstance(by_name["heuristic_v1"].get("description_it"), str)
@@ -207,6 +231,8 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert isinstance(by_name["heuristic_v2"].get("description_it"), str)
     assert by_name["heuristic_v2"]["description_it"]
     assert by_name["bc_model_hybrid_endgame"]["requires_model_selection"] is True
+    assert by_name["bc_model_value_lookahead_8x8"]["requires_model_selection"] is True
+    assert by_name["bc_model_value_lookahead_8x8"]["requires_model_id"] == "value_v0_h128_clean50k_seed20260701.npz"
     assert by_name["bc_model_pimc_16x8"]["requires_model_selection"] is True
 
 
@@ -230,6 +256,9 @@ def test_list_ai_agents_reports_availability(monkeypatch: pytest.MonkeyPatch, tm
     assert by_name["bc_model"]["available"] is False
     assert by_name["bc_model_hybrid_endgame"]["available"] is False
     assert by_name["bc_model_hybrid_endgame"]["requires_model_selection"] is True
+    assert by_name["bc_model_value_lookahead_8x8"]["available"] is False
+    assert by_name["bc_model_value_lookahead_8x8"]["requires_model_selection"] is True
+    assert by_name["bc_model_value_lookahead_8x8"]["requires_model_present"] is False
     assert by_name["bc_model_pimc_16x8"]["available"] is False
     assert by_name["bc_model_pimc_16x8"]["requires_model_selection"] is True
 
@@ -237,7 +266,13 @@ def test_list_ai_agents_reports_availability(monkeypatch: pytest.MonkeyPatch, tm
     by_name_with_model = {a["name"]: a for a in client.get("/ai/agents").json()["agents"]}
     assert by_name_with_model["bc_model"]["available"] is True
     assert by_name_with_model["bc_model_hybrid_endgame"]["available"] is True
+    assert by_name_with_model["bc_model_value_lookahead_8x8"]["available"] is False
     assert by_name_with_model["bc_model_pimc_16x8"]["available"] is True
+
+    _write_dummy_value_model_npz(tmp_path / "value_v0_h128_clean50k_seed20260701.npz")
+    by_name_with_value = {a["name"]: a for a in client.get("/ai/agents").json()["agents"]}
+    assert by_name_with_value["bc_model_value_lookahead_8x8"]["available"] is True
+    assert by_name_with_value["bc_model_value_lookahead_8x8"]["requires_model_present"] is True
 
 
 def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -251,6 +286,7 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     )
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "compatible_v2.npz", feature_dim=288)
     _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "incompatible.npz", feature_dim=10)
+    _write_dummy_value_model_npz(tmp_path / "value_v0_h128_clean50k_seed20260701.npz")
 
     client = TestClient(server.app)
     r = client.get("/ai/models")
@@ -267,6 +303,7 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     assert "compatible_v1.npz" in by_id
     assert "compatible_v2.npz" in by_id
     assert "incompatible.npz" in by_id
+    assert "value_v0_h128_clean50k_seed20260701.npz" not in by_id
 
     ok_v1 = by_id["compatible_v1.npz"]
     assert ok_v1["is_compatible"] is True
@@ -420,6 +457,69 @@ def test_create_game_supports_bc_model_hybrid_endgame_with_ai_model_id(
             "num_players": 2,
             "player_names": ["A", "B"],
             "ai_agent": "bc_model_hybrid_endgame",
+            "ai_model_id": "bad_model.npz",
+        },
+    )
+    assert bad.status_code == 400
+    assert "feature_dim" in bad.json()["detail"]
+
+
+def test_create_game_supports_bc_model_value_lookahead_with_ai_model_id(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """`bc_model_value_lookahead_8x8` resta una scelta avanzata ma validata prima della partita."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "best_a2c_v6.npz", feature_dim=310)
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "bad_model.npz", feature_dim=10)
+
+    client = TestClient(server.app)
+
+    missing_model_id = client.post(
+        "/games",
+        json={"num_players": 2, "player_names": ["A", "B"], "ai_agent": "bc_model_value_lookahead_8x8"},
+    )
+    assert missing_model_id.status_code == 400
+    assert "ai_model_id" in missing_model_id.json()["detail"]
+
+    missing_value_model = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_value_lookahead_8x8",
+            "ai_model_id": "best_a2c_v6.npz",
+        },
+    )
+    assert missing_value_model.status_code == 400
+    assert "value_v0_h128_clean50k_seed20260701" in missing_value_model.json()["detail"]
+
+    _write_dummy_value_model_npz(tmp_path / "value_v0_h128_clean50k_seed20260701.npz")
+
+    ok = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_value_lookahead_8x8",
+            "ai_model_id": "best_a2c_v6.npz",
+        },
+    )
+    assert ok.status_code == 200
+    payload = ok.json()
+    assert payload["ai_agent"] == "bc_model_value_lookahead_8x8"
+    assert payload["ai_model_id"] == "best_a2c_v6.npz"
+    session = _get_session(payload["game_id"])
+    assert session is not None
+    assert session.ai_seats[1].agent_name == "bc_model_value_lookahead_8x8"
+    assert session.ai_seats[1].model_id == "best_a2c_v6.npz"
+
+    bad = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_value_lookahead_8x8",
             "ai_model_id": "bad_model.npz",
         },
     )
@@ -1149,6 +1249,8 @@ def test_version_endpoint_reports_versions_and_model_presence() -> None:
         assert "rules_version" in body
         assert body["recommended_model"] == "best_a2c_v6.npz"
         assert isinstance(body["recommended_model_present"], bool)
+        assert body["value_lookahead_model"] == "value_v0_h128_clean50k_seed20260701.npz"
+        assert isinstance(body["value_lookahead_model_present"], bool)
         assert "models_dir" in body
 
 

@@ -11,6 +11,7 @@ import hashlib
 from pathlib import Path
 
 from briscola_ai.ai.models.provisioning import ensure_model_available
+from briscola_ai.main import _provision_startup_models
 
 
 def _make_source(tmp_path: Path, content: bytes = b"fake-model-bytes") -> tuple[Path, str]:
@@ -173,3 +174,30 @@ def test_download_passes_timeout_and_accepts_https(monkeypatch, tmp_path: Path) 
     assert ok is True
     assert captured["timeout"] == 12.5
     assert (models_dir / "m.npz").read_bytes() == b"downloaded-bytes"
+
+
+def test_startup_provisioning_downloads_policy_and_value_model(
+    monkeypatch,
+    tmp_path: Path,
+) -> None:
+    """Lo startup deve poter scaricare sia la policy consigliata sia il value model del lookahead."""
+    policy_bytes = b"policy-v6"
+    value_bytes = b"value-lookahead"
+    policy_src = tmp_path / "policy-source.npz"
+    value_src = tmp_path / "value-source.npz"
+    policy_src.write_bytes(policy_bytes)
+    value_src.write_bytes(value_bytes)
+
+    models_dir = tmp_path / "models"
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(models_dir))
+    monkeypatch.setenv("BRISCOLA_MODEL_URL", policy_src.as_uri())
+    monkeypatch.setenv("BRISCOLA_MODEL_SHA256", hashlib.sha256(policy_bytes).hexdigest())
+    monkeypatch.setenv("BRISCOLA_VALUE_MODEL_URL", value_src.as_uri())
+    monkeypatch.setenv("BRISCOLA_VALUE_MODEL_SHA256", hashlib.sha256(value_bytes).hexdigest())
+
+    messages = _provision_startup_models()
+
+    assert (models_dir / "best_a2c_v6.npz").read_bytes() == policy_bytes
+    assert (models_dir / "value_v0_h128_clean50k_seed20260701.npz").read_bytes() == value_bytes
+    assert any(msg.startswith("Model provisioning:") for msg in messages)
+    assert any(msg.startswith("Value model provisioning:") for msg in messages)

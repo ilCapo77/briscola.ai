@@ -158,7 +158,12 @@ const UI = (() => {
 
     const _agentRequiresModelSelection = (agentName) => {
         const meta = agentName ? aiAgentMetaByName[agentName] : null;
-        return meta?.requires_model_selection === true || agentName === 'bc_model' || agentName === 'bc_model_hybrid_endgame';
+        return (
+            meta?.requires_model_selection === true ||
+            agentName === 'bc_model' ||
+            agentName === 'bc_model_hybrid_endgame' ||
+            agentName === 'bc_model_value_lookahead_8x8'
+        );
     };
 
     const _modelRecencyScore = (model) => {
@@ -420,14 +425,12 @@ const UI = (() => {
             elements.aiAgentSelect.appendChild(option);
         });
 
-        // Default: il "modello migliore" con solver finale se disponibile; in caso contrario il modello
-        // puro, poi euristica v1; altrimenti il primo agente disponibile. Gli altri restano
-        // selezionabili solo se l'utente vuole cambiare avversario.
+        // Default: modello puro v6 quando disponibile. Le varianti runtime più forti restano vicine nel menu,
+        // ma non diventano default finché non sono provate anche in cloud/contro umani.
         const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
         const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
         let defaultAgent;
-        if (isAvail('bc_model_hybrid_endgame')) defaultAgent = 'bc_model_hybrid_endgame';
-        else if (isAvail('bc_model')) defaultAgent = 'bc_model';
+        if (isAvail('bc_model')) defaultAgent = 'bc_model';
         else if (isAvail('heuristic_v1')) defaultAgent = 'heuristic_v1';
         else defaultAgent = firstAvailable || agents[0]?.name || 'random';
         elements.aiAgentSelect.value = defaultAgent;

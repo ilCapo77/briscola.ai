@@ -393,27 +393,34 @@ def _is_ai_controlled_player(session: GameSession, player_index: int) -> bool:
     return player_index in session.ai_seats
 
 
-def _pimc_decision_trace(agent: Agent) -> dict[str, Any] | None:
+def _ai_decision_trace(agent: Agent) -> dict[str, Any] | None:
     """
-    Restituisce una traccia minimale della decisione PIMC appena eseguita, se disponibile.
+    Restituisce una traccia minimale della decisione IA appena eseguita, se disponibile.
 
     L'agente viene ricostruito per mossa, quindi i contatori `metrics` appartengono alla singola
     decisione corrente. Non salviamo punteggi interni o determinizzazioni: bastano ramo usato e
-    contatori per distinguere fallback, solver e search nei log di produzione.
+    contatori per distinguere fallback, solver e search/lookahead nei log di produzione.
     """
     metrics = getattr(agent, "metrics", None)
     if metrics is None:
         return None
 
+    is_value_lookahead = hasattr(metrics, "lookahead_decisions")
+    lookahead_decisions = int(getattr(metrics, "lookahead_decisions", 0))
     search_decisions = int(getattr(metrics, "search_decisions", 0))
     solver_decisions = int(getattr(metrics, "endgame_solver_decisions", 0))
     fallback_decisions = int(getattr(metrics, "fallback_decisions", 0))
     coerced_moves = int(getattr(metrics, "coerced_moves", 0))
     failed_determinizations = int(getattr(metrics, "failed_determinizations", 0))
     successful_determinizations = int(getattr(metrics, "successful_determinizations", 0))
-    total_search_seconds = float(getattr(metrics, "total_search_seconds", 0.0))
+    failed_leaf_evaluations = int(getattr(metrics, "failed_leaf_evaluations", 0))
+    completed_leaf_evaluations = int(getattr(metrics, "completed_leaf_evaluations", 0))
+    overkill_guard_adjustments = int(getattr(metrics, "overkill_guard_adjustments", 0))
+    search_seconds = float(getattr(metrics, "total_search_seconds", getattr(metrics, "search_elapsed_seconds", 0.0)))
 
-    if search_decisions > 0:
+    if lookahead_decisions > 0:
+        decision_type = "lookahead"
+    elif search_decisions > 0:
         decision_type = "search"
     elif solver_decisions > 0:
         decision_type = "solver"
@@ -423,15 +430,19 @@ def _pimc_decision_trace(agent: Agent) -> dict[str, Any] | None:
         decision_type = "unknown"
 
     return {
-        "agent_kind": "pimc",
+        "agent_kind": "value_lookahead" if is_value_lookahead else "pimc",
         "decision_type": decision_type,
+        "lookahead_decisions": lookahead_decisions,
         "search_decisions": search_decisions,
         "endgame_solver_decisions": solver_decisions,
         "fallback_decisions": fallback_decisions,
         "coerced_moves": coerced_moves,
         "successful_determinizations": successful_determinizations,
         "failed_determinizations": failed_determinizations,
-        "search_seconds": total_search_seconds,
+        "completed_leaf_evaluations": completed_leaf_evaluations,
+        "failed_leaf_evaluations": failed_leaf_evaluations,
+        "overkill_guard_adjustments": overkill_guard_adjustments,
+        "search_seconds": search_seconds,
     }
 
 
@@ -486,10 +497,11 @@ async def list_ai_agents():
     agents = []
     for spec in list_agent_specs():
         requires_model_selection = agent_uses_selected_model(spec.name)
+        required_model_present = spec.requires_model_id is None or (models_dir / spec.requires_model_id).exists()
         if requires_model_selection:
-            available = has_compatible_model
+            available = has_compatible_model and required_model_present
         elif spec.requires_model_id is not None:
-            available = (models_dir / spec.requires_model_id).exists()
+            available = required_model_present
         else:
             available = True
         agents.append(
@@ -498,6 +510,7 @@ async def list_ai_agents():
                 "label": spec.label,
                 "description_it": spec.description_it,
                 "requires_model_id": spec.requires_model_id,
+                "requires_model_present": required_model_present,
                 "requires_model_selection": requires_model_selection,
                 "available": available,
             }
@@ -591,6 +604,8 @@ async def create_game(config: GameConfig):
                 # Validiamo il path del modello PRIMA di salvare la sessione (come prima).
                 model_path = resolve_model_path(models_dir, config.ai_model_id or "")
                 validate_model_compatible_for_ui(model_path)
+                # Validiamo anche eventuali asset fissi richiesti dall'agente (es. value model).
+                build_agent(ai_agent_name, model_path=model_path)
                 ai_seats = {1: AiSeatConfig(agent_name=ai_agent_name, model_id=config.ai_model_id)}
             else:
                 # Validiamo l'agente PRIMA di salvare la sessione (come prima): un nome non valido
@@ -946,7 +961,7 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
             # Fallback di sicurezza: se un agente ritorna un indice invalido, non blocchiamo la partita.
             action_coerced = True
             card_index = rng.randrange(len(valid_actions))
-        decision_trace = _pimc_decision_trace(agent)
+        decision_trace = _ai_decision_trace(agent)
 
     selected_card = state.players[ai_player_index].hand[card_index]
 

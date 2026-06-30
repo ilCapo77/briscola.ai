@@ -13,10 +13,13 @@ from pathlib import Path
 from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
 from ..models.bc_model import BCModelAgent
 from ..models.catalog import get_models_dir_from_env, resolve_model_path
+from ..models.provisioning import VALUE_LOOKAHEAD_MODEL_ID
+from ..models.value_model import load_value_model_npz
 from .base import Agent, AgentSpec
 from .hybrid_endgame import HybridEndgameAgent
 from .pimc import PIMCAgent
 from .rule_based import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
+from .value_lookahead import ValueLookaheadAgent
 
 _AGENT_BUILDERS: dict[str, type[Agent]] = {
     "random": RandomAgent,
@@ -45,6 +48,17 @@ BC_MODEL_HYBRID_ENDGAME_SPEC = AgentSpec(
     ),
 )
 
+BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC = AgentSpec(
+    name="bc_model_value_lookahead_8x8",
+    label="Modello locale + value lookahead",
+    description_it=(
+        "Usa il modello `.npz` scelto dalla UI come policy base, il solver esatto a mazzo vuoto e una lookahead "
+        "depth-1 guidata da una rete di valore quando restano al massimo 8 carte vive ignote. È il nuovo "
+        "avversario avanzato più promettente: più forte di v6+solver nei benchmark, ma non ancora default."
+    ),
+    requires_model_id=VALUE_LOOKAHEAD_MODEL_ID,
+)
+
 BC_MODEL_PIMC_16X8_SPEC = AgentSpec(
     name="bc_model_pimc_16x8",
     label="Modello locale + PIMC finale",
@@ -66,12 +80,15 @@ BEST_A2C_SPEC = AgentSpec(
 )
 
 _BEST_A2C_DEFAULT_MODEL_ID = "best_a2c.npz"
+_VALUE_LOOKAHEAD_8X8_DETERMINIZATIONS = 8
+_VALUE_LOOKAHEAD_8X8_MAX_UNKNOWN_CARDS = 8
 _PIMC_16X8_DETERMINIZATIONS = 16
 _PIMC_16X8_MAX_UNKNOWN_CARDS = 8
 _SELECTED_MODEL_AGENT_NAMES = frozenset(
     {
         BC_MODEL_SPEC.name,
         BC_MODEL_HYBRID_ENDGAME_SPEC.name,
+        BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC.name,
         BC_MODEL_PIMC_16X8_SPEC.name,
     }
 )
@@ -102,9 +119,10 @@ def list_agent_specs() -> list[AgentSpec]:
         HeuristicAgentV2.spec,
         HybridEndgameAgent.spec,
         HYBRID_ENDGAME_BEST_A2C_SPEC,
+        BC_MODEL_SPEC,
+        BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC,
         BC_MODEL_HYBRID_ENDGAME_SPEC,
         BC_MODEL_PIMC_16X8_SPEC,
-        BC_MODEL_SPEC,
     ]
 
 
@@ -168,6 +186,36 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
         return HybridEndgameAgent(
             fallback=BCModelAgent.from_npz(model_path),
             name="bc_model_hybrid_endgame",
+        )
+
+    if name == "bc_model_value_lookahead_8x8":
+        if model_path is None:
+            raise ValueError("Agente 'bc_model_value_lookahead_8x8' richiede `model_path` (file .npz)")
+        models_dir = get_models_dir_from_env()
+        try:
+            value_model_path = resolve_model_path(
+                models_dir=models_dir,
+                model_id=VALUE_LOOKAHEAD_MODEL_ID,
+            )
+        except FileNotFoundError as exc:
+            raise ValueError(
+                "Agente 'bc_model_value_lookahead_8x8' non disponibile: manca il value model "
+                f"`{VALUE_LOOKAHEAD_MODEL_ID}` nella directory modelli."
+            ) from exc
+        value_model = load_value_model_npz(value_model_path)
+        policy_agent = BCModelAgent.from_npz(model_path)
+        control = HybridEndgameAgent(
+            fallback=policy_agent,
+            name="bc_model_value_lookahead_8x8_control",
+        )
+        return ValueLookaheadAgent(
+            value_model=value_model,
+            fallback=control,
+            continuation_agent=control,
+            num_determinizations=_VALUE_LOOKAHEAD_8X8_DETERMINIZATIONS,
+            max_unknown_cards=_VALUE_LOOKAHEAD_8X8_MAX_UNKNOWN_CARDS,
+            overkill_guard_enabled=True,
+            name="bc_model_value_lookahead_8x8",
         )
 
     if name == "bc_model_pimc_16x8":

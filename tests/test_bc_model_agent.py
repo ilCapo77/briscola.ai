@@ -9,6 +9,7 @@ Obiettivo didattico:
 
 from __future__ import annotations
 
+import json
 import os
 import random
 from pathlib import Path
@@ -16,9 +17,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from briscola_ai.ai.agents import build_agent
+from briscola_ai.ai.agents import ValueLookaheadAgent, build_agent
 from briscola_ai.ai.encoding.card_action_space import action_id_from_suit_number
-from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1, encode_player_observation_2p
+from briscola_ai.ai.encoding.observation_encoder import (
+    FEATURE_DIM_2P_V1,
+    FEATURE_DIM_2P_V3,
+    encode_player_observation_2p,
+)
 from briscola_ai.ai.models import BCModelAgent, load_bc_model_npz
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
@@ -182,6 +187,28 @@ def _write_linear_model(path: Path, *, bias_action: int = 0) -> None:
     np.savez(path, w=w, b=b, metadata_json=f'{{"format":"linear_softmax_bc_v1","feature_dim":{d}}}')
 
 
+def _write_zero_value_model(path: Path) -> None:
+    """Salva un value model minimale v3 per testare la factory del lookahead."""
+    d = int(FEATURE_DIM_2P_V3)
+    h = 4
+    metadata = {
+        "format": "value_mlp_v1",
+        "feature_dim": d,
+        "hidden_dim": h,
+        "encoder_version": "v3",
+        "target": "residual",
+        "target_scale": 120.0,
+    }
+    np.savez(
+        path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h,), dtype=np.float32),
+        b2=np.asarray([0.0], dtype=np.float32),
+        metadata_json=json.dumps(metadata),
+    )
+
+
 def test_build_agent_caches_bc_model_by_path(tmp_path: Path) -> None:
     """Lo stesso `.npz` non viene riletto: il modello caricato è condiviso dalla cache in-process."""
     model_path = tmp_path / "m.npz"
@@ -220,3 +247,35 @@ def test_validate_for_ui_shares_cache_with_from_npz(tmp_path: Path) -> None:
     validate_model_compatible_for_ui(model_path)  # non deve rileggere il file
     agent = build_agent("bc_model", model_path=model_path)
     assert agent.model is m1  # stesso payload condiviso tra validazione e costruzione agente
+
+
+def test_build_agent_value_lookahead_uses_selected_policy_and_required_value_model(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """La variante value-lookahead usa la policy selezionata dalla UI più il value model fisso."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    policy_path = tmp_path / "policy.npz"
+    _write_linear_model(policy_path)
+    _write_zero_value_model(tmp_path / "value_v0_h128_clean50k_seed20260701.npz")
+
+    agent = build_agent("bc_model_value_lookahead_8x8", model_path=policy_path)
+
+    assert isinstance(agent, ValueLookaheadAgent)
+    assert agent.name == "bc_model_value_lookahead_8x8"
+    assert agent.num_determinizations == 8
+    assert agent.max_unknown_cards == 8
+    assert agent.overkill_guard_enabled is True
+
+
+def test_build_agent_value_lookahead_errors_if_value_model_is_missing(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Senza asset value model l'agente avanzato deve fallire subito, non a partita iniziata."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    policy_path = tmp_path / "policy.npz"
+    _write_linear_model(policy_path)
+
+    with pytest.raises(ValueError, match="value_v0_h128_clean50k_seed20260701"):
+        build_agent("bc_model_value_lookahead_8x8", model_path=policy_path)

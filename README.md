@@ -202,6 +202,8 @@ L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in ver
 - `hybrid_endgame_best_a2c` – modello `best_a2c` nel mid‑game + solver nel finale.
 - `bc_model` – modello locale `.npz` (BC/PG/A2C), encoder dedotto dai metadati.
 - `bc_model_hybrid_endgame` – modello locale `.npz` scelto dalla UI + **solver esatto** nel finale.
+- `bc_model_value_lookahead_8x8` – modello locale `.npz` scelto dalla UI + solver finale + lookahead depth‑1
+  guidata dal value model `value_v0_h128_clean50k_seed20260701.npz` quando restano al massimo 8 carte vive ignote.
 - `bc_model_pimc_16x8` – modello locale `.npz` scelto dalla UI + PIMC 16×8 nel semi‑finale + solver esatto nel finale.
 
 Il **solver endgame** (`ai/endgame/solver.py`) calcola la mossa ottima esatta con minimax a mazzo vuoto; l’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
@@ -244,7 +246,7 @@ Audit aggregato delle partite per versione/agente/modello, utile per capire se l
 log contiene anche eventi IA auditabili:
 
 ```bash
-DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.15.0 --show-games
+DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.16.0 --show-games
 DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_16x8 --json
 ```
 
@@ -428,17 +430,19 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-Il modello consigliato è **`data/models/best_a2c_v6.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v5` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. In UI, quando disponibile, il default è `bc_model_hybrid_endgame`: usa il modello consigliato durante la partita e il solver esatto a mazzo vuoto. `best_a2c_v5.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v6 è in `PLAN.md`.
+Il modello consigliato è **`data/models/best_a2c_v6.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v5` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. In UI, quando disponibile, il default è `bc_model`: v6 puro, senza solver/search aggiunti, così la baseline resta leggibile durante test umani e audit. Subito vicino nel menu resta selezionabile `bc_model_value_lookahead_8x8`, che usa v6 come policy base più solver finale e lookahead guidata da value model. `best_a2c_v5.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v6 è in `PLAN.md`.
 
-Il codice `v0.15.0` usa `best_a2c_v6.npz` come modello consigliato e, in UI, lo propone tramite `bc_model_hybrid_endgame` (v6 + solver finale). Espone anche `bc_model_pimc_16x8` come avversario avanzato selezionabile e salva `ai_action` in modalità dataset per auditare le mosse IA/PIMC. Non c'è un nuovo asset modello: il provisioning può restare sull'asset `best_a2c_v6.npz` pubblicato con `v0.12.1`.
+Il ramo corrente usa `best_a2c_v6.npz` come modello consigliato e salva `ai_action` in modalità dataset per auditare le mosse IA/search. Per abilitare `bc_model_value_lookahead_8x8` serve anche il value model `value_v0_h128_clean50k_seed20260701.npz` in `BRISCOLA_MODELS_DIR`; il catalogo modelli UI non lo mostra come policy selezionabile perché è un asset interno del lookahead. Il provisioning scarica la policy consigliata e, se configurate le env dedicate, anche il value model.
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v6.npz
 BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.12.1/best_a2c_v6.npz
 BRISCOLA_MODEL_SHA256=b047a319c3505936d11127a3a2e29b9ca3a2b93676569a2ea8ce186a5e29a951
+BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
+BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
 ```
 
-Il provisioning scarica solo il modello consigliato: su ambienti con disco limitato (es. 512 MB) evita di rendere disponibili troppi `.npz` contemporaneamente. Se vuoi mantenere anche `best_a2c_v5.npz` selezionabile online, caricalo nella stessa directory modelli solo se il budget disco lo consente.
+Il provisioning è best-effort: se un download fallisce l'app parte comunque, ma `/version` espone `recommended_model_present` e `value_lookahead_model_present` per verificare il deploy. Su ambienti con disco limitato (es. 512 MB) evita di rendere disponibili troppi `.npz` contemporaneamente. Se vuoi mantenere anche `best_a2c_v5.npz` selezionabile online, caricalo nella stessa directory modelli solo se il budget disco lo consente.
 
 ### Report progressione modelli
 

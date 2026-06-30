@@ -23,7 +23,7 @@ Briscola end-to-end: motore di regole puro → backend HTTP/WS → UI → pipeli
 - **Stato partita**: vive in un `GameSessionStore` (`game_store.py`) — `InMemoryGameSessionStore` in locale, `RedisGameSessionStore` se è impostata `REDIS_URL`. Salva `GameState` (serializzato via `domain/serialization.py`) + la config IA per posto; l'oggetto `Agent` **non** è serializzato (si ricostruisce con `build_agent`, con cache). Lock per partita (asyncio in-memory / lock Redis distribuito) per serializzare le azioni concorrenti. Evita di reintrodurre dict globali di stato (`active_games` & co. sono stati rimossi).
 - **Realtime**: il fan-out degli eventi WebSocket passa per il **pub/sub** dello store (Redis in prod, fan-out asyncio in dev), così `ai_card_reveal`/`trick_result`/snapshot raggiungono il client su QUALSIASI replica. Gli snapshot per-giocatore sono ricostruiti dal subscriber (anti-cheat). `?polling=1` resta come fallback di debug.
 - **Event log** (`event_log.py`): append-only per dataset. `EventLog` su SQLite (default locale) **oppure** `PostgresEventLog` se è impostata `DATABASE_URL` (deploy persistente/condiviso); il backend è scelto da `build_event_log`. Stesso schema `games`/`events`. Attivo solo se configurato (`BRISCOLA_EVENT_DB_PATH` o `DATABASE_URL`); con modalità `dataset` richiede il consenso utente.
-- **Provisioning modello** (`ai/models/provisioning.py`): allo startup, se manca, scarica il modello consigliato da `BRISCOLA_MODEL_URL` (verifica `BRISCOLA_MODEL_SHA256`). Best-effort: non blocca l'avvio.
+- **Provisioning modello** (`ai/models/provisioning.py`): allo startup, se manca, scarica il modello consigliato da `BRISCOLA_MODEL_URL` (verifica `BRISCOLA_MODEL_SHA256`). Se configurati, scarica anche asset ausiliari come il value model da `BRISCOLA_VALUE_MODEL_URL` (verifica `BRISCOLA_VALUE_MODEL_SHA256`). Best-effort: non blocca l'avvio.
 
 **Modelli locali (`.npz`)**: la UI seleziona un avversario `bc_model` da un catalogo server-side (`ai/models/catalog.py`). Il browser invia solo un `ai_model_id` (path relativo) tra quelli di `GET /api/ai/models`; il backend rifiuta path traversal e carica solo da `BRISCOLA_MODELS_DIR` (default `./data/models/`). I trainer salvano nei `.npz` i metadati (`label`, `description_it`, `feature_dim`).
 
@@ -56,6 +56,7 @@ Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-
 - `DATABASE_URL` (o `BRISCOLA_DATABASE_URL`): attiva l'event log su Postgres. Se assente → SQLite (`BRISCOLA_EVENT_DB_PATH`) o disabilitato.
 - `BRISCOLA_EVENT_LOG_MODE`: `debug` (default) | `dataset` (minimale, richiede consenso) | `off`.
 - `BRISCOLA_MODEL_URL` + `BRISCOLA_MODEL_SHA256` (+ `BRISCOLA_DEFAULT_MODEL_ID`): provisioning del modello consigliato allo startup.
+- `BRISCOLA_VALUE_MODEL_URL` + `BRISCOLA_VALUE_MODEL_SHA256`: provisioning del value model richiesto da `bc_model_value_lookahead_8x8`.
 - `BRISCOLA_MODELS_DIR` (default `./data/models/`); `BRISCOLA_CORS_ALLOW_ORIGINS` (default `*`, restringere in prod).
 - `BRISCOLA_REALTIME_MODE` (`ws`|`polling`, override; default `ws`); `BRISCOLA_ASSET_VERSION` (override del cache-busting, che di default deriva da versione + mtime degli static).
 

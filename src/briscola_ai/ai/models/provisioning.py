@@ -22,6 +22,9 @@ from urllib.parse import urlparse
 # Id del modello consigliato (coerente con la baseline ufficiale e con `/version`).
 DEFAULT_MODEL_ID = "best_a2c_v6.npz"
 
+# Id del value model usato dall'agente selezionabile `bc_model_value_lookahead_8x8`.
+VALUE_LOOKAHEAD_MODEL_ID = "value_v0_h128_clean50k_seed20260701.npz"
+
 # Timeout (s) per il download: evita che un endpoint lento/appeso blocchi lo startup dell'app.
 _DEFAULT_DOWNLOAD_TIMEOUT_S = 30.0
 
@@ -40,6 +43,7 @@ def ensure_model_available(
     url: str | None,
     sha256: str | None = None,
     timeout: float = _DEFAULT_DOWNLOAD_TIMEOUT_S,
+    url_env_name: str = "BRISCOLA_MODEL_URL",
 ) -> tuple[bool, str]:
     """
     Garantisce che `models_dir/model_id` esista (e, se `sha256` è dato, che corrisponda),
@@ -73,7 +77,7 @@ def ensure_model_available(
             return False, f"modello presente ma sha256 non corrisponde e nessun URL per riscaricare: {target}"
         # hash diverso + url disponibile → procediamo a riscaricare (sovrascrittura atomica).
     elif not url:
-        return False, "modello assente e nessun BRISCOLA_MODEL_URL impostato"
+        return False, f"modello assente e nessun {url_env_name} impostato"
 
     scheme = urlparse(url or "").scheme.lower()
     if scheme not in _ALLOWED_URL_SCHEMES:

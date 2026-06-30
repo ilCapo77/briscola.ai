@@ -26,6 +26,47 @@ from .backend.event_log import build_event_log, parse_event_db_path, resolve_dat
 from .versioning import get_code_version
 
 
+def _provision_startup_models() -> list[str]:
+    """
+    Provisioning best-effort degli asset `.npz` necessari in cloud.
+
+    La policy consigliata (`best_a2c_v6.npz`, o override `BRISCOLA_DEFAULT_MODEL_ID`) resta il modello principale.
+    Il value model e' opzionale ma necessario per rendere disponibile `bc_model_value_lookahead_8x8`: lo scarichiamo
+    solo se l'operatore imposta `BRISCOLA_VALUE_MODEL_URL` o un pin `BRISCOLA_VALUE_MODEL_SHA256`.
+    """
+    from .ai.models import (
+        DEFAULT_MODEL_ID,
+        VALUE_LOOKAHEAD_MODEL_ID,
+        ensure_model_available,
+        get_models_dir_from_env,
+    )
+
+    models_dir = get_models_dir_from_env()
+    messages: list[str] = []
+
+    _, provisioning_msg = ensure_model_available(
+        models_dir=models_dir,
+        model_id=os.getenv("BRISCOLA_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID),
+        url=os.getenv("BRISCOLA_MODEL_URL"),
+        sha256=os.getenv("BRISCOLA_MODEL_SHA256"),
+    )
+    messages.append(f"Model provisioning: {provisioning_msg}")
+
+    value_url = os.getenv("BRISCOLA_VALUE_MODEL_URL")
+    value_sha256 = os.getenv("BRISCOLA_VALUE_MODEL_SHA256")
+    if value_url or value_sha256:
+        _, value_msg = ensure_model_available(
+            models_dir=models_dir,
+            model_id=VALUE_LOOKAHEAD_MODEL_ID,
+            url=value_url,
+            sha256=value_sha256,
+            url_env_name="BRISCOLA_VALUE_MODEL_URL",
+        )
+        messages.append(f"Value model provisioning: {value_msg}")
+
+    return messages
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -63,18 +104,11 @@ async def lifespan(app: FastAPI):
             print(f"Event log: inizializzazione fallita, feature disabilitata ({exc!r}).")
             backend_server.app.state.event_log = None
 
-    # Provisioning modello (best-effort): se manca e `BRISCOLA_MODEL_URL` è impostata, scarica il
-    # campione consigliato nella directory modelli. Non blocca l'avvio in caso di errore.
+    # Provisioning modelli (best-effort): scarica gli asset `.npz` configurati nella directory modelli.
+    # Non blocca l'avvio in caso di errore.
     try:
-        from .ai.models import DEFAULT_MODEL_ID, ensure_model_available, get_models_dir_from_env
-
-        _, provisioning_msg = ensure_model_available(
-            models_dir=get_models_dir_from_env(),
-            model_id=os.getenv("BRISCOLA_DEFAULT_MODEL_ID", DEFAULT_MODEL_ID),
-            url=os.getenv("BRISCOLA_MODEL_URL"),
-            sha256=os.getenv("BRISCOLA_MODEL_SHA256"),
-        )
-        print(f"Model provisioning: {provisioning_msg}")
+        for provisioning_msg in _provision_startup_models():
+            print(provisioning_msg)
     except Exception as exc:  # difesa extra: il provisioning non deve impedire l'avvio
         print(f"Model provisioning: errore inatteso, ignorato ({exc!r}).")
 
@@ -190,7 +224,7 @@ async def version_info():
     Utile in cloud per verificare che il modello consigliato sia risolvibile nella directory modelli
     effettiva (che dipende da `BRISCOLA_MODELS_DIR` o dalla working directory).
     """
-    from .ai.models import DEFAULT_MODEL_ID, get_models_dir_from_env
+    from .ai.models import DEFAULT_MODEL_ID, VALUE_LOOKAHEAD_MODEL_ID, get_models_dir_from_env
     from .versioning import get_rules_version
 
     models_dir = get_models_dir_from_env()
@@ -202,6 +236,8 @@ async def version_info():
         "models_dir": str(models_dir),
         "recommended_model": recommended_model,
         "recommended_model_present": (models_dir / recommended_model).exists(),
+        "value_lookahead_model": VALUE_LOOKAHEAD_MODEL_ID,
+        "value_lookahead_model_present": (models_dir / VALUE_LOOKAHEAD_MODEL_ID).exists(),
     }
 
 
