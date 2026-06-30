@@ -295,18 +295,18 @@ Passi consigliati:
   - conclusione provvisoria: il collo di bottiglia e' la distillazione, non la forza del teacher. In particolare il
     solver non va più trattato come comportamento da comprimere: va eseguito a runtime. La domanda utile diventa se una
     rete `v7-search`, combinata con lo stesso solver runtime, batte `v6 + solver`;
-  - prossimo esperimento distillazione: generare un dataset **search-ricco** con più partite e/o `max_unknown` più largo,
-    puntando a circa `15k..30k` disaccordi search (`teacher.search != v6`). Tenere esempi v6/fallback come
-    copertura eventuale, ma usare soprattutto l'anchor CE a v6 come anti-dimenticanza: le etichette hard v6 rischiano
-    di ridiluire il segnale search. Pesare o sovracampionare i disaccordi search; ignorare i disaccordi solver come
-    target primario;
-  - protocollo pre-registrato per evitare cherry-picking: usare seed/config di validazione per scegliere la recipe, poi
-    confermare **un solo** candidato su seed held-out, seat-fair, `>=2000` partite (meglio `4000`). Solo la conferma
-    held-out entra nel piano come evidenza di promozione; le run di selezione restano diagnostiche;
-  - criterio di promozione v7: valutare `(v7-search + solver)` contro `(v6 + solver)` con CI95 positiva e materiale
-    sull'avg diff (lower bound `> +0.5` punti medi, non solo `> 0`), più gap vs PIMC teacher e decision-quality. Se a
-    potenza adeguata la CI include `0` o è negativa, chiudere l'idea "v7 distillato" come risultato negativo misurato e
-    usare `control_solver(v6)` come baseline deployabile, con PIMC live opzionale.
+  - distillazione hard-label PIMC chiusa come risultato negativo misurato. `train_bc.py` supporta `sample_weight` e
+    `scripts/filter_pimc_teacher_subset.py` filtra correzioni search affidabili (`PIMC != v6`, margine/CI) con pesi
+    da margine, ma il valore non sopravvive nei pesi:
+    - fit test solo correzioni, warm-start v6, `h128/e150/lr3e-4`: train acc `81.3%`, val acc `57.3%`; le correzioni
+      sono parzialmente imparabili, ma la generalizzazione resta limitata;
+    - mix deploy-relevant (`50k` coverage fallback v6 + `14,978` correzioni search pesate): il candidato `e80`
+      peggiora `(v7+solver)` vs `(v6+solver)` di `-3.01` punti medi (CI95 `-4.15..-1.88`), il checkpoint corto `e24`
+      peggiora di `-4.51` (CI95 `-5.64..-3.37`), e un update minimo `e1` resta non positivo (`-0.87`, CI95
+      `-1.96..+0.22`);
+    - decisione: non promuovere nessun `pimc_v7_*` e non continuare training su hard label PIMC senza una nuova ipotesi.
+      Il miglioramento reale oggi resta runtime: `v6 + solver` come baseline/default solida, `PIMC(v6,16×8)` come
+      avversario più forte selezionabile e misurato.
 
 Screening population league declassato a opzionale:
 

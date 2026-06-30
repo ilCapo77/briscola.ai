@@ -35,6 +35,12 @@ e aggiungere un anchor congelato (`--bc-anchor`, `--bc-anchor-beta`) per limitar
 la deriva rispetto al modello base. `--filter-disagree-with-model` permette di
 allenare solo sugli esempi in cui il teacher corregge davvero quel modello base.
 
+Se il dataset JSONL include un campo `sample_weight` per riga (es. il subset di
+correzioni PIMC ad alto margine), la cross-entropy viene pesata per esempio. I pesi
+sono normalizzati a media 1.0 sul train, così il learning rate resta valido;
+`--ignore-sample-weights` allena uniforme e `--no-weight-normalize` disabilita la
+normalizzazione, utili per confronti A/B.
+
 Nota didattica:
 Questo NON è un modello "forte". Serve come primo passo:
 encoder -> dataset -> training -> salvataggio -> (in futuro) integrazione in `evaluate_agents.py`.
@@ -58,11 +64,12 @@ from briscola_ai.domain.observation import PlayerObservation
 
 @dataclass(frozen=True)
 class Batch:
-    """Batch di training: feature, mask, target."""
+    """Batch di training: feature, mask, target, peso per esempio."""
 
     x: np.ndarray  # (B, D)
     mask: np.ndarray  # (B, 40) boolean
     y: np.ndarray  # (B,) int in [0, 39]
+    weight: np.ndarray  # (B,) float32, peso CE per esempio (1.0 = neutro)
 
 
 def _iter_jsonl(path: Path):
@@ -146,13 +153,34 @@ def _agent_action_id_from_observation(agent, obs: dict, *, rng: np.random.Genera
     return card_dto_to_action_id(hand[card_index])
 
 
+def _record_sample_weight(rec: dict, *, ignore_sample_weights: bool) -> float:
+    """
+    Estrae il peso CE per esempio dal record JSONL.
+
+    Cerchiamo `sample_weight` (scritto dallo step di filtro/subset). Se assente o se
+    `ignore_sample_weights` è attivo, il peso è 1.0 (training uniforme, identico al
+    comportamento storico). Pesi negativi o non finiti sono rifiutati: un peso non valido
+    è un bug del dataset, non qualcosa da nascondere.
+    """
+    if ignore_sample_weights:
+        return 1.0
+    raw = rec.get("sample_weight")
+    if raw is None:
+        return 1.0
+    weight = float(raw)
+    if not np.isfinite(weight) or weight < 0.0:
+        raise ValueError(f"sample_weight non valido nel dataset: {raw!r}")
+    return weight
+
+
 def _build_training_examples(
     path: Path,
     *,
     encoder_version: EncoderVersion,
     disagreement_agent=None,
     disagreement_seed: int = 0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+    ignore_sample_weights: bool = False,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Carica esempi dal JSONL export.
 
@@ -160,10 +188,12 @@ def _build_training_examples(
     - X: (N, D) float32
     - M: (N, 40) bool
     - y: (N,) int64
+    - W: (N,) float32  (peso CE per esempio; 1.0 se il dataset non ne specifica)
     """
     features_list: list[list[float]] = []
     masks_list: list[list[bool]] = []
     targets: list[int] = []
+    weights: list[float] = []
     disagreement_rng = np.random.default_rng(disagreement_seed)
 
     for rec in _iter_jsonl(path):
@@ -204,6 +234,7 @@ def _build_training_examples(
         features_list.append(encoded.features)
         masks_list.append(encoded.action_mask)
         targets.append(y)
+        weights.append(_record_sample_weight(rec, ignore_sample_weights=ignore_sample_weights))
 
     if not features_list:
         raise ValueError("Nessun esempio valido trovato: controlla input JSONL e filtri (2-player).")
@@ -211,7 +242,8 @@ def _build_training_examples(
     x = np.asarray(features_list, dtype=np.float32)
     m = np.asarray(masks_list, dtype=bool)
     y_arr = np.asarray(targets, dtype=np.int64)
-    return x, m, y_arr
+    w_arr = np.asarray(weights, dtype=np.float32)
+    return x, m, y_arr, w_arr
 
 
 def _masked_logits(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -277,12 +309,20 @@ def _accuracy(masked_logits: np.ndarray, y: np.ndarray) -> float:
     return float(np.mean(pred == y))
 
 
-def _iter_minibatches(x: np.ndarray, m: np.ndarray, y: np.ndarray, *, batch_size: int, rng: np.random.Generator):
+def _iter_minibatches(
+    x: np.ndarray,
+    m: np.ndarray,
+    y: np.ndarray,
+    w: np.ndarray,
+    *,
+    batch_size: int,
+    rng: np.random.Generator,
+):
     idx = np.arange(x.shape[0])
     rng.shuffle(idx)
     for start in range(0, len(idx), batch_size):
         batch_idx = idx[start : start + batch_size]
-        yield Batch(x=x[batch_idx], mask=m[batch_idx], y=y[batch_idx])
+        yield Batch(x=x[batch_idx], mask=m[batch_idx], y=y[batch_idx], weight=w[batch_idx])
 
 
 @dataclass
@@ -303,15 +343,20 @@ def _loss_and_grad_linear(
     w: np.ndarray,
     b: np.ndarray,
     *,
+    sample_weight: np.ndarray | None = None,
     anchor: LoadedBCModel | None = None,
     anchor_beta: float = 0.0,
 ):
     """
-    Cross-entropy mascherata + gradienti per softmax linear.
+    Cross-entropy mascherata (eventualmente pesata) + gradienti per softmax linear.
 
     - logits = xW + b
     - logits mascherati: solo azioni in mano
-    - loss = -log p(y)
+    - loss = -(1/B) * Σ w_i * log p(y_i)
+
+    `sample_weight` (shape (B,)) pesa la CE per esempio. Manteniamo il normalizzatore `1/B`
+    (non `1/Σ w_i`): se i pesi hanno media ≈ 1 sull'insieme di training, la scala del gradiente
+    resta confrontabile con il caso non pesato e il learning rate non va riaccordato.
     """
     logits = x @ w + b  # (B, 40)
     masked = _masked_logits(logits, mask)
@@ -319,11 +364,14 @@ def _loss_and_grad_linear(
 
     # Loss
     bsz = x.shape[0]
-    loss = -np.log(probs[np.arange(bsz), y] + 1e-12).mean()
+    per_example = -np.log(probs[np.arange(bsz), y] + 1e-12)
+    loss = float((sample_weight * per_example).sum() / bsz) if sample_weight is not None else float(per_example.mean())
 
     # Gradienti
     dlogits = probs.copy()
     dlogits[np.arange(bsz), y] -= 1.0
+    if sample_weight is not None:
+        dlogits *= sample_weight[:, None]
     dlogits /= float(bsz)
     # Azioni non valide: gradient ≈ 0 per costruzione (prob ~0), ma rendiamolo esplicito.
     dlogits[~mask] = 0.0
@@ -357,11 +405,12 @@ def _loss_and_grad_mlp(
     b2: np.ndarray,
     *,
     weight_decay: float,
+    sample_weight: np.ndarray | None = None,
     anchor: LoadedBCModel | None = None,
     anchor_beta: float = 0.0,
 ):
     """
-    Cross-entropy mascherata + gradienti per MLP 1-hidden-layer.
+    Cross-entropy mascherata (eventualmente pesata) + gradienti per MLP 1-hidden-layer.
 
     Architettura:
     - z1 = x W1 + b1
@@ -380,7 +429,8 @@ def _loss_and_grad_mlp(
     probs = _softmax(masked)
 
     bsz = x.shape[0]
-    loss = -np.log(probs[np.arange(bsz), y] + 1e-12).mean()
+    per_example = -np.log(probs[np.arange(bsz), y] + 1e-12)
+    loss = float((sample_weight * per_example).sum() / bsz) if sample_weight is not None else float(per_example.mean())
 
     # L2 weight decay (solo sui pesi, non sui bias).
     if weight_decay > 0.0:
@@ -388,6 +438,8 @@ def _loss_and_grad_mlp(
 
     dlogits = probs.copy()
     dlogits[np.arange(bsz), y] -= 1.0
+    if sample_weight is not None:
+        dlogits *= sample_weight[:, None]
     dlogits /= float(bsz)
     dlogits[~mask] = 0.0
     anchor_ce = _add_anchor_regularization(
@@ -525,6 +577,22 @@ def main() -> int:
             "Utile per fine-tuning da v6 su sole correzioni teacher."
         ),
     )
+    parser.add_argument(
+        "--ignore-sample-weights",
+        action="store_true",
+        help=(
+            "Ignora il campo `sample_weight` del dataset e allena uniforme (peso 1.0 per tutti). "
+            "Utile per confrontare A/B l'effetto del weighting sullo stesso subset."
+        ),
+    )
+    parser.add_argument(
+        "--no-weight-normalize",
+        action="store_true",
+        help=(
+            "Non normalizzare i pesi a media 1.0 sul train. Per default normalizziamo così che la scala "
+            "del gradiente (e quindi il learning rate) resti confrontabile col training non pesato."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG")
     parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione validation (0..1)")
     args = parser.parse_args()
@@ -570,11 +638,12 @@ def main() -> int:
         return label, description_it
 
     disagreement_agent = BCModelAgent.from_npz(filter_disagree_path) if filter_disagree_path else None
-    x_all, mask_all, y_all = _build_training_examples(
+    x_all, mask_all, y_all, w_all = _build_training_examples(
         data_path,
         encoder_version=encoder_version,
         disagreement_agent=disagreement_agent,
         disagreement_seed=int(args.seed),
+        ignore_sample_weights=bool(args.ignore_sample_weights),
     )
 
     rng = np.random.default_rng(args.seed)
@@ -588,8 +657,34 @@ def main() -> int:
     val_idx = idx[:val_size]
     train_idx = idx[val_size:]
 
-    x_train, mask_train, y_train = x_all[train_idx], mask_all[train_idx], y_all[train_idx]
+    x_train, mask_train, y_train, w_train = x_all[train_idx], mask_all[train_idx], y_all[train_idx], w_all[train_idx]
     x_val, mask_val, y_val = x_all[val_idx], mask_all[val_idx], y_all[val_idx]
+
+    # Normalizziamo i pesi a media 1.0 sul solo train: così il gradiente medio per batch ha la stessa
+    # scala del training non pesato e il learning rate resta valido. La validation usa CE non pesata
+    # (peso implicito 1.0) per restare confrontabile tra run con weighting diverso.
+    weight_mean = float(w_train.mean()) if w_train.size else 0.0
+    if not bool(args.no_weight_normalize) and weight_mean > 0.0:
+        w_train = (w_train / weight_mean).astype(np.float32)
+    weights_are_uniform = bool(np.allclose(w_train, 1.0))
+    weight_stats = {
+        "raw_mean": weight_mean,
+        "min": float(w_train.min()) if w_train.size else 0.0,
+        "max": float(w_train.max()) if w_train.size else 0.0,
+        "normalized": bool(not args.no_weight_normalize),
+        "ignored": bool(args.ignore_sample_weights),
+        "uniform": weights_are_uniform,
+    }
+    print(
+        "sample_weight | "
+        f"raw_mean {weight_stats['raw_mean']:.4f} "
+        f"min {weight_stats['min']:.4f} max {weight_stats['max']:.4f} "
+        f"normalized={weight_stats['normalized']} ignored={weight_stats['ignored']} uniform={weight_stats['uniform']}"
+    )
+
+    # Passiamo i pesi alla loss solo quando non sono uniformi: così il caso classico (nessun
+    # sample_weight nel dataset) resta numericamente identico al comportamento storico.
+    train_weight = None if weights_are_uniform else w_train
 
     lr = float(args.lr) if args.lr is not None else (0.5 if args.model == "linear" else 1e-3)
 
@@ -623,13 +718,14 @@ def main() -> int:
         for epoch in range(1, args.epochs + 1):
             train_losses = []
             train_accs = []
-            for batch in _iter_minibatches(x_train, mask_train, y_train, batch_size=args.batch_size, rng=rng):
+            for batch in _iter_minibatches(x_train, mask_train, y_train, w_train, batch_size=args.batch_size, rng=rng):
                 loss, grad_w, grad_b, masked = _loss_and_grad_linear(
                     batch.x,
                     batch.mask,
                     batch.y,
                     w,
                     b,
+                    sample_weight=None if train_weight is None else batch.weight,
                     anchor=bc_anchor,
                     anchor_beta=float(args.bc_anchor_beta),
                 )
@@ -681,6 +777,7 @@ def main() -> int:
             "bc_anchor_path": bc_anchor_path or None,
             "bc_anchor_beta": float(args.bc_anchor_beta),
             "filter_disagree_with_model": filter_disagree_path or None,
+            "sample_weight": weight_stats,
             "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
             "metrics": [asdict(metric) for metric in metrics],
         }
@@ -717,7 +814,7 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         train_losses = []
         train_accs = []
-        for batch in _iter_minibatches(x_train, mask_train, y_train, batch_size=args.batch_size, rng=rng):
+        for batch in _iter_minibatches(x_train, mask_train, y_train, w_train, batch_size=args.batch_size, rng=rng):
             t += 1
             loss, gw1, gb1, gw2, gb2, masked = _loss_and_grad_mlp(
                 batch.x,
@@ -728,6 +825,7 @@ def main() -> int:
                 w2,
                 b2,
                 weight_decay=float(args.weight_decay),
+                sample_weight=None if train_weight is None else batch.weight,
                 anchor=bc_anchor,
                 anchor_beta=float(args.bc_anchor_beta),
             )
@@ -785,6 +883,7 @@ def main() -> int:
         "bc_anchor_path": bc_anchor_path or None,
         "bc_anchor_beta": float(args.bc_anchor_beta),
         "filter_disagree_with_model": filter_disagree_path or None,
+        "sample_weight": weight_stats,
         "train": {
             "model": "mlp",
             "optimizer": "adam",

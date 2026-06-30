@@ -107,11 +107,11 @@ def test_bc_data_path_v3_has_310_features(tmp_path: Path) -> None:
     jsonl_path = _make_teacher_jsonl(tmp_path)
     train_bc = _load_script_module("train_bc")
 
-    x, mask, y = train_bc._build_training_examples(jsonl_path, encoder_version="v3")
+    x, mask, y, weights = train_bc._build_training_examples(jsonl_path, encoder_version="v3")
     assert x.shape[0] > 0
     assert x.shape[1] == int(FEATURE_DIM_2P_V3) == 310
     assert mask.shape[1] == 40
-    assert x.shape[0] == y.shape[0] == mask.shape[0]
+    assert x.shape[0] == y.shape[0] == mask.shape[0] == weights.shape[0]
 
 
 def test_train_bc_v3_cli_roundtrip(tmp_path: Path) -> None:
