@@ -28,6 +28,7 @@ from .registry import (
     list_agent_specs,
 )
 from .rule_based import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent, card_to_short_string
+from .value_lookahead import ValueLookaheadAgent, ValueLookaheadStats
 
 __all__ = [
     "AI_AGENTS_COMMON_NOTE_IT",
@@ -46,6 +47,8 @@ __all__ = [
     "PIMCAgent",
     "PIMCSearchDiagnostics",
     "RandomAgent",
+    "ValueLookaheadAgent",
+    "ValueLookaheadStats",
     "agent_uses_selected_model",
     "build_agent",
     "can_solve_endgame_from_observation",

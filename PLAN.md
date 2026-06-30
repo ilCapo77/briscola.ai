@@ -95,12 +95,14 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 Obiettivo: verificare se il value model validato offline produce forza reale quando usato a runtime.
 
+Stato:
+
+- implementati `ValueLookaheadAgent` e `scripts/evaluate_value_lookahead.py`;
+- smoke reale 40 partite vs `v6 + solver`: `records_failed=0` equivalente, leaf eval fallite `0`, circa `0.016s` per
+  mossa lookahead; CI troppo larga per conclusioni di forza.
+
 Fare:
 
-- implementare agente domain-only `V-lookahead depth-1 + solver`: per ogni carta legale applica la mossa, risolve la
-  presa corrente con policy `v6 + solver`, valuta la foglia con `V`, cambia segno se la foglia tocca all'avversario;
-- fallback a `v6 + solver` in caso di errore, e solver esatto a mazzo vuoto;
-- testare anti-cheat, determinismo seed e parità del caso `depth=0`/fallback;
 - valutare seat-fair contro `v6 + solver`, 2000-4000 partite, con CI su score e avg diff;
 - promuovere solo se il lower bound CI95 di avg diff è materialmente positivo e la latenza/mossa è compatibile col
   cloud.
@@ -193,6 +195,7 @@ Value-learning / V-lookahead:
 uv run python scripts/generate_value_dataset.py --help
 uv run python scripts/train_value.py --help
 uv run python scripts/evaluate_value_ranking.py --help
+uv run python scripts/evaluate_value_lookahead.py --help
 ```
 
 Avvio locale:

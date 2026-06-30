@@ -360,6 +360,8 @@ PIMC quando valuta foglie di lookahead corta.
 - `scripts/evaluate_value_ranking.py`: gate offline contro diagnostica PIMC: confronta top-1 e ranking pairwise di
   `V` con `teacher.search_diagnostics.action_values`, includendo baseline `reference_top1` del modello v6 sulla stessa
   popolazione.
+- `scripts/evaluate_value_lookahead.py`: Stage 1 domain-only. Misura un agente `v6 + solver + V-lookahead depth-1`
+  contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead.
 
 Esempio minimo:
 
@@ -389,6 +391,13 @@ python scripts/evaluate_value_ranking.py \
   --continuation-model ./data/models/best_a2c_v6.npz \
   --determinizations 8 \
   --max-records 5000
+
+python scripts/evaluate_value_lookahead.py \
+  --policy-model ./data/models/best_a2c_v6.npz \
+  --value-model ./data/models/value_v0_h128_clean50k.npz \
+  --num-games 2000 \
+  --determinizations 8 \
+  --max-unknown-cards 8
 ```
 
 **Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
