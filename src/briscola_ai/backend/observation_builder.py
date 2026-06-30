@@ -135,6 +135,7 @@ def build_game_state_dto(state: DomainGameState, server_version: int) -> GameSta
     # Stesso criterio di `ObservationDTO`: se il mazzo è vuoto, non ripetiamo la carta di briscola.
     trump_card = CardDTO.from_domain(state.trump_card) if state.trump_card and len(state.deck) > 0 else None
     trump_suit = state.trump_card.suit.value if state.trump_card else None
+    next_deck_card = CardDTO.from_domain(state.deck[-1]) if state.deck else None
     table_cards = [TableCardDTO.from_domain(card, idx) for card, idx in state.table_cards]
 
     players: list[PlayerStateDTO] = []
@@ -160,6 +161,7 @@ def build_game_state_dto(state: DomainGameState, server_version: int) -> GameSta
         is_team_game=state.is_team_game,
         trump_card=trump_card,
         trump_suit=trump_suit,
+        next_deck_card=next_deck_card,
         table_cards=table_cards,
         current_turn=state.current_turn,
         first_player=state.first_player,

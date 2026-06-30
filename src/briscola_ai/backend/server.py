@@ -999,6 +999,7 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
     reveal_dto = AiCardRevealDTO(
         card_index=card_index,
         card=CardDTO.from_domain(selected_card),
+        decision_type=decision_trace.get("decision_type") if decision_trace is not None else None,
     )
     _safe_log_event(
         game_id,

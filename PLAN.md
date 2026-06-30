@@ -5,7 +5,7 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.17.2`.
+- Versione progetto: `0.18.0`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
 - Modello consigliato: `best_a2c_v6.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
 - Default UI: `bc_model` + modello consigliato, cioè v6 puro. È la baseline più leggibile per giocatori umani e audit.
@@ -19,6 +19,8 @@ nei commit, nei test e nei report.
 - Diagnostica cloud: `/version` e `/api/meta` espongono `event_log_available`, `event_log_healthy`,
   `event_log_backend`, `event_log_database_name` ed `event_log_database_host` per verificare che il processo live
   abbia un event log Postgres raggiungibile e collegato al Neon atteso.
+- Debug UI: `GET /api/games/{id}` resta endpoint completo per debug/spectator e include anche `next_deck_card`;
+  la vista fair (`player_index`) e gli agenti continuano a ricevere solo `ObservationDTO`.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
 - Artefatti locali (`data/`, `benchmarks/`) restano gitignored.
 

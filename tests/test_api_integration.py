@@ -837,12 +837,17 @@ def test_get_game_state_without_player_index_returns_game_state_dto() -> None:
     assert payload["type"] == "game_state"
     assert payload["num_players"] == 2
     assert payload["is_team_game"] is False
+    assert payload["next_deck_card"] is not None
     assert isinstance(payload.get("players"), list)
     assert len(payload["players"]) == 2
 
     # Deve includere mani complete (debug/spectator), quindi `hand` è presente.
     assert "hand" in payload["players"][0]
     assert isinstance(payload["players"][0]["hand"], list)
+
+    observation = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+    assert observation["type"] == "observation"
+    assert "next_deck_card" not in observation
 
 
 def test_get_game_state_rejects_invalid_player_index() -> None:

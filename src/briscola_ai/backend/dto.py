@@ -160,6 +160,8 @@ class AiCardRevealDTO(BaseModel):
     type: Literal["ai_card_reveal"] = "ai_card_reveal"
     card_index: int
     card: CardDTO
+    # Ramo decisionale usato dall'agente, se disponibile. Serve solo alla presentazione/debug.
+    decision_type: str | None = None
 
 
 class TrickResultDTO(BaseModel):
@@ -195,6 +197,9 @@ class GameStateDTO(BaseModel):
 
     trump_card: CardDTO | None
     trump_suit: str | None
+    # Solo debug/spectator: prossima carta pescabile dal mazzo (`deck[-1]` nel dominio).
+    # Non compare in ObservationDTO, quindi gli agenti e la vista fair del giocatore non la ricevono.
+    next_deck_card: CardDTO | None = None
 
     table_cards: list[TableCardDTO]
 

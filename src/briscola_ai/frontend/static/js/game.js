@@ -141,6 +141,8 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     let pendingEvents = [];
     let flushTimeoutId = null;
+    let debugPeekActive = false;
+    let debugPeekRequestId = 0;
 
     const _displayNameForPlayer = (playerIndex, fallbackName = null) => {
         if (playerIndex === getState().playerIndex) return 'Tu';
@@ -245,6 +247,50 @@ document.addEventListener('DOMContentLoaded', () => {
         _scheduleFlush();
     };
 
+    const _isTypingTarget = (target) => {
+        const tag = target?.tagName?.toLowerCase();
+        return tag === 'input' || tag === 'textarea' || tag === 'select' || target?.isContentEditable === true;
+    };
+
+    const _applyDebugPeekState = (fullState) => {
+        if (!debugPeekActive || !fullState || fullState.type !== 'game_state') return;
+
+        const state = getState();
+        const opponent = (fullState.players || []).find((p) => p.index === state.opponentIndex);
+        if (opponent?.hand) {
+            UI.renderOpponentHand(opponent.hand_size || opponent.hand.length, opponent.hand);
+        }
+        UI.updateDeckCount(fullState.cards_remaining_in_deck || 0, fullState.next_deck_card || null);
+    };
+
+    const _refreshDebugPeek = async () => {
+        const state = getState();
+        if (!debugPeekActive || !state.gameId || state.gameOver) return;
+
+        const requestId = ++debugPeekRequestId;
+        try {
+            const fullState = await API.getGameState(state.gameId);
+            if (!debugPeekActive || requestId !== debugPeekRequestId) return;
+            _applyDebugPeekState(fullState);
+        } catch (error) {
+            console.warn('Debug peek failed:', error);
+        }
+    };
+
+    const _setDebugPeekActive = (active) => {
+        const next = active === true;
+        if (debugPeekActive === next) return;
+        debugPeekActive = next;
+        debugPeekRequestId += 1;
+
+        const state = getState();
+        if (debugPeekActive) {
+            _refreshDebugPeek();
+        } else if (state.observation) {
+            updateUI(state.observation);
+        }
+    };
+
     /**
      * Accoda un evento, collassando snapshot consecutivi.
      *
@@ -317,7 +363,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (next.type === 'ai_card_reveal') {
                 const data = next.data;
                 console.log('AI card reveal:', data.card_index, data.card);
-                UI.revealOpponentCard(data.card_index, data.card);
+                UI.revealOpponentCard(data.card_index, data.card, data.decision_type || null);
                 _holdUiForReveal();
                 break;
             }
@@ -368,6 +414,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
         // Deck count
         UI.updateDeckCount(obs.cards_remaining_in_deck || 0);
+
+        if (debugPeekActive) {
+            _refreshDebugPeek();
+        }
 
         // Turn message
         if (obs.game_over) {
@@ -632,6 +682,8 @@ document.addEventListener('DOMContentLoaded', () => {
         lastAppliedServerVersion = -1;
         pendingEvents = [];
         uiHoldUntilMs = 0;
+        debugPeekActive = false;
+        debugPeekRequestId += 1;
         my_turn_started_at_ms = null;
         my_turn_observation_server_version = null;
         was_my_turn = false;
@@ -649,6 +701,19 @@ document.addEventListener('DOMContentLoaded', () => {
     // Precarica le immagini delle carte in background mentre l'utente è sulla home:
     // quando avvia la partita sono già in cache (niente flicker al primo render).
     UI.preloadCardAssets();
+
+    document.addEventListener('keydown', (event) => {
+        if (event.repeat || _isTypingTarget(event.target)) return;
+        if ((event.key || '').toLowerCase() === 's') {
+            _setDebugPeekActive(true);
+        }
+    });
+
+    document.addEventListener('keyup', (event) => {
+        if ((event.key || '').toLowerCase() === 's') {
+            _setDebugPeekActive(false);
+        }
+    });
 
     UI.showGameSetup();
 });

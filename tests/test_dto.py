@@ -8,8 +8,10 @@ e che i DTO producano JSON con la struttura attesa.
 from briscola_ai.backend.dto import (
     AiCardRevealDTO,
     CardDTO,
+    GameStateDTO,
     ObservationDTO,
     PlayerInfoDTO,
+    PlayerStateDTO,
     TableCardDTO,
     TrickResultDTO,
 )
@@ -145,9 +147,44 @@ class TestAiCardRevealDTO:
         dto = AiCardRevealDTO(
             card_index=1,
             card=CardDTO(suit="swords", rank="SEVEN", number=7, points=0),
+            decision_type="lookahead",
         )
 
         assert dto.type == "ai_card_reveal"
+        assert dto.decision_type == "lookahead"
+
+
+class TestGameStateDTO:
+    """Test per GameStateDTO completo usato da debug/spectator."""
+
+    def test_debug_state_can_include_next_deck_card(self) -> None:
+        """Lo stato completo può esporre la prossima carta mazzo; ObservationDTO no."""
+        dto = GameStateDTO(
+            server_version=2,
+            num_players=2,
+            is_team_game=False,
+            trump_card=None,
+            trump_suit="cups",
+            next_deck_card=CardDTO(suit="coins", rank="ACE", number=1, points=11),
+            table_cards=[],
+            current_turn=0,
+            first_player=0,
+            cards_remaining_in_deck=12,
+            valid_actions=[0, 1, 2],
+            game_over=False,
+            trick_in_progress=False,
+            trick_size=0,
+            expected_trick_size=2,
+            players=[
+                PlayerStateDTO(index=0, name="Player", points=0, hand=[], hand_size=0, captured_cards=[]),
+                PlayerStateDTO(index=1, name="AI", points=0, hand=[], hand_size=0, captured_cards=[]),
+            ],
+        )
+
+        data = dto.model_dump()
+
+        assert data["type"] == "game_state"
+        assert data["next_deck_card"]["rank"] == "ACE"
 
 
 class TestTrickResultDTO:

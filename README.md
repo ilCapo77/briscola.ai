@@ -114,11 +114,34 @@ Architettura ibrida HTTP + WebSocket.
 
 | Metodo | Endpoint | Descrizione |
 |--------|----------|-------------|
+| `GET` | `/health` | Liveness check minimale per cloud/load balancer |
+| `GET` | `/version` | Diagnostica deploy: versione, modelli presenti, event log realmente montato |
+| `GET` | `/api/meta` | Metadati runtime per UI: modalità event log, consenso dataset, diagnostica DB |
+| `GET` | `/api/ai/agents` | Catalogo agenti IA disponibili per la UI |
+| `GET` | `/api/ai/models` | Catalogo modelli `.npz` selezionabili |
 | `POST` | `/api/games` | Crea una nuova partita |
-| `GET` | `/api/games/{id}` | Stato completo (DTO `type: "game_state"`, debug/spettatori) |
+| `GET` | `/api/games/{id}` | Stato completo (DTO `type: "game_state"`, debug/spettatori, include mani e prossima carta mazzo) |
 | `GET` | `/api/games/{id}?player_index={i}` | Vista del giocatore `i` (`type: "observation"`) |
 | `POST` | `/api/games/{id}/actions` | Il giocatore gioca una carta |
 | `GET` | `/api/games/{id}/result` | Risultato finale |
+
+### Endpoint Diagnostici
+
+`GET /version` è pensato per controllare rapidamente un deploy cloud senza aprire la UI. Espone almeno:
+`code_version`, `rules_version`, directory modelli, modello consigliato e presenza degli asset (`recommended_model_present`,
+`value_lookahead_model_present`). Quando l'event log è configurato include anche `event_log_available`,
+`event_log_healthy`, `event_log_backend`, `event_log_database_name` e `event_log_database_host`, così puoi verificare
+che il processo live stia usando il Postgres/Neon atteso.
+
+`GET /api/meta` espone gli stessi campi runtime utili alla UI, più `event_log_mode`, `dataset_requires_consent` e
+`cors_allow_origins`. In produzione dataset il controllo minimo atteso è:
+`event_log_mode=dataset`, `event_log_available=true`, `event_log_healthy=true`, `event_log_backend=postgres` e host/nome
+DB coerenti col pannello Neon.
+
+`GET /api/games/{id}` senza `player_index` è volutamente un payload di debug/spectator: mostra tutto lo stato della
+partita, incluse le mani complete e `next_deck_card`. Per la UI fair, per gli agenti e per il WebSocket player-facing
+usa invece sempre `GET /api/games/{id}?player_index={i}` o gli snapshot `observation`, che espongono solo
+l'informazione lecita del giocatore.
 
 ### WebSocket (tempo reale)
 

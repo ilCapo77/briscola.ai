@@ -585,10 +585,13 @@ const UI = (() => {
         elements.turnIndicator.style.visibility = isMyTurn ? 'visible' : 'hidden';
     };
 
-    const renderOpponentHand = (cardCount) => {
+    const renderOpponentHand = (cardCount, revealedCards = null) => {
         elements.opponentHand.innerHTML = '';
-        for (let i = 0; i < cardCount; i++) {
-            const cardEl = createCardElement(null);
+        const cards = Array.isArray(revealedCards) ? revealedCards : null;
+        const count = cards ? cards.length : cardCount;
+        for (let i = 0; i < count; i++) {
+            const cardEl = createCardElement(cards ? cards[i] : null);
+            if (cards) cardEl.classList.add('debug-peek-card');
             elements.opponentHand.appendChild(cardEl);
         }
     };
@@ -596,7 +599,7 @@ const UI = (() => {
     /**
      * Reveal a specific card in opponent's hand (show face-up with highlight)
      */
-    const revealOpponentCard = (cardIndex, card) => {
+    const revealOpponentCard = (cardIndex, card, decisionType = null) => {
         const cards = elements.opponentHand.children;
         console.log('revealOpponentCard called:', cardIndex, 'cards in hand:', cards.length);
         if (cardIndex >= 0 && cardIndex < cards.length) {
@@ -607,6 +610,8 @@ const UI = (() => {
             if (src) {
                 cardEl.classList.remove('card-back');
                 cardEl.classList.add('revealed');
+                cardEl.classList.toggle('revealed-lookahead', decisionType === 'lookahead' || decisionType === 'search');
+                cardEl.classList.toggle('revealed-solver', decisionType === 'solver');
                 const img = document.createElement('img');
                 img.className = 'card-face';
                 img.src = src;
@@ -720,13 +725,40 @@ const UI = (() => {
         elements.trumpCard.appendChild(label);
     };
 
-    const updateDeckCount = (count) => {
+    const updateDeckCount = (count, debugNextCard = null) => {
         const safeCount = Number.isFinite(count) ? count : 0;
         elements.deckCount.textContent = safeCount;
 
         // Manteniamo sempre visibile il placeholder del mazzo per evitare che l'area "tavolo"
         // cambi altezza quando il mazzo si esaurisce.
         elements.deck.style.display = 'flex';
+        elements.deck.classList.remove('debug-peek-card');
+
+        if (debugNextCard && safeCount > 0) {
+            const src = _cardImageSrc(debugNextCard);
+            if (src) {
+                elements.deck.classList.remove('deck-empty');
+                elements.deck.classList.remove('card-back');
+                elements.deck.classList.add('debug-peek-card');
+                elements.deck.replaceChildren();
+
+                const img = document.createElement('img');
+                img.className = 'card-face';
+                img.src = src;
+                img.alt = 'Prossima carta mazzo';
+                elements.deck.appendChild(img);
+                elements.deck.appendChild(elements.deckCount);
+                return;
+            }
+        }
+
+        if (elements.deckCount.parentElement !== elements.deck) {
+            elements.deck.replaceChildren(elements.deckCount);
+        } else {
+            Array.from(elements.deck.children).forEach((child) => {
+                if (child !== elements.deckCount) child.remove();
+            });
+        }
 
         // Quando il mazzo è vuoto:
         // - non vogliamo più mostrare il retro della carta (sembra che ci sia ancora un mazzo)
