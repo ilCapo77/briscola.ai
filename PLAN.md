@@ -304,6 +304,9 @@ Passi consigliati:
       peggiora `(v7+solver)` vs `(v6+solver)` di `-3.01` punti medi (CI95 `-4.15..-1.88`), il checkpoint corto `e24`
       peggiora di `-4.51` (CI95 `-5.64..-3.37`), e un update minimo `e1` resta non positivo (`-0.87`, CI95
       `-1.96..+0.22`);
+    - test capacità `hidden=512` da zero sulle sole `14,978` correzioni: train acc arriva a `~100%`, quindi il subset
+      è memorizzabile e la capacità larga basta; la val acc resta però circa `56-57%` e la val loss peggiora presto.
+      Allargare la MLP non risolve da solo la generalizzazione delle hard label PIMC;
     - decisione: non promuovere nessun `pimc_v7_*` e non continuare training su hard label PIMC senza una nuova ipotesi.
       Il miglioramento reale oggi resta runtime: `v6 + solver` come baseline/default solida, `PIMC(v6,16×8)` come
       avversario più forte selezionabile e misurato.
