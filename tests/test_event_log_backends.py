@@ -9,6 +9,9 @@ demandata al deploy (Neon); qui copriamo dialetto SQL e logica Python.
 
 from __future__ import annotations
 
+import sys
+import types
+
 import pytest
 
 from briscola_ai.backend.event_log import (
@@ -53,6 +56,27 @@ class _FakeConn:
         self.closed = True
 
 
+class _FailOnceCursor(_FakeCursor):
+    """Cursor fake che simula una connessione Postgres chiusa alla prima execute richiesta."""
+
+    def execute(self, sql: str, params: tuple = ()) -> None:
+        if self._conn.fail_next_execute:
+            self._conn.fail_next_execute = False
+            raise RuntimeError("connection lost")
+        super().execute(sql, params)
+
+
+class _FailOnceConn(_FakeConn):
+    """Connessione fake configurabile per fallire una sola statement, poi tornare sana."""
+
+    def __init__(self, rowcount: int = 1) -> None:
+        super().__init__(rowcount=rowcount)
+        self.fail_next_execute = False
+
+    def cursor(self) -> _FailOnceCursor:
+        return _FailOnceCursor(self)
+
+
 def _sqls(conn: _FakeConn) -> str:
     return "\n".join(sql for sql, _ in conn.executed)
 
@@ -81,6 +105,27 @@ def test_postgres_event_log_insert_uses_on_conflict_and_placeholders() -> None:
     assert games_inserts and "ON CONFLICT (game_id) DO NOTHING" in games_inserts[0][0]
     assert "%s" in games_inserts[0][0] and "?" not in games_inserts[0][0]  # placeholder Postgres
     assert events_inserts and events_inserts[0][1][0] == "g1"
+
+
+def test_postgres_event_log_reconnects_once_on_execute_failure(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Se Neon chiude una connessione idle, la prima scrittura deve riconnettere e ritentare una volta."""
+    first_conn = _FailOnceConn()
+    second_conn = _FakeConn()
+    connections: list[_FakeConn] = [first_conn, second_conn]
+
+    def _connect(_: str, *, autocommit: bool = True) -> _FakeConn:
+        assert autocommit is True
+        return connections.pop(0)
+
+    fake_psycopg = types.SimpleNamespace(connect=_connect)
+    monkeypatch.setitem(sys.modules, "psycopg", fake_psycopg)
+
+    log = PostgresEventLog(dsn="postgresql://user:secret@example.neon.tech/neondb")
+    first_conn.fail_next_execute = True
+    log.ensure_game("g-reconnect", num_players=2, seed=7, code_version="0.17.2", rules_version="1")
+
+    assert first_conn.closed is True
+    assert any(sql.startswith("INSERT INTO games") for sql, _ in second_conn.executed)
 
 
 def test_postgres_try_mark_finished_idempotent_via_rowcount() -> None:
@@ -116,6 +161,17 @@ def test_both_backends_satisfy_protocol() -> None:
     così da essere intercambiabili a runtime."""
     assert isinstance(PostgresEventLog(conn=_FakeConn()), EventLogProtocol)
     assert isinstance(EventLog(EventLogConfig(path=":memory:")), EventLogProtocol)
+
+
+def test_event_log_health_check(tmp_path) -> None:
+    """La health check deve confermare che i backend montati sono realmente interrogabili."""
+    sqlite_log = EventLog(EventLogConfig(path=str(tmp_path / "events.sqlite3")))
+    try:
+        assert sqlite_log.health_check() is True
+    finally:
+        sqlite_log.close()
+
+    assert PostgresEventLog(conn=_FakeConn()).health_check() is True
 
 
 def test_event_log_exposes_safe_backend_and_database_name(tmp_path) -> None:

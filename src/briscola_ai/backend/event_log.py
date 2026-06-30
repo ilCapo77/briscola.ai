@@ -66,6 +66,8 @@ class EventLogProtocol(Protocol):
     @property
     def database_host(self) -> Optional[str]: ...
 
+    def health_check(self) -> bool: ...
+
     def close(self) -> None: ...
 
     def ensure_game(
@@ -136,6 +138,15 @@ class EventLog:
     def database_host(self) -> Optional[str]:
         """SQLite locale non ha un host di rete."""
         return None
+
+    def health_check(self) -> bool:
+        """Verifica rapida che la connessione SQLite sia ancora utilizzabile."""
+        try:
+            with self._lock:
+                self._conn.execute("SELECT 1;")
+        except Exception:
+            return False
+        return True
 
     def close(self) -> None:
         """Chiude la connessione SQLite."""
@@ -416,9 +427,7 @@ class PostgresEventLog:
         if conn is not None:
             self._conn = conn
         elif dsn is not None:
-            import psycopg  # import lazy: solo se si usa Postgres
-
-            self._conn = psycopg.connect(dsn, autocommit=True)
+            self._conn = self._connect()
         else:
             raise ValueError("PostgresEventLog richiede `dsn` oppure `conn`.")
         self._init_schema()
@@ -447,11 +456,58 @@ class PostgresEventLog:
         with self._lock, contextlib.suppress(Exception):
             self._conn.close()
 
-    def _execute(self, sql: str, params: tuple = ()) -> int:
-        """Esegue una statement e ritorna `rowcount` (per l'idempotenza)."""
-        with self._lock, self._conn.cursor() as cur:
+    def _connect(self) -> Any:
+        """Apre una nuova connessione Postgres dal DSN configurato."""
+        if not self._dsn:
+            raise ValueError("Impossibile riconnettere Postgres senza DSN.")
+        import psycopg  # import lazy: solo se si usa Postgres
+
+        return psycopg.connect(self._dsn, autocommit=True)
+
+    def _reconnect_locked(self) -> None:
+        """Ricrea la connessione Postgres; chiamare solo con `_lock` gia' acquisito."""
+        with contextlib.suppress(Exception):
+            self._conn.close()
+        self._conn = self._connect()
+
+    def _execute_once_locked(self, sql: str, params: tuple = ()) -> int:
+        """Esegue una statement usando la connessione corrente; richiede `_lock` acquisito."""
+        with self._conn.cursor() as cur:
             cur.execute(sql, params)
             return int(cur.rowcount)
+
+    def _execute(self, sql: str, params: tuple = ()) -> int:
+        """
+        Esegue una statement e ritorna `rowcount` (per l'idempotenza).
+
+        Neon e altre piattaforme serverless possono chiudere connessioni rimaste inattive.
+        In quel caso il logger non deve restare "available ma muto": tentiamo una
+        riconnessione e ritentiamo una volta la statement.
+        """
+        with self._lock:
+            try:
+                return self._execute_once_locked(sql, params)
+            except Exception:
+                if not self._dsn:
+                    raise
+                self._reconnect_locked()
+                return self._execute_once_locked(sql, params)
+
+    def health_check(self) -> bool:
+        """Verifica che la connessione Postgres corrente sia utilizzabile, riconnettendo se serve."""
+        with self._lock:
+            try:
+                self._execute_once_locked("SELECT 1;")
+                return True
+            except Exception:
+                if not self._dsn:
+                    return False
+                try:
+                    self._reconnect_locked()
+                    self._execute_once_locked("SELECT 1;")
+                except Exception:
+                    return False
+                return True
 
     def _init_schema(self) -> None:
         """Crea tabelle e indici se non esistono (schema completo: niente migrazioni)."""

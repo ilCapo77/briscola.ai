@@ -134,12 +134,16 @@ def event_log_runtime_metadata() -> dict[str, str | bool | None]:
     if log is None:
         return {
             "event_log_available": False,
+            "event_log_healthy": False,
             "event_log_backend": None,
             "event_log_database_name": None,
             "event_log_database_host": None,
         }
+    health_check = getattr(log, "health_check", None)
+    healthy = bool(health_check()) if callable(health_check) else None
     return {
         "event_log_available": True,
+        "event_log_healthy": healthy,
         "event_log_backend": getattr(log, "backend_name", "unknown"),
         "event_log_database_name": getattr(log, "database_name", None),
         "event_log_database_host": getattr(log, "database_host", None),
@@ -202,9 +206,9 @@ def _safe_log_event(
             server_version=server_version,
             player_index=player_index,
         )
-    except Exception:
+    except Exception as exc:
         # Best-effort: non propaghiamo eccezioni lato API/WS.
-        print(f"Event log SQLite: errore scrittura evento {event_type!r} (game_id={game_id}).")
+        print(f"Event log: errore scrittura evento {event_type!r} (game_id={game_id}, error={exc!r}).")
 
 
 def _safe_set_client_id(game_id: str, client_id: Optional[str]) -> None:

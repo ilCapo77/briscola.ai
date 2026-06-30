@@ -5,7 +5,7 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.17.1`.
+- Versione progetto: `0.17.2`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
 - Modello consigliato: `best_a2c_v6.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
 - Default UI: `bc_model` + modello consigliato, cioè v6 puro. È la baseline più leggibile per giocatori umani e audit.
@@ -16,9 +16,9 @@ nei commit, nei test e nei report.
 - Backend: FastAPI + WebSocket, stato in `GameSessionStore` (Redis in cloud), event log SQLite/Postgres.
 - Dataset cloud: `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`; il backend salva eventi `ai_action` auditabili
   per mosse IA/search (`fallback`, `lookahead`, `search`, `solver`).
-- Diagnostica cloud: `/version` e `/api/meta` espongono `event_log_available`, `event_log_backend`,
-  `event_log_database_name` ed `event_log_database_host` per verificare che il processo live stia davvero scrivendo
-  sul Postgres/Neon atteso.
+- Diagnostica cloud: `/version` e `/api/meta` espongono `event_log_available`, `event_log_healthy`,
+  `event_log_backend`, `event_log_database_name` ed `event_log_database_host` per verificare che il processo live
+  abbia un event log Postgres raggiungibile e collegato al Neon atteso.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
 - Artefatti locali (`data/`, `benchmarks/`) restano gitignored.
 
@@ -105,7 +105,8 @@ Stato:
 
 - implementati `ValueLookaheadAgent` e `scripts/evaluate_value_lookahead.py`;
 - deployato in `v0.16.0` come seconda scelta vicina a `bc_model`; default UI resta v6 puro;
-- `v0.17.x` aggiunge diagnostica event-log runtime e `scripts/inspect_event_log_game.py` per isolare mismatch DB/log;
+- `v0.17.x` aggiunge diagnostica event-log runtime, health check Postgres con reconnect e
+  `scripts/inspect_event_log_game.py` per isolare mismatch DB/log;
 - provisioning cloud attivo per `value_v0_h128_clean50k_seed20260701.npz` via
   `BRISCOLA_VALUE_MODEL_URL`/`BRISCOLA_VALUE_MODEL_SHA256`;
 - il guard anti-overkill è attivo di default sulle sole decisioni V-lookahead; fallback e solver restano invariati;
@@ -118,7 +119,7 @@ Fare:
 
 - far giocare 10-20 partite umane contro `bc_model_value_lookahead_8x8`;
 - dopo ogni deploy verificare che `/version` mostri `event_log_mode=dataset`, `event_log_available=true`,
-  `event_log_backend=postgres`, `event_log_database_name=neondb` (o il nome DB atteso) e
+  `event_log_healthy=true`, `event_log_backend=postgres`, `event_log_database_name=neondb` (o il nome DB atteso) e
   `event_log_database_host` uguale all'endpoint Neon atteso;
 - esportare/auditare gli eventi `ai_action`;
 - verificare per ogni partita: conteggio `lookahead`/`solver`/`fallback`, `failed_determinizations=0`,

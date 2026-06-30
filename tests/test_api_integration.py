@@ -176,6 +176,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
     assert payload["event_log_mode"] == "dataset"
     assert payload["dataset_requires_consent"] is True
     assert payload["event_log_available"] is False
+    assert payload["event_log_healthy"] is False
     assert payload["event_log_backend"] is None
     assert payload["event_log_database_name"] is None
     assert payload["event_log_database_host"] is None
@@ -187,6 +188,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
         assert r_available.status_code == 200
         payload_available = r_available.json()
         assert payload_available["event_log_available"] is True
+        assert payload_available["event_log_healthy"] is True
         assert payload_available["event_log_backend"] == "sqlite"
         assert payload_available["event_log_database_name"] == "events.sqlite3"
         assert payload_available["event_log_database_host"] is None
@@ -195,6 +197,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
         assert version.status_code == 200
         version_payload = version.json()
         assert version_payload["event_log_available"] is True
+        assert version_payload["event_log_healthy"] is True
         assert version_payload["event_log_backend"] == "sqlite"
         assert version_payload["event_log_database_name"] == "events.sqlite3"
         assert version_payload["event_log_database_host"] is None
