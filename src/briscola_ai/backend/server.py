@@ -122,6 +122,24 @@ def _get_event_log_mode() -> str:
     return "debug"
 
 
+def event_log_runtime_metadata() -> dict[str, str | bool | None]:
+    """
+    Diagnostica dell'event log effettivamente montato nel processo.
+
+    `event_log_mode` descrive la configurazione desiderata; questi campi dicono
+    invece se il logger e' davvero inizializzato. In cloud e' il controllo rapido
+    per distinguere "dataset mode attivo" da "Postgres non raggiungibile allo startup".
+    """
+    log = _get_event_log()
+    if log is None:
+        return {"event_log_available": False, "event_log_backend": None, "event_log_database_name": None}
+    return {
+        "event_log_available": True,
+        "event_log_backend": getattr(log, "backend_name", "unknown"),
+        "event_log_database_name": getattr(log, "database_name", None),
+    }
+
+
 def _safe_log_event(
     game_id: str,
     event_type: str,
@@ -569,6 +587,7 @@ async def meta() -> Dict:
         "code_version": get_code_version(),
         "rules_version": get_rules_version(),
         "event_log_mode": mode,
+        **event_log_runtime_metadata(),
         "dataset_requires_consent": mode == "dataset",
         "cors_allow_origins": cors_allow_origins,
     }

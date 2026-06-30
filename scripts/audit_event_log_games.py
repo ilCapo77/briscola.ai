@@ -73,6 +73,7 @@ class _GameAudit:
     ai_actions_missing_next_observation: int = 0
     ai_actions_done: int = 0
     ai_actions_search: int = 0
+    ai_actions_lookahead: int = 0
     ai_actions_solver: int = 0
     ai_actions_fallback: int = 0
     ai_actions_unknown_decision: int = 0
@@ -248,6 +249,8 @@ def build_event_log_games_audit_from_reader(reader: EventLogReader, *, config: A
             decision_type = trace.get("decision_type") if isinstance(trace, dict) else None
             if decision_type == "search":
                 game.ai_actions_search += 1
+            elif decision_type == "lookahead":
+                game.ai_actions_lookahead += 1
             elif decision_type == "solver":
                 game.ai_actions_solver += 1
             elif decision_type == "fallback":
@@ -309,6 +312,7 @@ def build_event_log_games_audit_from_reader(reader: EventLogReader, *, config: A
         "ai_actions_missing_next_observation": 0,
         "ai_actions_done": 0,
         "ai_actions_search": 0,
+        "ai_actions_lookahead": 0,
         "ai_actions_solver": 0,
         "ai_actions_fallback": 0,
         "ai_actions_unknown_decision": 0,
@@ -340,6 +344,7 @@ def build_event_log_games_audit_from_reader(reader: EventLogReader, *, config: A
         gameplay["ai_actions_missing_next_observation"] += game.ai_actions_missing_next_observation
         gameplay["ai_actions_done"] += game.ai_actions_done
         gameplay["ai_actions_search"] += game.ai_actions_search
+        gameplay["ai_actions_lookahead"] += game.ai_actions_lookahead
         gameplay["ai_actions_solver"] += game.ai_actions_solver
         gameplay["ai_actions_fallback"] += game.ai_actions_fallback
         gameplay["ai_actions_unknown_decision"] += game.ai_actions_unknown_decision
@@ -377,6 +382,7 @@ def build_event_log_games_audit_from_reader(reader: EventLogReader, *, config: A
                     "human_actions": game.human_actions,
                     "ai_actions": game.ai_actions,
                     "ai_actions_search": game.ai_actions_search,
+                    "ai_actions_lookahead": game.ai_actions_lookahead,
                     "ai_actions_solver": game.ai_actions_solver,
                     "ai_actions_fallback": game.ai_actions_fallback,
                     "action_play_card_ai": game.action_play_card_ai,
@@ -444,8 +450,9 @@ def _print_text_report(report: dict[str, Any]) -> None:
     print(f"- partite PIMC senza eventi IA nel log: {games['pimc_without_ai_events']}")
     print(f"- ai_action dataset: {gameplay['ai_actions']}")
     print(
-        "- ai_action search/solver/fallback: "
+        "- ai_action search/lookahead/solver/fallback: "
         f"{gameplay['ai_actions_search']} / "
+        f"{gameplay['ai_actions_lookahead']} / "
         f"{gameplay['ai_actions_solver']} / "
         f"{gameplay['ai_actions_fallback']}"
     )

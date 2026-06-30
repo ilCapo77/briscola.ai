@@ -165,15 +165,39 @@ def test_backend_root_healthcheck() -> None:
     assert r.json()["message"]
 
 
-def test_meta_exposes_event_log_mode_and_consent(monkeypatch: pytest.MonkeyPatch) -> None:
-    """`GET /meta` deve indicare la modalità logging e se serve il consenso (dataset)."""
+def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """`GET /meta` e `/version` distinguono configurazione logging e logger realmente montato."""
     monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "dataset")
+    server.app.state.event_log = None
     client = TestClient(server.app)
     r = client.get("/meta")
     assert r.status_code == 200
     payload = r.json()
     assert payload["event_log_mode"] == "dataset"
     assert payload["dataset_requires_consent"] is True
+    assert payload["event_log_available"] is False
+    assert payload["event_log_backend"] is None
+    assert payload["event_log_database_name"] is None
+
+    log = EventLog(EventLogConfig(path=str(tmp_path / "events.sqlite3")))
+    server.app.state.event_log = log
+    try:
+        r_available = client.get("/meta")
+        assert r_available.status_code == 200
+        payload_available = r_available.json()
+        assert payload_available["event_log_available"] is True
+        assert payload_available["event_log_backend"] == "sqlite"
+        assert payload_available["event_log_database_name"] == "events.sqlite3"
+
+        version = TestClient(main_app).get("/version")
+        assert version.status_code == 200
+        version_payload = version.json()
+        assert version_payload["event_log_available"] is True
+        assert version_payload["event_log_backend"] == "sqlite"
+        assert version_payload["event_log_database_name"] == "events.sqlite3"
+    finally:
+        log.close()
+        server.app.state.event_log = None
 
     monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "debug")
     r2 = client.get("/meta")

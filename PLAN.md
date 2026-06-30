@@ -5,7 +5,7 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.16.0`.
+- Versione progetto: `0.17.0`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
 - Modello consigliato: `best_a2c_v6.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
 - Default UI: `bc_model` + modello consigliato, cioè v6 puro. È la baseline più leggibile per giocatori umani e audit.
@@ -14,8 +14,10 @@ nei commit, nei test e nei report.
 - Altro avversario avanzato selezionabile: `bc_model_pimc_16x8`, cioè PIMC(v6, 16 determinizzazioni, max 8 carte
   vive ignote) + solver finale.
 - Backend: FastAPI + WebSocket, stato in `GameSessionStore` (Redis in cloud), event log SQLite/Postgres.
-- Dataset cloud: `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`; in `v0.15.0` il backend salva anche eventi
-  `ai_action` auditabili per mosse IA/PIMC.
+- Dataset cloud: `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`; il backend salva eventi `ai_action` auditabili
+  per mosse IA/search (`fallback`, `lookahead`, `search`, `solver`).
+- Diagnostica cloud: `/version` e `/api/meta` espongono `event_log_available`, `event_log_backend` e
+  `event_log_database_name` per verificare che il processo live stia davvero scrivendo su Postgres.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
 - Artefatti locali (`data/`, `benchmarks/`) restano gitignored.
 
@@ -93,13 +95,18 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 ## Prossime Azioni
 
-### 1. Stage 1 V-Lookahead
+### 1. Monitoraggio Produzione Value-Lookahead
 
-Obiettivo: verificare se il value model validato offline produce forza reale quando usato a runtime.
+Obiettivo: osservare `bc_model_value_lookahead_8x8` in produzione contro giocatori reali prima di qualunque altra
+promozione o training.
 
 Stato:
 
 - implementati `ValueLookaheadAgent` e `scripts/evaluate_value_lookahead.py`;
+- deployato in `v0.16.0` come seconda scelta vicina a `bc_model`; default UI resta v6 puro;
+- `v0.17.0` aggiunge diagnostica event-log runtime e `scripts/inspect_event_log_game.py` per isolare mismatch DB/log;
+- provisioning cloud attivo per `value_v0_h128_clean50k_seed20260701.npz` via
+  `BRISCOLA_VALUE_MODEL_URL`/`BRISCOLA_VALUE_MODEL_SHA256`;
 - il guard anti-overkill è attivo di default sulle sole decisioni V-lookahead; fallback e solver restano invariati;
 - held-out 4000 partite vs `v6 + solver`, seed diverso: avg diff `+2.65`, CI95 `+1.85..+3.45`; score rate `0.5421`,
   CI95 `0.5267..0.5575`; `0` determinizzazioni/leaf eval fallite; circa `0.016s` per mossa lookahead;
@@ -108,23 +115,30 @@ Stato:
 
 Fare:
 
-- deployarlo come opzione selezionabile pubblicando il value model `value_v0_h128_clean50k_seed20260701.npz` come
-  release asset e impostando `BRISCOLA_VALUE_MODEL_URL`/`BRISCOLA_VALUE_MODEL_SHA256`;
-- farlo provare a giocatori umani e auditare eventuali mosse sospette.
+- far giocare 10-20 partite umane contro `bc_model_value_lookahead_8x8`;
+- dopo ogni deploy verificare che `/version` mostri `event_log_mode=dataset`, `event_log_available=true`,
+  `event_log_backend=postgres`, `event_log_database_name=neondb` (o il nome DB atteso);
+- esportare/auditare gli eventi `ai_action`;
+- verificare per ogni partita: conteggio `lookahead`/`solver`/`fallback`, `failed_determinizations=0`,
+  `failed_leaf_evaluations=0`, `overkill_guard_adjustments`, e mosse qualitativamente sospette;
+- classificare ogni mossa sospetta dal `decision_type`: se è `fallback`, il problema è v6; se è `solver`, verificare
+  ricostruzione/endgame; se è `lookahead`, verificare value/guard/determinizzazione.
 
 Non fare:
 
 - non esporlo come default UI prima di una prova cloud/umana;
-- non chiamarlo v7 finché non batte `v6 + solver` in evaluation.
+- non chiamarlo v7: non è un nuovo `.npz` policy, è un agente runtime;
+- non avviare nuovo training finché non emerge un pattern reale misurabile dalle partite/audit.
 
 ### 2. Monitoraggio Produzione E Audit PIMC
 
-Obiettivo: capire come si comportano v6 puro, V-lookahead e `PIMC(v6,16×8)` contro giocatori reali, senza usare ancora
-questi dati per training.
+Obiettivo: mantenere `PIMC(v6,16×8)` come confronto avanzato opzionale, senza spostare il focus dal V-lookahead appena
+deployato.
 
 Fare:
 
-- far giocare 10-20 partite umane contro `bc_model_value_lookahead_8x8` e `bc_model_pimc_16x8`;
+- far giocare qualche partita umana contro `bc_model_pimc_16x8` solo se serve un confronto qualitativo con
+  V-lookahead;
 - esportare/auditare le mosse IA con:
   - `scripts/audit_event_log_games.py`
   - `scripts/export_ai_actions.py`
@@ -151,7 +165,7 @@ Continuare ad aggiungere test solo quando troviamo un caso reale sospetto o tocc
 
 Un nuovo `best_a2c_v7` ha senso solo se c'è un segnale concreto, ad esempio:
 
-- pattern di errore PIMC/v6 ripetibile da dataset reale;
+- pattern di errore V-lookahead/PIMC/v6 ripetibile da dataset reale;
 - nuova architettura/feature che risolve un limite osservato;
 - teacher/search diverso con evidenza preliminare forte;
 - aumento di volume umano sufficiente e privacy/qualità verificata.

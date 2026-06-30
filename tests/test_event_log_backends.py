@@ -118,6 +118,23 @@ def test_both_backends_satisfy_protocol() -> None:
     assert isinstance(EventLog(EventLogConfig(path=":memory:")), EventLogProtocol)
 
 
+def test_event_log_exposes_safe_backend_and_database_name(tmp_path) -> None:
+    """La diagnostica deve esporre solo backend e nome database, mai DSN completo o path locali."""
+    sqlite_log = EventLog(EventLogConfig(path=str(tmp_path / "events.sqlite3")))
+    try:
+        assert sqlite_log.backend_name == "sqlite"
+        assert sqlite_log.database_name == "events.sqlite3"
+    finally:
+        sqlite_log.close()
+
+    pg_url = PostgresEventLog(dsn="postgresql://user:secret@example.neon.tech/neondb?sslmode=require", conn=_FakeConn())
+    assert pg_url.backend_name == "postgres"
+    assert pg_url.database_name == "neondb"
+
+    pg_keywords = PostgresEventLog(dsn="host=example.neon.tech dbname=analytics user=owner", conn=_FakeConn())
+    assert pg_keywords.database_name == "analytics"
+
+
 def test_build_event_log_selection() -> None:
     """La factory deve scegliere SQLite quando è dato solo un path e restituire None
     quando non c'è né path né database_url (event log disabilitato)."""

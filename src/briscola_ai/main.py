@@ -238,6 +238,7 @@ async def version_info():
         "recommended_model_present": (models_dir / recommended_model).exists(),
         "value_lookahead_model": VALUE_LOOKAHEAD_MODEL_ID,
         "value_lookahead_model_present": (models_dir / VALUE_LOOKAHEAD_MODEL_ID).exists(),
+        **backend_server.event_log_runtime_metadata(),
     }
 
 
