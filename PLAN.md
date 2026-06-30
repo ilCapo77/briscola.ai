@@ -65,6 +65,22 @@ Esperimenti chiusi:
 Decisione: non promuovere nessun `pimc_v7_*` e non continuare distillazione PIMC in questa MLP/recipe senza una nuova
 ipotesi sostanziale.
 
+### V-Lookahead Stage 0: Positivo
+
+Ipotesi: non distillare l'argmax PIMC in una policy reattiva; allenare invece un value model `V(observation)` e usarlo
+per ordinare foglie di una lookahead corta.
+
+Stage 0 validato con dataset `v6 + solver`, `epsilon=0.10`, label pulita `v6-continuation`:
+
+- 50k partite, 2M record value-observation.
+- `train_value.py`: MAE `14.02` vs baseline delta corrente `16.34`; sign acc `0.734` vs `0.633`; best checkpoint epoca
+  16.
+- gate ranking vs diagnostica PIMC 64×8, 5000 record search: top1 `0.7276` vs reference v6 `0.5278`;
+  strong/reliable top1 `0.8395` vs `0.6359`; pairwise `0.8016`, strong pairwise `0.8502`; `records_failed=0`.
+
+Decisione: procedere a Stage 1, cioè agente `v6 + solver + V-lookahead depth-1`, e misurarlo seat-fair contro
+`v6 + solver`. Non è ancora un nuovo best né un default UI.
+
 ### Population League Declassata
 
 Il round-robin `{best_a2c_v2, v3, v4, v5, v6, heuristic_v1}` mostra famiglia monotona/transitiva: nessun ciclo
@@ -75,7 +91,26 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 ## Prossime Azioni
 
-### 1. Monitoraggio Produzione E Audit PIMC
+### 1. Stage 1 V-Lookahead
+
+Obiettivo: verificare se il value model validato offline produce forza reale quando usato a runtime.
+
+Fare:
+
+- implementare agente domain-only `V-lookahead depth-1 + solver`: per ogni carta legale applica la mossa, risolve la
+  presa corrente con policy `v6 + solver`, valuta la foglia con `V`, cambia segno se la foglia tocca all'avversario;
+- fallback a `v6 + solver` in caso di errore, e solver esatto a mazzo vuoto;
+- testare anti-cheat, determinismo seed e parità del caso `depth=0`/fallback;
+- valutare seat-fair contro `v6 + solver`, 2000-4000 partite, con CI su score e avg diff;
+- promuovere solo se il lower bound CI95 di avg diff è materialmente positivo e la latenza/mossa è compatibile col
+  cloud.
+
+Non fare:
+
+- non esporlo in UI prima del confronto head-to-head;
+- non chiamarlo v7 finché non batte `v6 + solver` in evaluation.
+
+### 2. Monitoraggio Produzione E Audit PIMC
 
 Obiettivo: capire come si comportano `v6 + solver` e `PIMC(v6,16×8)` contro giocatori reali, senza usare ancora questi
 dati per training.
@@ -95,7 +130,7 @@ Non fare:
 - non usare dati umani per training finché volume, consenso, qualità e privacy non sono riverificati;
 - non avviare v7 per inerzia.
 
-### 2. Hardening Continuo
+### 3. Hardening Continuo
 
 Già aggiunti stress test su:
 
@@ -105,7 +140,7 @@ Già aggiunti stress test su:
 
 Continuare ad aggiungere test solo quando troviamo un caso reale sospetto o tocchiamo regole/observation/PIMC.
 
-### 3. Nuovo Modello Solo Con Nuova Ipotesi
+### 4. Nuovo Modello Solo Con Nuova Ipotesi
 
 Un nuovo `best_a2c_v7` ha senso solo se c'è un segnale concreto, ad esempio:
 
@@ -122,7 +157,7 @@ Qualunque promozione deve includere:
 - `trump_waste_rate` e `trump_overkill_rate` non peggiorati materialmente;
 - aggiornamento `docs/reports/model_progress.xlsx` se cambia un best ufficiale.
 
-### 4. PPO/GAE: Bassa Priorità
+### 5. PPO/GAE: Bassa Priorità
 
 Valutare PPO/GAE solo dopo un blocco reale di A2C/PIMC e con esperimento piccolo e isolato. Non introdurre DQN per ora:
 action mask, osservabilità parziale e self-play rendono più coerente restare su policy-gradient.
@@ -150,6 +185,14 @@ Report modelli:
 
 ```bash
 uv run python scripts/build_model_report.py
+```
+
+Value-learning / V-lookahead:
+
+```bash
+uv run python scripts/generate_value_dataset.py --help
+uv run python scripts/train_value.py --help
+uv run python scripts/evaluate_value_ranking.py --help
 ```
 
 Avvio locale:

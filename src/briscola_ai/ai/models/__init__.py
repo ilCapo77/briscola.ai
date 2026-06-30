@@ -9,10 +9,12 @@ from .catalog import (
     validate_model_compatible_for_ui,
 )
 from .provisioning import DEFAULT_MODEL_ID, ensure_model_available
+from .value_model import MLPValueModel, infer_value_encoder_version, load_value_model_npz
 
 __all__ = [
     "BCModelAgent",
     "LoadedBCModel",
+    "MLPValueModel",
     "MLPBCModel",
     "LocalModelSpec",
     "DEFAULT_MODEL_ID",
@@ -20,6 +22,8 @@ __all__ = [
     "get_models_dir_from_env",
     "list_local_models",
     "load_bc_model_npz",
+    "load_value_model_npz",
+    "infer_value_encoder_version",
     "resolve_model_path",
     "validate_model_compatible_for_ui",
 ]

@@ -348,6 +348,49 @@ python scripts/train_bc.py \
   --inference-overkill-guard
 ```
 
+**Value learning / V-lookahead**: alternativa alla distillazione policy PIMC. Invece di comprimere l'argmax della
+search in una policy reattiva, si allena un value model scalare `V(observation)` e si misura se ordina le carte come
+PIMC quando valuta foglie di lookahead corta.
+
+- `scripts/generate_value_dataset.py`: genera JSONL `value_observation` da self-play 2-player. Per run puliti usa
+  `--label-mode v6-continuation`: gli stati sono visitati con epsilon, ma ogni label viene prodotta completando una
+  copia dello stato con `v6 + solver` senza epsilon. È più costoso del `same-game`, ma dà target on-policy più puliti.
+- `scripts/train_value.py`: allena una MLP scalare `.npz` con target residuale consigliato
+  `(final_score_delta - current_score_delta) / 120`, loss Huber/MSE e salvataggio del best checkpoint per `val_loss`.
+- `scripts/evaluate_value_ranking.py`: gate offline contro diagnostica PIMC: confronta top-1 e ranking pairwise di
+  `V` con `teacher.search_diagnostics.action_values`, includendo baseline `reference_top1` del modello v6 sulla stessa
+  popolazione.
+
+Esempio minimo:
+
+```bash
+python scripts/generate_value_dataset.py \
+  --agent bc_model_hybrid_endgame \
+  --model ./data/models/best_a2c_v6.npz \
+  --epsilon 0.10 \
+  --label-mode v6-continuation \
+  --num-games 50000 \
+  --out ./data/value/value_v6_solver_eps10_clean_50k.jsonl \
+  --seed 20260701
+
+python scripts/train_value.py \
+  --data ./data/value/value_v6_solver_eps10_clean_50k.jsonl \
+  --out ./data/models/value_v0_h128_clean50k.npz \
+  --encoder-version v3 \
+  --hidden-dim 128 \
+  --target residual \
+  --loss huber \
+  --epochs 30
+
+python scripts/evaluate_value_ranking.py \
+  --data ./data/pimc_teacher_diag_175k_d64_u8_seed20260630.jsonl \
+  --value-model ./data/models/value_v0_h128_clean50k.npz \
+  --continuation-agent bc_model_hybrid_endgame \
+  --continuation-model ./data/models/best_a2c_v6.npz \
+  --determinizations 8 \
+  --max-records 5000
+```
+
 **Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
 - **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.
 - **A2C** (`scripts/train_a2c.py`, consigliato): aggiunge un *critic* `V(s)` e usa l’**advantage** `A = G − V(s)` come baseline appresa, con un reward più denso (delta `punti_policy − punti_opp` per turno della policy, senza barare).
