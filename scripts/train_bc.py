@@ -64,12 +64,13 @@ from briscola_ai.domain.observation import PlayerObservation
 
 @dataclass(frozen=True)
 class Batch:
-    """Batch di training: feature, mask, target, peso per esempio."""
+    """Batch di training: feature, mask, target hard, peso e target soft opzionale."""
 
     x: np.ndarray  # (B, D)
     mask: np.ndarray  # (B, 40) boolean
     y: np.ndarray  # (B,) int in [0, 39]
     weight: np.ndarray  # (B,) float32, peso CE per esempio (1.0 = neutro)
+    target_probs: np.ndarray | None = None  # (B, 40) float32, distribuzione teacher opzionale
 
 
 def _iter_jsonl(path: Path):
@@ -173,6 +174,76 @@ def _record_sample_weight(rec: dict, *, ignore_sample_weights: bool) -> float:
     return weight
 
 
+def _pimc_soft_target_probs(
+    *,
+    rec: dict,
+    obs: dict,
+    mask: np.ndarray,
+    temperature: float,
+) -> np.ndarray | None:
+    """
+    Costruisce il target soft PIMC dai valori medi per azione salvati nel JSONL teacher.
+
+    `PIMCAgent` registra `teacher.search_diagnostics.action_values` come lista di carte
+    in mano con relativo `mean_score`. In modalità soft-label non vogliamo appiattire
+    tutto sull'argmax: trasformiamo quei punteggi in una distribuzione con softmax(score/T)
+    sulle sole carte legali osservate, poi la mappiamo sullo spazio canonico a 40 azioni.
+    """
+    teacher = rec.get("teacher")
+    if not isinstance(teacher, dict):
+        return None
+    diagnostics = teacher.get("search_diagnostics")
+    if not isinstance(diagnostics, dict):
+        return None
+    action_values = diagnostics.get("action_values")
+    if not isinstance(action_values, list) or not action_values:
+        return None
+
+    my_hand = obs.get("my_hand") or []
+    if not isinstance(my_hand, list):
+        return None
+
+    action_ids: list[int] = []
+    scores: list[float] = []
+    for item in action_values:
+        if not isinstance(item, dict):
+            continue
+        card_index = item.get("card_index")
+        mean_score = item.get("mean_score")
+        if not isinstance(card_index, int) or card_index < 0 or card_index >= len(my_hand):
+            continue
+        if mean_score is None:
+            continue
+        score = float(mean_score)
+        if not np.isfinite(score):
+            continue
+        action_id = card_dto_to_action_id(my_hand[card_index])
+        if not bool(mask[action_id]):
+            continue
+        action_ids.append(int(action_id))
+        scores.append(score)
+
+    if not action_ids:
+        return None
+
+    logits = np.asarray(scores, dtype=np.float64) / float(temperature)
+    logits -= float(np.max(logits))
+    probs = np.exp(logits)
+    prob_sum = float(np.sum(probs))
+    if not np.isfinite(prob_sum) or prob_sum <= 0.0:
+        return None
+    probs /= prob_sum
+
+    target = np.zeros((40,), dtype=np.float32)
+    for action_id, prob in zip(action_ids, probs, strict=True):
+        target[action_id] += float(prob)
+    target_sum = float(target.sum())
+    if target_sum <= 0.0:
+        return None
+    target /= target_sum
+    return target
+
+
 def _build_training_examples(
     path: Path,
     *,
@@ -180,7 +251,9 @@ def _build_training_examples(
     disagreement_agent=None,
     disagreement_seed: int = 0,
     ignore_sample_weights: bool = False,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    soft_labels: bool = False,
+    soft_temperature: float = 5.0,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
     """
     Carica esempi dal JSONL export.
 
@@ -189,11 +262,16 @@ def _build_training_examples(
     - M: (N, 40) bool
     - y: (N,) int64
     - W: (N,) float32  (peso CE per esempio; 1.0 se il dataset non ne specifica)
+    - T: (N, 40) float32 | None  (target soft PIMC se richiesto)
     """
+    if soft_labels and float(soft_temperature) <= 0.0:
+        raise ValueError("--soft-temperature deve essere > 0")
+
     features_list: list[list[float]] = []
     masks_list: list[list[bool]] = []
     targets: list[int] = []
     weights: list[float] = []
+    target_probs_list: list[np.ndarray] = []
     disagreement_rng = np.random.default_rng(disagreement_seed)
 
     for rec in _iter_jsonl(path):
@@ -223,6 +301,16 @@ def _build_training_examples(
         if not encoded.action_mask[y]:
             # Sanity: il target deve essere sempre una carta in mano.
             continue
+        target_probs = None
+        if soft_labels:
+            target_probs = _pimc_soft_target_probs(
+                rec=rec,
+                obs=obs,
+                mask=np.asarray(encoded.action_mask, dtype=bool),
+                temperature=float(soft_temperature),
+            )
+            if target_probs is None:
+                continue
         if disagreement_agent is not None:
             try:
                 baseline_y = _agent_action_id_from_observation(disagreement_agent, obs, rng=disagreement_rng)
@@ -235,6 +323,9 @@ def _build_training_examples(
         masks_list.append(encoded.action_mask)
         targets.append(y)
         weights.append(_record_sample_weight(rec, ignore_sample_weights=ignore_sample_weights))
+        if soft_labels:
+            assert target_probs is not None
+            target_probs_list.append(target_probs)
 
     if not features_list:
         raise ValueError("Nessun esempio valido trovato: controlla input JSONL e filtri (2-player).")
@@ -243,7 +334,8 @@ def _build_training_examples(
     m = np.asarray(masks_list, dtype=bool)
     y_arr = np.asarray(targets, dtype=np.int64)
     w_arr = np.asarray(weights, dtype=np.float32)
-    return x, m, y_arr, w_arr
+    t_arr = np.asarray(target_probs_list, dtype=np.float32) if soft_labels else None
+    return x, m, y_arr, w_arr, t_arr
 
 
 def _masked_logits(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -314,6 +406,7 @@ def _iter_minibatches(
     m: np.ndarray,
     y: np.ndarray,
     w: np.ndarray,
+    target_probs: np.ndarray | None,
     *,
     batch_size: int,
     rng: np.random.Generator,
@@ -322,7 +415,13 @@ def _iter_minibatches(
     rng.shuffle(idx)
     for start in range(0, len(idx), batch_size):
         batch_idx = idx[start : start + batch_size]
-        yield Batch(x=x[batch_idx], mask=m[batch_idx], y=y[batch_idx], weight=w[batch_idx])
+        yield Batch(
+            x=x[batch_idx],
+            mask=m[batch_idx],
+            y=y[batch_idx],
+            weight=w[batch_idx],
+            target_probs=None if target_probs is None else target_probs[batch_idx],
+        )
 
 
 @dataclass
@@ -343,6 +442,7 @@ def _loss_and_grad_linear(
     w: np.ndarray,
     b: np.ndarray,
     *,
+    target_probs: np.ndarray | None = None,
     sample_weight: np.ndarray | None = None,
     anchor: LoadedBCModel | None = None,
     anchor_beta: float = 0.0,
@@ -364,12 +464,18 @@ def _loss_and_grad_linear(
 
     # Loss
     bsz = x.shape[0]
-    per_example = -np.log(probs[np.arange(bsz), y] + 1e-12)
+    if target_probs is None:
+        per_example = -np.log(probs[np.arange(bsz), y] + 1e-12)
+    else:
+        per_example = -np.sum(target_probs.astype(np.float64) * np.log(probs.astype(np.float64) + 1e-12), axis=1)
     loss = float((sample_weight * per_example).sum() / bsz) if sample_weight is not None else float(per_example.mean())
 
     # Gradienti
-    dlogits = probs.copy()
-    dlogits[np.arange(bsz), y] -= 1.0
+    if target_probs is None:
+        dlogits = probs.copy()
+        dlogits[np.arange(bsz), y] -= 1.0
+    else:
+        dlogits = probs - target_probs
     if sample_weight is not None:
         dlogits *= sample_weight[:, None]
     dlogits /= float(bsz)
@@ -405,6 +511,7 @@ def _loss_and_grad_mlp(
     b2: np.ndarray,
     *,
     weight_decay: float,
+    target_probs: np.ndarray | None = None,
     sample_weight: np.ndarray | None = None,
     anchor: LoadedBCModel | None = None,
     anchor_beta: float = 0.0,
@@ -429,15 +536,21 @@ def _loss_and_grad_mlp(
     probs = _softmax(masked)
 
     bsz = x.shape[0]
-    per_example = -np.log(probs[np.arange(bsz), y] + 1e-12)
+    if target_probs is None:
+        per_example = -np.log(probs[np.arange(bsz), y] + 1e-12)
+    else:
+        per_example = -np.sum(target_probs.astype(np.float64) * np.log(probs.astype(np.float64) + 1e-12), axis=1)
     loss = float((sample_weight * per_example).sum() / bsz) if sample_weight is not None else float(per_example.mean())
 
     # L2 weight decay (solo sui pesi, non sui bias).
     if weight_decay > 0.0:
         loss += 0.5 * float(weight_decay) * (float(np.sum(w1 * w1)) + float(np.sum(w2 * w2)))
 
-    dlogits = probs.copy()
-    dlogits[np.arange(bsz), y] -= 1.0
+    if target_probs is None:
+        dlogits = probs.copy()
+        dlogits[np.arange(bsz), y] -= 1.0
+    else:
+        dlogits = probs - target_probs
     if sample_weight is not None:
         dlogits *= sample_weight[:, None]
     dlogits /= float(bsz)
@@ -593,6 +706,20 @@ def main() -> int:
             "del gradiente (e quindi il learning rate) resti confrontabile col training non pesato."
         ),
     )
+    parser.add_argument(
+        "--soft-labels",
+        action="store_true",
+        help=(
+            "Usa `teacher.search_diagnostics.action_values` come target soft PIMC invece dell'argmax hard. "
+            "Le righe senza diagnostica PIMC valida vengono scartate."
+        ),
+    )
+    parser.add_argument(
+        "--soft-temperature",
+        type=float,
+        default=5.0,
+        help="Temperatura della softmax sui mean_score PIMC quando `--soft-labels` è attivo. Default: 5.",
+    )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG")
     parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione validation (0..1)")
     args = parser.parse_args()
@@ -607,6 +734,8 @@ def main() -> int:
         raise ValueError("--bc-anchor-beta deve essere >= 0")
     if float(args.bc_anchor_beta) > 0.0 and not bc_anchor_path:
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
+    if bool(args.soft_labels) and float(args.soft_temperature) <= 0.0:
+        raise ValueError("--soft-temperature deve essere > 0")
 
     # Metadati UI (opzionali ma utili per la selezione del modello in frontend).
     #
@@ -638,12 +767,14 @@ def main() -> int:
         return label, description_it
 
     disagreement_agent = BCModelAgent.from_npz(filter_disagree_path) if filter_disagree_path else None
-    x_all, mask_all, y_all, w_all = _build_training_examples(
+    x_all, mask_all, y_all, w_all, target_probs_all = _build_training_examples(
         data_path,
         encoder_version=encoder_version,
         disagreement_agent=disagreement_agent,
         disagreement_seed=int(args.seed),
         ignore_sample_weights=bool(args.ignore_sample_weights),
+        soft_labels=bool(args.soft_labels),
+        soft_temperature=float(args.soft_temperature),
     )
 
     rng = np.random.default_rng(args.seed)
@@ -659,6 +790,8 @@ def main() -> int:
 
     x_train, mask_train, y_train, w_train = x_all[train_idx], mask_all[train_idx], y_all[train_idx], w_all[train_idx]
     x_val, mask_val, y_val = x_all[val_idx], mask_all[val_idx], y_all[val_idx]
+    target_train = None if target_probs_all is None else target_probs_all[train_idx]
+    target_val = None if target_probs_all is None else target_probs_all[val_idx]
 
     # Normalizziamo i pesi a media 1.0 sul solo train: così il gradiente medio per batch ha la stessa
     # scala del training non pesato e il learning rate resta valido. La validation usa CE non pesata
@@ -681,6 +814,12 @@ def main() -> int:
         f"min {weight_stats['min']:.4f} max {weight_stats['max']:.4f} "
         f"normalized={weight_stats['normalized']} ignored={weight_stats['ignored']} uniform={weight_stats['uniform']}"
     )
+    if bool(args.soft_labels):
+        print(
+            "soft_labels | "
+            f"enabled=True temperature={float(args.soft_temperature):g} "
+            f"examples={int(n)} train={int(train_idx.size)} val={int(val_idx.size)}"
+        )
 
     # Passiamo i pesi alla loss solo quando non sono uniformi: così il caso classico (nessun
     # sample_weight nel dataset) resta numericamente identico al comportamento storico.
@@ -718,13 +857,22 @@ def main() -> int:
         for epoch in range(1, args.epochs + 1):
             train_losses = []
             train_accs = []
-            for batch in _iter_minibatches(x_train, mask_train, y_train, w_train, batch_size=args.batch_size, rng=rng):
+            for batch in _iter_minibatches(
+                x_train,
+                mask_train,
+                y_train,
+                w_train,
+                target_train,
+                batch_size=args.batch_size,
+                rng=rng,
+            ):
                 loss, grad_w, grad_b, masked = _loss_and_grad_linear(
                     batch.x,
                     batch.mask,
                     batch.y,
                     w,
                     b,
+                    target_probs=batch.target_probs,
                     sample_weight=None if train_weight is None else batch.weight,
                     anchor=bc_anchor,
                     anchor_beta=float(args.bc_anchor_beta),
@@ -742,6 +890,7 @@ def main() -> int:
                 y_val,
                 w,
                 b,
+                target_probs=target_val,
                 anchor=bc_anchor,
                 anchor_beta=float(args.bc_anchor_beta),
             )
@@ -778,6 +927,10 @@ def main() -> int:
             "bc_anchor_beta": float(args.bc_anchor_beta),
             "filter_disagree_with_model": filter_disagree_path or None,
             "sample_weight": weight_stats,
+            "soft_labels": {
+                "enabled": bool(args.soft_labels),
+                "temperature": float(args.soft_temperature) if bool(args.soft_labels) else None,
+            },
             "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
             "metrics": [asdict(metric) for metric in metrics],
         }
@@ -814,7 +967,15 @@ def main() -> int:
     for epoch in range(1, args.epochs + 1):
         train_losses = []
         train_accs = []
-        for batch in _iter_minibatches(x_train, mask_train, y_train, w_train, batch_size=args.batch_size, rng=rng):
+        for batch in _iter_minibatches(
+            x_train,
+            mask_train,
+            y_train,
+            w_train,
+            target_train,
+            batch_size=args.batch_size,
+            rng=rng,
+        ):
             t += 1
             loss, gw1, gb1, gw2, gb2, masked = _loss_and_grad_mlp(
                 batch.x,
@@ -825,6 +986,7 @@ def main() -> int:
                 w2,
                 b2,
                 weight_decay=float(args.weight_decay),
+                target_probs=batch.target_probs,
                 sample_weight=None if train_weight is None else batch.weight,
                 anchor=bc_anchor,
                 anchor_beta=float(args.bc_anchor_beta),
@@ -847,6 +1009,7 @@ def main() -> int:
             w2,
             b2,
             weight_decay=float(args.weight_decay),
+            target_probs=target_val,
             anchor=bc_anchor,
             anchor_beta=float(args.bc_anchor_beta),
         )
@@ -884,6 +1047,10 @@ def main() -> int:
         "bc_anchor_beta": float(args.bc_anchor_beta),
         "filter_disagree_with_model": filter_disagree_path or None,
         "sample_weight": weight_stats,
+        "soft_labels": {
+            "enabled": bool(args.soft_labels),
+            "temperature": float(args.soft_temperature) if bool(args.soft_labels) else None,
+        },
         "train": {
             "model": "mlp",
             "optimizer": "adam",

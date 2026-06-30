@@ -92,11 +92,12 @@ def test_generate_pimc_teacher_dataset_is_bc_compatible(tmp_path: Path) -> None:
         assert isinstance(obs["out_of_play_cards_onehot"], list)
         assert len(obs["out_of_play_cards_onehot"]) == 40
 
-    x, mask, y, weights = train_bc._build_training_examples(out_path, encoder_version="v3")
+    x, mask, y, weights, target_probs = train_bc._build_training_examples(out_path, encoder_version="v3")
     assert x.shape == (8, int(FEATURE_DIM_2P_V3))
     assert mask.shape == (8, 40)
     assert y.shape == (8,)
     assert weights.shape == (8,)
+    assert target_probs is None
 
 
 def test_generate_pimc_teacher_dataset_respects_player_filter_and_threshold(tmp_path: Path) -> None:

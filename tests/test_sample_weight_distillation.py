@@ -68,11 +68,12 @@ def test_build_training_examples_reads_sample_weight(tmp_path: Path) -> None:
     data_path = tmp_path / "weighted.jsonl"
     _write_weighted_jsonl(data_path, [3.0, None, 0.5])
 
-    _, _, _, weights = train_bc._build_training_examples(data_path, encoder_version="v3")
+    _, _, _, weights, target_probs = train_bc._build_training_examples(data_path, encoder_version="v3")
     assert weights.tolist() == [3.0, 1.0, 0.5]
+    assert target_probs is None
 
     # --ignore-sample-weights forza il training uniforme.
-    _, _, _, weights_uniform = train_bc._build_training_examples(
+    _, _, _, weights_uniform, _ = train_bc._build_training_examples(
         data_path, encoder_version="v3", ignore_sample_weights=True
     )
     assert weights_uniform.tolist() == [1.0, 1.0, 1.0]
@@ -88,6 +89,57 @@ def test_invalid_sample_weight_is_rejected(tmp_path: Path) -> None:
     except ValueError:
         return
     raise AssertionError("Un sample_weight negativo deve sollevare ValueError")
+
+
+def test_build_training_examples_builds_soft_pimc_targets(tmp_path: Path) -> None:
+    """`--soft-labels` deve trasformare i mean_score PIMC in una distribuzione masked a 40 azioni."""
+    train_bc = _load_script_module("train_bc.py", "train_bc_for_soft_target_test")
+    data_path = tmp_path / "soft.jsonl"
+    state = new_game_state(num_players=2, seed=123)
+    obs = build_observation_dto(state, player_index=0, server_version=1).model_dump(mode="json")
+    action_values = [
+        {"card_index": 0, "mean_score": 12.0, "rollout_count": 64},
+        {"card_index": 1, "mean_score": 10.0, "rollout_count": 64},
+        {"card_index": 2, "mean_score": 0.0, "rollout_count": 64},
+    ]
+    record = {
+        "schema_version": 1,
+        "game_id": "soft_0",
+        "event_id": 0,
+        "player_index": 0,
+        "is_ai": True,
+        "observation": obs,
+        "action": {"card_index": 0},
+        "teacher": {"decision_type": "search", "search_diagnostics": {"action_values": action_values}},
+    }
+    data_path.write_text(json.dumps(record, ensure_ascii=False) + "\n", encoding="utf-8")
+
+    _, mask, y, _, target_probs = train_bc._build_training_examples(
+        data_path,
+        encoder_version="v3",
+        soft_labels=True,
+        soft_temperature=2.0,
+    )
+
+    assert target_probs is not None
+    assert target_probs.shape == (1, 40)
+    assert abs(float(target_probs[0].sum()) - 1.0) < 1e-6
+    assert np.all(target_probs[0][~mask[0]] == 0.0)
+
+    action0 = train_bc.card_dto_to_action_id(obs["my_hand"][0])
+    action1 = train_bc.card_dto_to_action_id(obs["my_hand"][1])
+    action2 = train_bc.card_dto_to_action_id(obs["my_hand"][2])
+    assert int(y[0]) == int(action0)
+    assert target_probs[0, action0] > target_probs[0, action1] > target_probs[0, action2]
+
+    _, _, _, _, colder = train_bc._build_training_examples(
+        data_path,
+        encoder_version="v3",
+        soft_labels=True,
+        soft_temperature=1.0,
+    )
+    assert colder is not None
+    assert colder[0, action0] > target_probs[0, action0]
 
 
 def _toy_classification_batch(rng: np.random.Generator, *, n: int, d: int) -> tuple[np.ndarray, np.ndarray, np.ndarray]:

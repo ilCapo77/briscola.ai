@@ -100,7 +100,7 @@ def test_build_training_examples_can_filter_disagreements(tmp_path: Path) -> Non
         )
     data_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
-    x, mask, y, weights = train_bc._build_training_examples(
+    x, mask, y, weights, target_probs = train_bc._build_training_examples(
         data_path,
         encoder_version="v3",
         disagreement_agent=_AlwaysFirstCardAgent(),
@@ -111,6 +111,7 @@ def test_build_training_examples_can_filter_disagreements(tmp_path: Path) -> Non
     # Senza campo sample_weight nel JSONL, il peso di default è 1.0 (training uniforme).
     assert weights.shape == (1,)
     assert float(weights[0]) == 1.0
+    assert target_probs is None
     kept_card = obs["my_hand"][1]
     assert int(y[0]) == train_bc.card_dto_to_action_id(kept_card)
 

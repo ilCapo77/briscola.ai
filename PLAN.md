@@ -307,9 +307,14 @@ Passi consigliati:
     - test capacità `hidden=512` da zero sulle sole `14,978` correzioni: train acc arriva a `~100%`, quindi il subset
       è memorizzabile e la capacità larga basta; la val acc resta però circa `56-57%` e la val loss peggiora presto.
       Allargare la MLP non risolve da solo la generalizzazione delle hard label PIMC;
-    - decisione: non promuovere nessun `pimc_v7_*` e non continuare training su hard label PIMC senza una nuova ipotesi.
-      Il miglioramento reale oggi resta runtime: `v6 + solver` come baseline/default solida, `PIMC(v6,16×8)` come
-      avversario più forte selezionabile e misurato.
+    - nuova ipotesi soft-label testata: `train_bc.py` supporta `--soft-labels --soft-temperature`, costruendo target
+      `softmax(mean_score/T)` da `teacher.search_diagnostics.action_values` sulle carte legali. Sweep sullo stesso
+      subset `14,978`, h128, warm-start v6, `150` epoche, lr `3e-4`: T=`2` best val acc `56.9%`, T=`5` `55.6%`,
+      T=`10` `52.8%`. Non supera il tetto hard-label (`57.3%`), quindi il collo di bottiglia non era solo l'argmax
+      troppo secco;
+    - decisione: non promuovere nessun `pimc_v7_*` e non continuare distillazione PIMC in questa MLP/recipe senza
+      cambiare ipotesi in modo sostanziale. Il miglioramento reale oggi resta runtime: `v6 + solver` come
+      baseline/default solida, `PIMC(v6,16×8)` come avversario più forte selezionabile e misurato.
 
 Screening population league declassato a opzionale:
 
