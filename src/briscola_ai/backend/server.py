@@ -132,11 +132,17 @@ def event_log_runtime_metadata() -> dict[str, str | bool | None]:
     """
     log = _get_event_log()
     if log is None:
-        return {"event_log_available": False, "event_log_backend": None, "event_log_database_name": None}
+        return {
+            "event_log_available": False,
+            "event_log_backend": None,
+            "event_log_database_name": None,
+            "event_log_database_host": None,
+        }
     return {
         "event_log_available": True,
         "event_log_backend": getattr(log, "backend_name", "unknown"),
         "event_log_database_name": getattr(log, "database_name", None),
+        "event_log_database_host": getattr(log, "database_host", None),
     }
 
 

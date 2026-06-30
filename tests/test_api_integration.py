@@ -178,6 +178,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
     assert payload["event_log_available"] is False
     assert payload["event_log_backend"] is None
     assert payload["event_log_database_name"] is None
+    assert payload["event_log_database_host"] is None
 
     log = EventLog(EventLogConfig(path=str(tmp_path / "events.sqlite3")))
     server.app.state.event_log = log
@@ -188,6 +189,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
         assert payload_available["event_log_available"] is True
         assert payload_available["event_log_backend"] == "sqlite"
         assert payload_available["event_log_database_name"] == "events.sqlite3"
+        assert payload_available["event_log_database_host"] is None
 
         version = TestClient(main_app).get("/version")
         assert version.status_code == 200
@@ -195,6 +197,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
         assert version_payload["event_log_available"] is True
         assert version_payload["event_log_backend"] == "sqlite"
         assert version_payload["event_log_database_name"] == "events.sqlite3"
+        assert version_payload["event_log_database_host"] is None
     finally:
         log.close()
         server.app.state.event_log = None

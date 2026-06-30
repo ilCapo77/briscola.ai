@@ -63,6 +63,9 @@ class EventLogProtocol(Protocol):
     @property
     def database_name(self) -> Optional[str]: ...
 
+    @property
+    def database_host(self) -> Optional[str]: ...
+
     def close(self) -> None: ...
 
     def ensure_game(
@@ -128,6 +131,11 @@ class EventLog:
         if self._config.path == ":memory:":
             return ":memory:"
         return os.path.basename(self._config.path) or None
+
+    @property
+    def database_host(self) -> Optional[str]:
+        """SQLite locale non ha un host di rete."""
+        return None
 
     def close(self) -> None:
         """Chiude la connessione SQLite."""
@@ -367,6 +375,23 @@ def _postgres_database_name_from_dsn(dsn: Optional[str]) -> Optional[str]:
     return None
 
 
+def _postgres_database_host_from_dsn(dsn: Optional[str]) -> Optional[str]:
+    """Estrae solo l'host Postgres da un DSN, senza esporre utente/password."""
+    if not dsn:
+        return None
+
+    parsed = urlparse(dsn)
+    if parsed.scheme in {"postgres", "postgresql"}:
+        return parsed.hostname or None
+
+    # Supporta anche DSN keyword-style: "host=ep-... dbname=neondb user=...".
+    for token in shlex.split(dsn):
+        key, separator, value = token.partition("=")
+        if separator and key == "host":
+            return value or None
+    return None
+
+
 class PostgresEventLog:
     """
     Event log append-only su **Postgres** (deploy multi-replica, es. Neon).
@@ -412,6 +437,11 @@ class PostgresEventLog:
     def database_name(self) -> Optional[str]:
         """Nome del database Postgres, estratto dal DSN senza rivelare credenziali."""
         return _postgres_database_name_from_dsn(self._dsn)
+
+    @property
+    def database_host(self) -> Optional[str]:
+        """Host Postgres, utile per confrontare project/branch Neon senza rivelare segreti."""
+        return _postgres_database_host_from_dsn(self._dsn)
 
     def close(self) -> None:
         with self._lock, contextlib.suppress(Exception):
