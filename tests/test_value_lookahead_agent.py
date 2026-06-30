@@ -36,6 +36,16 @@ class FixedFallbackAgent:
         return min(self.card_index, len(observation.hand) - 1)
 
 
+class FixedLookaheadAgent(ValueLookaheadAgent):
+    """ValueLookaheadAgent che forza una scelta search, utile per testare il post-processing."""
+
+    forced_choice: int = 0
+
+    def _choose_with_lookahead(self, observation: PlayerObservation, *, rng: random.Random) -> int | None:
+        self.metrics.lookahead_decisions += 1
+        return self.forced_choice
+
+
 def _load_script_module(name: str) -> Any:
     """Carica uno script da `scripts/` come modulo testabile."""
     path = _ROOT / "scripts" / f"{name}.py"
@@ -191,6 +201,52 @@ def test_value_lookahead_evaluates_leaves_inside_window() -> None:
     assert agent.metrics.fallback_decisions == 0
 
 
+def test_value_lookahead_overkill_guard_can_adjust_search_choice() -> None:
+    """Il guard anti-overkill deve proteggere le scelte V-lookahead come protegge il BCModelAgent."""
+    from briscola_ai.domain.models import Card, Rank, Suit
+    from briscola_ai.domain.rules import trick_points
+    from briscola_ai.domain.state import PlayerState
+
+    trump = Card(Suit.COINS, Rank.SEVEN)
+    hand0 = (Card(Suit.COINS, Rank.ACE), Card(Suit.COINS, Rank.TWO))
+    hand1 = (Card(Suit.CUPS, Rank.KING),)
+    table = ((Card(Suit.SWORDS, Rank.FIVE), 1),)
+    deck = (trump,)
+    visible = set(hand0 + hand1 + tuple(card for card, _player in table) + deck)
+    captured = tuple(Card(suit, rank) for suit in Suit for rank in Rank if Card(suit, rank) not in visible)
+    state = GameState(
+        num_players=2,
+        is_team_game=False,
+        teams=None,
+        players=(
+            PlayerState("P0", hand0, captured, trick_points(captured)),
+            PlayerState("P1", hand1, tuple(), 0),
+        ),
+        deck=deck,
+        trump_card=trump,
+        table_cards=table,
+        current_turn=0,
+        first_player=1,
+        game_over=False,
+        winner_index=None,
+        winning_team=None,
+    )
+    observation = make_player_observation(state, player_index=0)
+    fallback = FixedFallbackAgent(card_index=0)
+    agent = FixedLookaheadAgent(
+        value_model=_zero_value_model(),
+        fallback=fallback,
+        continuation_agent=fallback,
+        max_unknown_cards=8,
+    )
+    agent.forced_choice = 0
+
+    guarded = agent.choose_card_index(observation, rng=random.Random(1))
+
+    assert guarded == 1
+    assert agent.metrics.overkill_guard_adjustments == 1
+
+
 def test_evaluate_value_lookahead_script_smoke(tmp_path: Path) -> None:
     """Lo script Stage 1 deve girare end-to-end con modelli temporanei minimali."""
     script = _load_script_module("evaluate_value_lookahead")
@@ -212,6 +268,41 @@ def test_evaluate_value_lookahead_script_smoke(tmp_path: Path) -> None:
             "4",
             "--seed",
             "123",
+            "--determinizations",
+            "1",
+            "--max-unknown-cards",
+            "8",
+            "--out-json",
+            str(out_path),
+        ]
+        assert script.main() == 0
+    finally:
+        sys.argv = old_argv
+
+    assert out_path.exists()
+
+
+def test_evaluate_value_lookahead_quality_script_smoke(tmp_path: Path) -> None:
+    """Lo script quality deve confrontare candidato e baseline senza passare dal registry."""
+    script = _load_script_module("evaluate_value_lookahead_quality")
+    policy_path = tmp_path / "policy.npz"
+    value_path = tmp_path / "value.npz"
+    out_path = tmp_path / "quality.json"
+    _write_linear_bc_model(policy_path)
+    _write_zero_value_model(value_path)
+
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "evaluate_value_lookahead_quality.py",
+            "--policy-model",
+            str(policy_path),
+            "--value-model",
+            str(value_path),
+            "--num-games",
+            "4",
+            "--seed",
+            "321",
             "--determinizations",
             "1",
             "--max-unknown-cards",

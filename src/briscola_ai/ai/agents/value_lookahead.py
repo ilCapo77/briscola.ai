@@ -26,6 +26,7 @@ from ...domain.observation import PlayerObservation, make_player_observation
 from ...domain.state import GameState
 from ..encoding.observation_encoder import encode_player_observation_2p
 from ..endgame.solver import solve_endgame
+from ..models.bc_model import apply_overkill_guard_second_hand
 from ..models.value_model import MLPValueModel, infer_value_encoder_version
 from .base import Agent
 from .hybrid_endgame import reconstruct_endgame_state
@@ -44,6 +45,7 @@ class ValueLookaheadStats:
     successful_determinizations: int = 0
     failed_leaf_evaluations: int = 0
     completed_leaf_evaluations: int = 0
+    overkill_guard_adjustments: int = 0
     search_elapsed_seconds: float = 0.0
 
     @property
@@ -109,6 +111,7 @@ class ValueLookaheadAgent:
     continuation_agent: Agent
     num_determinizations: int = 8
     max_unknown_cards: int = 8
+    overkill_guard_enabled: bool = True
     name: str = "value_lookahead"
     metrics: ValueLookaheadStats = field(default_factory=ValueLookaheadStats)
 
@@ -145,7 +148,12 @@ class ValueLookaheadAgent:
         if choice is None:
             self.metrics.fallback_decisions += 1
             return _safe_card_index(self.fallback, observation, rng=rng)
-        return choice
+        if self.overkill_guard_enabled:
+            guarded = apply_overkill_guard_second_hand(observation, chosen_card_index=int(choice))
+            if int(guarded) != int(choice):
+                self.metrics.overkill_guard_adjustments += 1
+            return int(guarded)
+        return int(choice)
 
     def _choose_with_lookahead(self, observation: PlayerObservation, *, rng: random.Random) -> int | None:
         """Esegue depth-1 lookahead su determinizzazioni compatibili."""

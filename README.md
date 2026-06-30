@@ -361,7 +361,10 @@ PIMC quando valuta foglie di lookahead corta.
   `V` con `teacher.search_diagnostics.action_values`, includendo baseline `reference_top1` del modello v6 sulla stessa
   popolazione.
 - `scripts/evaluate_value_lookahead.py`: Stage 1 domain-only. Misura un agente `v6 + solver + V-lookahead depth-1`
-  contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead.
+  contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead. Il guard
+  anti-overkill è attivo di default sulle decisioni V-lookahead; usa `--disable-overkill-guard` solo per A/B test.
+- `scripts/evaluate_value_lookahead_quality.py`: confronta decision-quality del candidato e della baseline contro
+  `heuristic_v1` sullo stesso seed.
 
 Esempio minimo:
 
@@ -396,6 +399,13 @@ python scripts/evaluate_value_lookahead.py \
   --policy-model ./data/models/best_a2c_v6.npz \
   --value-model ./data/models/value_v0_h128_clean50k.npz \
   --num-games 2000 \
+  --determinizations 8 \
+  --max-unknown-cards 8
+
+python scripts/evaluate_value_lookahead_quality.py \
+  --policy-model ./data/models/best_a2c_v6.npz \
+  --value-model ./data/models/value_v0_h128_clean50k.npz \
+  --benchmark small \
   --determinizations 8 \
   --max-unknown-cards 8
 ```

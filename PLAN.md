@@ -98,18 +98,20 @@ Obiettivo: verificare se il value model validato offline produce forza reale qua
 Stato:
 
 - implementati `ValueLookaheadAgent` e `scripts/evaluate_value_lookahead.py`;
-- smoke reale 40 partite vs `v6 + solver`: `records_failed=0` equivalente, leaf eval fallite `0`, circa `0.016s` per
-  mossa lookahead; CI troppo larga per conclusioni di forza.
+- il guard anti-overkill è attivo di default sulle sole decisioni V-lookahead; fallback e solver restano invariati;
+- held-out 4000 partite vs `v6 + solver`, seed diverso: avg diff `+2.65`, CI95 `+1.85..+3.45`; score rate `0.5421`,
+  CI95 `0.5267..0.5575`; `0` determinizzazioni/leaf eval fallite; circa `0.016s` per mossa lookahead;
+- decision-quality small vs `heuristic_v1`: avg diff `+18.95` vs baseline `v6+solver` `+17.47`; trump waste `0.23%`
+  vs `0.20%`; trump overkill `11.51%` vs `11.60%`; low-lead overkill `0.22%` vs `0.46%`.
 
 Fare:
 
-- valutare seat-fair contro `v6 + solver`, 2000-4000 partite, con CI su score e avg diff;
-- promuovere solo se il lower bound CI95 di avg diff è materialmente positivo e la latenza/mossa è compatibile col
-  cloud.
+- confermare su benchmark quality più ampio se vogliamo promuoverlo a default;
+- decidere packaging/deploy: nuovo agente selezionabile prima, default solo dopo prova cloud/umana.
 
 Non fare:
 
-- non esporlo in UI prima del confronto head-to-head;
+- non esporlo come default UI prima di una prova cloud/umana;
 - non chiamarlo v7 finché non batte `v6 + solver` in evaluation.
 
 ### 2. Monitoraggio Produzione E Audit PIMC
@@ -196,6 +198,7 @@ uv run python scripts/generate_value_dataset.py --help
 uv run python scripts/train_value.py --help
 uv run python scripts/evaluate_value_ranking.py --help
 uv run python scripts/evaluate_value_lookahead.py --help
+uv run python scripts/evaluate_value_lookahead_quality.py --help
 ```
 
 Avvio locale:

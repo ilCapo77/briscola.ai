@@ -38,6 +38,11 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--determinizations", type=int, default=8)
     parser.add_argument("--max-unknown-cards", type=int, default=8)
+    parser.add_argument(
+        "--disable-overkill-guard",
+        action="store_true",
+        help="Disabilita il guard anti-overkill sulle decisioni V-lookahead.",
+    )
     parser.add_argument("--out-json", default="", help="Path JSON opzionale per salvare il risultato.")
     args = parser.parse_args()
 
@@ -56,6 +61,7 @@ def main() -> int:
         continuation_agent=candidate_control,
         num_determinizations=int(args.determinizations),
         max_unknown_cards=int(args.max_unknown_cards),
+        overkill_guard_enabled=not bool(args.disable_overkill_guard),
         name=f"value_lookahead({value_model_path.name})",
     )
 
@@ -114,6 +120,7 @@ def main() -> int:
         f"determinizations_failed={metrics.failed_determinizations} | "
         f"leaf_evals={metrics.completed_leaf_evaluations} failed_leaf_evals={metrics.failed_leaf_evaluations}"
     )
+    print(f"value_lookahead_guard | adjustments={metrics.overkill_guard_adjustments}")
 
     if args.out_json:
         payload = {
@@ -123,6 +130,7 @@ def main() -> int:
             "seed": int(args.seed),
             "determinizations": int(args.determinizations),
             "max_unknown_cards": int(args.max_unknown_cards),
+            "overkill_guard_enabled": not bool(args.disable_overkill_guard),
             "elapsed_seconds": elapsed,
             "seconds_per_game": elapsed / max(1, int(args.num_games)),
             "score_rate": score_rate,

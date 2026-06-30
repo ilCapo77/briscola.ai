@@ -275,6 +275,16 @@ def _apply_overkill_guard_second_hand(observation: PlayerObservation, *, chosen_
     return int(min_idx)
 
 
+def apply_overkill_guard_second_hand(observation: PlayerObservation, *, chosen_card_index: int) -> int:
+    """
+    Applica il post-processing anti-overkill generico su una scelta già calcolata.
+
+    È pubblico perché lo stesso guard può proteggere policy non-BC (es. V-lookahead) senza duplicare
+    logica. La funzione usa solo `PlayerObservation`, quindi mantiene il confine anti-cheat.
+    """
+    return _apply_overkill_guard_second_hand(observation, chosen_card_index=chosen_card_index)
+
+
 # Cache in-process dei modelli `.npz` caricati, chiave (path assoluto, mtime_ns, size).
 # `load_bc_model_npz` e' l'unico choke point della lettura `.npz`: lo usano sia `BCModelAgent.from_npz`
 # sia `model_catalog.validate_model_compatible_for_ui` (chiamata a ogni `POST /api/games` con bc_model).
