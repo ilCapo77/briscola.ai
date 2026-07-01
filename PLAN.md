@@ -120,30 +120,47 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 ## Prossime Azioni
 
-### 1. Value Model v1 Con Dataset Numba
+### 1. Value Model Decision-Aligned
 
-Ipotesi: il value-lookahead può migliorare più del default `.npz` se il value model viene riaddestrato sulla nuova base
-`v7 + solver`, usando molti più stati proprio nella finestra in cui la lookahead interroga `V`.
+Stato: il riaddestramento value generico su base `v7 + solver` è stato misurato e non basta.
 
-Implementazione pronta:
+- `value_v1_h128_v7_window500k_seed20260701.npz` migliora molto MAE/sign sul proprio holdout, ma non migliora
+  materialmente il value-lookahead runtime;
+- ranking gate vs diagnostica PIMC: top1 circa pari a `value_v0`;
+- A/B runtime diretto `value_v1` vs `value_v0`, 4k seat-fair: `+0.24`, CI95 `-0.55..+1.04`;
+- decisione: non promuovere `value_v1`; tenere `value_v0` come value model deployato.
+
+Nuova ipotesi: `V` deve imparare a ordinare le foglie come la search PIMC, non solo predire l'esito della
+continuazione base. Questo evita di addestrare una value su target troppo diverso dalla decisione che deve prendere.
+
+Implementazione pronta/in corso:
 
 - `scripts/generate_value_dataset_numba.py` genera dataset `.npz` compatti da self-play numerico JIT;
-- target: continuazione deterministica `policy .npz + solver endgame`;
-- raccolta consigliata: `collect-mode=window`, `max_unknown_cards=8`, `include_endgame`, `epsilon=0.10`;
+- `scripts/generate_pimc_leaf_value_dataset.py` converte diagnostica PIMC root-level in foglie value decision-aligned;
 - `train_value.py` legge sia JSONL canonico sia `.npz` compatto.
+- `scripts/train_value_pairwise.py` allena `V` con regressione + ranking pairwise intra-root, con warm-start opzionale da
+  `value_v0`;
+- `scripts/evaluate_value_lookahead_pair.py` confronta due value model nello stesso harness value-lookahead.
+
+Primo probe tecnico:
+
+- usando diagnostica PIMC v6 esistente e policy base v7, dataset 5k root / 15k leaf;
+- training da zero perde nettamente contro `value_v0` (`-2.05`, CI95 `-3.62..-0.47`, 1k);
+- fine-tune da `value_v0` è sano offline ma non supera `value_v0` (`-0.55`, CI95 `-2.14..+1.03`, 1k);
+- lettura: il plumbing è valido, ma il teacher v6 è disallineato. Non usare questo artefatto per promozione.
 
 Fare:
 
-- generare un dataset lungo con `best_a2c_v7.npz` come policy base;
-- allenare `value_v1` con target residuale;
-- gate offline con `evaluate_value_ranking.py` contro diagnostica PIMC;
-- se il gate migliora `value_v0`, valutare `bc_model_value_lookahead_8x8` usando `value_v1` contro:
-  `(v7 + solver)`, `value-lookahead(v0)` e `heuristic_v1` per decision-quality.
+- rigenerare un teacher PIMC con `best_a2c_v7.npz` (almeno 20k esempi search, `d=64`, `u=8`);
+- generare leaf dataset decision-aligned dallo stesso teacher v7;
+- fare prima fine-tune da `value_v0`, non training da zero;
+- gate: `value-lookahead(candidate)` vs `value-lookahead(value_v0)` con seed held-out.
 
 Kill criterion:
 
-- se ranking/top1 su casi strong non migliora `value_v0`, non fare deploy;
-- se forza non supera materialmente `value-lookahead(v0)` o peggiora `trump_waste/overkill`, tenere `value_v0`.
+- se il fine-tune su teacher v7 non supera `value_v0` con CI positiva o lower bound materiale, chiudere il ramo
+  decision-aligned e lasciare il miglioramento nella search runtime;
+- se migliora, confermare con quality medium vs `heuristic_v1` prima di deploy.
 
 ### 2. Monitoraggio Produzione E Audit Value-Lookahead/PIMC
 

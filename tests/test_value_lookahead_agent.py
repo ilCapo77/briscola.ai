@@ -282,6 +282,45 @@ def test_evaluate_value_lookahead_script_smoke(tmp_path: Path) -> None:
     assert out_path.exists()
 
 
+def test_evaluate_value_lookahead_pair_script_smoke(tmp_path: Path) -> None:
+    """Lo script pair deve confrontare due value model nello stesso harness."""
+    script = _load_script_module("evaluate_value_lookahead_pair")
+    policy_path = tmp_path / "policy.npz"
+    value_a_path = tmp_path / "value_a.npz"
+    value_b_path = tmp_path / "value_b.npz"
+    out_path = tmp_path / "pair.json"
+    _write_linear_bc_model(policy_path)
+    _write_zero_value_model(value_a_path)
+    _write_zero_value_model(value_b_path)
+
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "evaluate_value_lookahead_pair.py",
+            "--policy-model",
+            str(policy_path),
+            "--value-model-a",
+            str(value_a_path),
+            "--value-model-b",
+            str(value_b_path),
+            "--num-games",
+            "4",
+            "--seed",
+            "456",
+            "--determinizations",
+            "1",
+            "--max-unknown-cards",
+            "8",
+            "--out-json",
+            str(out_path),
+        ]
+        assert script.main() == 0
+    finally:
+        sys.argv = old_argv
+
+    assert out_path.exists()
+
+
 def test_evaluate_value_lookahead_quality_script_smoke(tmp_path: Path) -> None:
     """Lo script quality deve confrontare candidato e baseline senza passare dal registry."""
     script = _load_script_module("evaluate_value_lookahead_quality")

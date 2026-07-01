@@ -391,16 +391,26 @@ PIMC quando valuta foglie di lookahead corta.
 - `scripts/generate_value_dataset_numba.py`: genera lo stesso tipo di segnale in formato compatto `.npz`, ma usando il
   fast path Numba e salvando direttamente feature/target. È il percorso consigliato per run lunghe: usa una policy
   `.npz` come base, target `policy + solver`, e può limitarsi alla finestra utile della V-lookahead
-  (`--collect-mode window --max-unknown-cards 8`).
+  (`--collect-mode window --max-unknown-cards 8`). Nota: su base v7 questo migliora il fit di valore, ma finora non ha
+  superato materialmente il `value_v0` runtime.
+- `scripts/generate_pimc_leaf_value_dataset.py`: converte diagnostica PIMC con `action_values` in un dataset leaf-level:
+  per ogni carta candidata campiona una determinizzazione, applica la carta, porta lo stato al decision boundary della
+  V-lookahead e salva la foglia con target pari al valore PIMC della carta. Serve per insegnare a `V` l'ordinamento
+  decisionale, non solo l'esito della continuazione base.
 - `scripts/train_value.py`: allena una MLP scalare `.npz` con target residuale consigliato
   `(final_score_delta - current_score_delta) / 120`, loss Huber/MSE e salvataggio del best checkpoint per `val_loss`.
   Legge sia JSONL canonico sia `.npz` compatto Numba.
+- `scripts/train_value_pairwise.py`: allena lo stesso formato di value model, ma combina regressione leaf-level e
+  ranking pairwise intra-root. Per esperimenti reali usa `--init-value-model` da `value_v0`: il training da zero su pochi
+  leaf PIMC tende a degradare.
 - `scripts/evaluate_value_ranking.py`: gate offline contro diagnostica PIMC: confronta top-1 e ranking pairwise di
   `V` con `teacher.search_diagnostics.action_values`, includendo baseline `reference_top1` del modello v6 sulla stessa
   popolazione.
 - `scripts/evaluate_value_lookahead.py`: Stage 1 domain-only. Misura un agente `v6 + solver + V-lookahead depth-1`
   contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead. Il guard
   anti-overkill è attivo di default sulle decisioni V-lookahead; usa `--disable-overkill-guard` solo per A/B test.
+- `scripts/evaluate_value_lookahead_pair.py`: confronto diretto tra due value model nello stesso harness
+  value-lookahead. È il gate corretto per decidere se un nuovo `V` migliora il `value_v0` già deployabile.
 - `ai/numba/value_lookahead.py`: core JIT training-first dello stesso schema depth‑1, ma su array di stato già
   determinizzati. Serve per rollout/evaluation veloci senza passare da oggetti dominio a ogni mossa; `train_a2c.py`
   può usarlo come opponent `bc_model_value_lookahead_8x8` nel fast rollout Numba.
@@ -431,6 +441,43 @@ python scripts/train_value.py \
   --target residual \
   --loss huber \
   --epochs 30
+
+# Percorso decision-aligned: richiede diagnostica PIMC generata con la stessa policy base del candidato.
+python scripts/generate_pimc_teacher_dataset.py \
+  --model ./data/models/best_a2c_v7.npz \
+  --out ./data/pimc_teacher_v7_d64_u8_20k_seed20260707.jsonl \
+  --num-examples 20000 \
+  --max-games 5000 \
+  --seed 20260707 \
+  --determinizations 64 \
+  --max-unknown-cards 8 \
+  --only-pimc-window
+
+python scripts/generate_pimc_leaf_value_dataset.py \
+  --data ./data/pimc_teacher_v7_d64_u8_20k_seed20260707.jsonl \
+  --policy-model ./data/models/best_a2c_v7.npz \
+  --out ./data/value/pimc_leaf_value_v7_d64_u8_20k_seed20260707.npz \
+  --max-roots 20000 \
+  --samples-per-root 1 \
+  --seed 20260707
+
+python scripts/train_value_pairwise.py \
+  --data ./data/value/pimc_leaf_value_v7_d64_u8_20k_seed20260707.npz \
+  --out ./data/models/value_leaf_pairwise_ft_v0_v7_d64_u8_20k_seed20260707.npz \
+  --hidden-dim 128 \
+  --init-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz \
+  --epochs 20 \
+  --lr 1e-4 \
+  --pairwise-beta 0.2
+
+python scripts/evaluate_value_lookahead_pair.py \
+  --policy-model ./data/models/best_a2c_v7.npz \
+  --value-model-a ./data/models/value_leaf_pairwise_ft_v0_v7_d64_u8_20k_seed20260707.npz \
+  --value-model-b ./data/models/value_v0_h128_clean50k_seed20260701.npz \
+  --label-a value_leaf_pairwise_candidate \
+  --label-b value_v0 \
+  --num-games 4000 \
+  --seed 20260708
 
 # Percorso leggibile/didattico precedente, utile per smoke o debug record-per-record.
 python scripts/generate_value_dataset.py \

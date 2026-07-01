@@ -40,6 +40,49 @@ def _read_jsonl(path: Path) -> list[dict[str, Any]]:
     return [json.loads(line) for line in path.read_text(encoding="utf-8").splitlines() if line.strip()]
 
 
+def _write_zero_policy_model(path: Path, *, label: str = "policy-test") -> None:
+    """Crea una policy MLP minima deterministica per smoke test."""
+    feature_dim = int(FEATURE_DIM_2P_V3)
+    np.savez(
+        path,
+        w1=np.zeros((feature_dim, 1), dtype=np.float32),
+        b1=np.zeros(1, dtype=np.float32),
+        w2=np.zeros((1, 40), dtype=np.float32),
+        b2=np.zeros(40, dtype=np.float32),
+        metadata_json=json.dumps(
+            {
+                "model": "mlp",
+                "feature_dim": feature_dim,
+                "encoder_version": "v3",
+                "inference_overkill_guard": True,
+                "label": label,
+            }
+        ),
+    )
+
+
+def _write_zero_value_model(path: Path, *, hidden_dim: int = 8) -> None:
+    """Crea un value MLP minimo compatibile con `load_value_model_npz`."""
+    feature_dim = int(FEATURE_DIM_2P_V3)
+    np.savez(
+        path,
+        w1=np.zeros((feature_dim, hidden_dim), dtype=np.float32),
+        b1=np.zeros(hidden_dim, dtype=np.float32),
+        w2=np.zeros(hidden_dim, dtype=np.float32),
+        b2=np.asarray([0.0], dtype=np.float32),
+        metadata_json=json.dumps(
+            {
+                "format": "value_mlp_v1",
+                "feature_dim": feature_dim,
+                "hidden_dim": hidden_dim,
+                "encoder_version": "v3",
+                "target": "residual",
+                "target_scale": 120.0,
+            }
+        ),
+    )
+
+
 def test_generate_value_dataset_and_train_value_roundtrip(tmp_path: Path) -> None:
     """Il dataset value deve essere leggibile dal trainer e salvabile come value model `.npz`."""
     generator = _load_script_module("generate_value_dataset")
@@ -112,22 +155,7 @@ def test_generate_value_dataset_numba_npz_roundtrip(tmp_path: Path) -> None:
 
     feature_dim = int(FEATURE_DIM_2P_V3)
     model_path = tmp_path / "policy.npz"
-    np.savez(
-        model_path,
-        w1=np.zeros((feature_dim, 1), dtype=np.float32),
-        b1=np.zeros(1, dtype=np.float32),
-        w2=np.zeros((1, 40), dtype=np.float32),
-        b2=np.zeros(40, dtype=np.float32),
-        metadata_json=json.dumps(
-            {
-                "model": "mlp",
-                "feature_dim": feature_dim,
-                "encoder_version": "v3",
-                "inference_overkill_guard": True,
-                "label": "policy-test",
-            }
-        ),
-    )
+    _write_zero_policy_model(model_path)
 
     data_path = tmp_path / "value_numba.npz"
     summary = generator.generate_value_dataset_numba(
@@ -176,6 +204,95 @@ def test_generate_value_dataset_numba_npz_roundtrip(tmp_path: Path) -> None:
     finally:
         sys.argv = old_argv
     assert load_value_model_npz(model_out).feature_dim == feature_dim
+
+
+def test_pimc_leaf_value_dataset_and_pairwise_train_smoke(tmp_path: Path) -> None:
+    """Il dataset leaf PIMC deve essere allenabile con la loss pairwise decision-aligned."""
+    pimc_generator = _load_script_module("generate_pimc_teacher_dataset")
+    leaf_generator = _load_script_module("generate_pimc_leaf_value_dataset")
+    train_pairwise = _load_script_module("train_value_pairwise")
+
+    policy_path = tmp_path / "policy.npz"
+    _write_zero_policy_model(policy_path, label="policy-leaf-test")
+
+    teacher_data = tmp_path / "pimc_teacher.jsonl"
+    base_agent = HeuristicAgentV2()
+    teacher = PIMCAgent(
+        rollout_agent=base_agent,
+        fallback=base_agent,
+        num_determinizations=2,
+        max_unknown_cards=8,
+    )
+    pimc_generator.generate_pimc_teacher_dataset(
+        pimc_generator.PIMCTeacherDatasetConfig(
+            out_path=teacher_data,
+            num_examples=8,
+            max_games=80,
+            seed=31,
+            max_unknown_cards=8,
+            include_fallback_examples=False,
+            strong_margin_min=0.0,
+            reliable_margin_ci_low_min=-999.0,
+        ),
+        teacher=teacher,
+        play_agent=base_agent,
+    )
+
+    leaf_data = tmp_path / "pimc_leaf_value.npz"
+    summary = leaf_generator.generate_pimc_leaf_value_dataset(
+        data_path=teacher_data,
+        policy_model_path=policy_path,
+        out_path=leaf_data,
+        max_roots=4,
+        samples_per_root=1,
+        seed=32,
+        min_margin=0.0,
+        min_margin_ci_low=-999.0,
+        feature_dtype="float32",
+    )
+    assert summary["leaf_records_written"] > 0
+    assert leaf_data.exists()
+
+    dataset = train_pairwise.load_leaf_value_dataset(leaf_data)
+    assert dataset.x.shape[1] == int(FEATURE_DIM_2P_V3)
+    assert dataset.y.shape == (dataset.x.shape[0],)
+    assert len(set(dataset.root_id.tolist())) >= 1
+
+    out_model = tmp_path / "value_pairwise.npz"
+    init_value = tmp_path / "init_value.npz"
+    _write_zero_value_model(init_value, hidden_dim=8)
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "train_value_pairwise.py",
+            "--data",
+            str(leaf_data),
+            "--out",
+            str(out_model),
+            "--hidden-dim",
+            "8",
+            "--init-value-model",
+            str(init_value),
+            "--epochs",
+            "1",
+            "--batch-size",
+            "8",
+            "--pair-batch-size",
+            "8",
+            "--val-frac",
+            "0.5",
+            "--pair-min-margin",
+            "0.0",
+            "--seed",
+            "33",
+        ]
+        assert train_pairwise.main() == 0
+    finally:
+        sys.argv = old_argv
+
+    model = load_value_model_npz(out_model)
+    assert model.feature_dim == int(FEATURE_DIM_2P_V3)
+    assert model.hidden_dim == 8
 
 
 def test_numba_value_dataset_collector_shapes_are_valid() -> None:
