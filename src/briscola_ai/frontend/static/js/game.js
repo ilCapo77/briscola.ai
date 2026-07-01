@@ -143,6 +143,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let flushTimeoutId = null;
     let debugPeekActive = false;
     let debugPeekRequestId = 0;
+    let activeOpponentReveal = null;
 
     const _displayNameForPlayer = (playerIndex, fallbackName = null) => {
         if (playerIndex === getState().playerIndex) return 'Tu';
@@ -263,6 +264,29 @@ document.addEventListener('DOMContentLoaded', () => {
         UI.updateDeckCount(fullState.cards_remaining_in_deck || 0, fullState.next_deck_card || null);
     };
 
+    const _restoreDebugPeekFromObservation = (obs) => {
+        const state = getState();
+        const opponent = (obs.players || []).find(p => p.index === state.opponentIndex);
+        const opponentHandSize = opponent?.hand_size || 0;
+
+        // Il debug peek sostituisce solo mano IA e mazzo: al rilascio di `S`
+        // ripristiniamo quelle aree senza passare da updateUI(), così la mano
+        // del giocatore non viene ricreata e non riparte l'animazione card-appear.
+        UI.renderOpponentHand(opponentHandSize);
+        if (
+            activeOpponentReveal &&
+            activeOpponentReveal.cardIndex >= 0 &&
+            activeOpponentReveal.cardIndex < opponentHandSize
+        ) {
+            UI.revealOpponentCard(
+                activeOpponentReveal.cardIndex,
+                activeOpponentReveal.card,
+                activeOpponentReveal.decisionType
+            );
+        }
+        UI.updateDeckCount(obs.cards_remaining_in_deck || 0);
+    };
+
     const _refreshDebugPeek = async () => {
         const state = getState();
         if (!debugPeekActive || !state.gameId || state.gameOver) return;
@@ -287,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
         if (debugPeekActive) {
             _refreshDebugPeek();
         } else if (state.observation) {
-            updateUI(state.observation);
+            _restoreDebugPeekFromObservation(state.observation);
         }
     };
 
@@ -319,6 +343,7 @@ document.addEventListener('DOMContentLoaded', () => {
             return;
         }
         if (serverVersion !== -1) lastAppliedServerVersion = serverVersion;
+        activeOpponentReveal = null;
 
         store.setState({
             observation: obs,
@@ -363,6 +388,11 @@ document.addEventListener('DOMContentLoaded', () => {
             if (next.type === 'ai_card_reveal') {
                 const data = next.data;
                 console.log('AI card reveal:', data.card_index, data.card);
+                activeOpponentReveal = {
+                    cardIndex: data.card_index,
+                    card: data.card,
+                    decisionType: data.decision_type || null
+                };
                 UI.revealOpponentCard(data.card_index, data.card, data.decision_type || null);
                 _holdUiForReveal();
                 break;
@@ -478,6 +508,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const handleTrickResult = (data) => {
         const state = getState();
+        activeOpponentReveal = null;
 
         // Render both cards on the table
         UI.renderTableCards(data.trick_cards || []);
@@ -555,6 +586,7 @@ document.addEventListener('DOMContentLoaded', () => {
             my_turn_started_at_ms = null;
             my_turn_observation_server_version = null;
             was_my_turn = false;
+            activeOpponentReveal = null;
 
             UI.setPlayerName(config.playerName);
             UI.updateGameInfo({ gameId: result.game_id, connected: false, statusText: 'Connessione...', statusClass: 'connecting' });
@@ -684,6 +716,7 @@ document.addEventListener('DOMContentLoaded', () => {
         uiHoldUntilMs = 0;
         debugPeekActive = false;
         debugPeekRequestId += 1;
+        activeOpponentReveal = null;
         my_turn_started_at_ms = null;
         my_turn_observation_server_version = null;
         was_my_turn = false;

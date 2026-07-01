@@ -120,22 +120,30 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 ## Prossime Azioni
 
-### 1. Release E Rollout v7
+### 1. Value Model v1 Con Dataset Numba
+
+Ipotesi: il value-lookahead può migliorare più del default `.npz` se il value model viene riaddestrato sulla nuova base
+`v7 + solver`, usando molti più stati proprio nella finestra in cui la lookahead interroga `V`.
+
+Implementazione pronta:
+
+- `scripts/generate_value_dataset_numba.py` genera dataset `.npz` compatti da self-play numerico JIT;
+- target: continuazione deterministica `policy .npz + solver endgame`;
+- raccolta consigliata: `collect-mode=window`, `max_unknown_cards=8`, `include_endgame`, `epsilon=0.10`;
+- `train_value.py` legge sia JSONL canonico sia `.npz` compatto.
 
 Fare:
 
-- creare tag/release `v0.19.0` con asset `best_a2c_v7.npz`;
-- aggiornare in cloud `BRISCOLA_DEFAULT_MODEL_ID`, `BRISCOLA_MODEL_URL` e `BRISCOLA_MODEL_SHA256`;
-- dopo deploy verificare `/version`: `recommended_model=best_a2c_v7.npz`, `recommended_model_present=true`,
-  `event_log_mode=dataset`, `event_log_available=true`, `event_log_healthy=true`;
-- far giocare 10-20 partite umane contro il nuovo default v7 e alcune contro `bc_model_value_lookahead_8x8`;
-- esportare/auditare gli eventi `ai_action`;
-- monitorare in particolare `trump_waste`, perché il candidato v7 è leggermente peggiore di v6 nello stesso harness.
+- generare un dataset lungo con `best_a2c_v7.npz` come policy base;
+- allenare `value_v1` con target residuale;
+- gate offline con `evaluate_value_ranking.py` contro diagnostica PIMC;
+- se il gate migliora `value_v0`, valutare `bc_model_value_lookahead_8x8` usando `value_v1` contro:
+  `(v7 + solver)`, `value-lookahead(v0)` e `heuristic_v1` per decision-quality.
 
-Non fare:
+Kill criterion:
 
-- non dichiarare v7 più forte del value-lookahead runtime;
-- non avviare un v8 per inerzia: servono prima pattern reali da audit o una nuova ipotesi misurabile.
+- se ranking/top1 su casi strong non migliora `value_v0`, non fare deploy;
+- se forza non supera materialmente `value-lookahead(v0)` o peggiora `trump_waste/overkill`, tenere `value_v0`.
 
 ### 2. Monitoraggio Produzione E Audit Value-Lookahead/PIMC
 
@@ -169,7 +177,7 @@ Un nuovo `best_a2c_v8` ha senso solo se c'è un segnale concreto, ad esempio:
 
 - pattern di errore V-lookahead/PIMC/v7 ripetibile da dataset reale;
 - nuova architettura/feature che risolve un limite osservato;
-- nuovo value model/value-lookahead con v7 come base e segnale preliminare forte;
+- nuovo value model/value-lookahead con v7 come base e segnale preliminare forte, misurato prima come agente runtime;
 - aumento di volume umano sufficiente e privacy/qualità verificata.
 
 Qualunque promozione deve includere:
@@ -214,6 +222,7 @@ Value-learning / V-lookahead:
 
 ```bash
 uv run python scripts/generate_value_dataset.py --help
+uv run python scripts/generate_value_dataset_numba.py --help
 uv run python scripts/train_value.py --help
 uv run python scripts/evaluate_value_ranking.py --help
 uv run python scripts/evaluate_value_lookahead.py --help

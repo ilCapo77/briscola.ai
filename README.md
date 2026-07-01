@@ -388,8 +388,13 @@ PIMC quando valuta foglie di lookahead corta.
 - `scripts/generate_value_dataset.py`: genera JSONL `value_observation` da self-play 2-player. Per run puliti usa
   `--label-mode v6-continuation`: gli stati sono visitati con epsilon, ma ogni label viene prodotta completando una
   copia dello stato con `v6 + solver` senza epsilon. È più costoso del `same-game`, ma dà target on-policy più puliti.
+- `scripts/generate_value_dataset_numba.py`: genera lo stesso tipo di segnale in formato compatto `.npz`, ma usando il
+  fast path Numba e salvando direttamente feature/target. È il percorso consigliato per run lunghe: usa una policy
+  `.npz` come base, target `policy + solver`, e può limitarsi alla finestra utile della V-lookahead
+  (`--collect-mode window --max-unknown-cards 8`).
 - `scripts/train_value.py`: allena una MLP scalare `.npz` con target residuale consigliato
   `(final_score_delta - current_score_delta) / 120`, loss Huber/MSE e salvataggio del best checkpoint per `val_loss`.
+  Legge sia JSONL canonico sia `.npz` compatto Numba.
 - `scripts/evaluate_value_ranking.py`: gate offline contro diagnostica PIMC: confronta top-1 e ranking pairwise di
   `V` con `teacher.search_diagnostics.action_values`, includendo baseline `reference_top1` del modello v6 sulla stessa
   popolazione.
@@ -405,6 +410,29 @@ PIMC quando valuta foglie di lookahead corta.
 Esempio minimo:
 
 ```bash
+# Run lunga consigliata per value_v1 su base v7: dataset compatto, solo finestra lookahead/finale.
+python scripts/generate_value_dataset_numba.py \
+  --model ./data/models/best_a2c_v7.npz \
+  --epsilon 0.10 \
+  --collect-mode window \
+  --max-unknown-cards 8 \
+  --include-endgame \
+  --num-games 1000000 \
+  --batch-games 4096 \
+  --feature-dtype float16 \
+  --out ./data/value/value_v7_solver_eps10_window_1M_seed20260701.npz \
+  --seed 20260701
+
+python scripts/train_value.py \
+  --data ./data/value/value_v7_solver_eps10_window_1M_seed20260701.npz \
+  --out ./data/models/value_v1_h128_v7_window1M_seed20260701.npz \
+  --encoder-version v3 \
+  --hidden-dim 128 \
+  --target residual \
+  --loss huber \
+  --epochs 30
+
+# Percorso leggibile/didattico precedente, utile per smoke o debug record-per-record.
 python scripts/generate_value_dataset.py \
   --agent bc_model_hybrid_endgame \
   --model ./data/models/best_a2c_v6.npz \

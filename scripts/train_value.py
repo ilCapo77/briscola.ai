@@ -21,6 +21,7 @@ from typing import Literal
 import numpy as np
 
 from briscola_ai.ai.encoding.observation_encoder import EncoderVersion, encode_observation_2p_with_version
+from briscola_ai.ai.numba.value_dataset import phase_name_from_code
 
 TargetMode = Literal["residual", "absolute"]
 LossName = Literal["huber", "mse"]
@@ -80,8 +81,8 @@ def _target_scaled(record: dict, *, target: TargetMode) -> float:
     return float(record["final_score_delta"]) / 120.0
 
 
-def load_value_dataset(path: Path, *, encoder_version: EncoderVersion, target: TargetMode) -> ValueDataset:
-    """Carica un dataset `value_observation` in array NumPy."""
+def _load_value_dataset_jsonl(path: Path, *, encoder_version: EncoderVersion, target: TargetMode) -> ValueDataset:
+    """Carica un dataset JSONL `value_observation` in array NumPy."""
     features: list[list[float]] = []
     targets: list[float] = []
     current_delta: list[float] = []
@@ -111,6 +112,56 @@ def load_value_dataset(path: Path, *, encoder_version: EncoderVersion, target: T
         final_delta=np.asarray(final_delta, dtype=np.float32),
         phases=np.asarray(phases, dtype=object),
     )
+
+
+def _load_value_dataset_npz(path: Path, *, target: TargetMode) -> ValueDataset:
+    """Carica un dataset compatto `.npz` prodotto da `generate_value_dataset_numba.py`."""
+    with np.load(path) as data:
+        keys = set(data.keys())
+        missing = {"x", "current_delta", "final_delta"} - keys
+        if missing:
+            raise ValueError(f"Dataset value .npz invalido: mancano chiavi {sorted(missing)}")
+
+        x = np.asarray(data["x"], dtype=np.float32)
+        current_delta = np.asarray(data["current_delta"], dtype=np.float32)
+        final_delta = np.asarray(data["final_delta"], dtype=np.float32)
+        if x.ndim != 2:
+            raise ValueError(f"Dataset value .npz invalido: x deve essere 2D, ottenuto {x.shape}")
+        if current_delta.shape != (x.shape[0],) or final_delta.shape != (x.shape[0],):
+            raise ValueError(
+                "Dataset value .npz invalido: current_delta/final_delta devono avere shape "
+                f"{(x.shape[0],)}, ottenuto {current_delta.shape}/{final_delta.shape}"
+            )
+
+        if target == "residual":
+            if "residual_delta" in data:
+                raw_target = np.asarray(data["residual_delta"], dtype=np.float32)
+            else:
+                raw_target = final_delta - current_delta
+            y = raw_target / 120.0
+        else:
+            y = final_delta / 120.0
+
+        if "phase" in data:
+            raw_phase = np.asarray(data["phase"])
+            phases = np.asarray([phase_name_from_code(int(code)) for code in raw_phase.tolist()], dtype=object)
+        else:
+            phases = np.full((x.shape[0],), "unknown", dtype=object)
+
+    return ValueDataset(
+        x=x,
+        y=np.asarray(y, dtype=np.float32),
+        current_delta=current_delta,
+        final_delta=final_delta,
+        phases=phases,
+    )
+
+
+def load_value_dataset(path: Path, *, encoder_version: EncoderVersion, target: TargetMode) -> ValueDataset:
+    """Carica un dataset value da JSONL canonico oppure da `.npz` compatto Numba."""
+    if path.suffix.lower() == ".npz":
+        return _load_value_dataset_npz(path, target=target)
+    return _load_value_dataset_jsonl(path, encoder_version=encoder_version, target=target)
 
 
 def _relu(x: np.ndarray) -> np.ndarray:

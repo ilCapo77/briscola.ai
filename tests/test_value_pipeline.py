@@ -13,6 +13,13 @@ import numpy as np
 from briscola_ai.ai.agents import HeuristicAgentV2, PIMCAgent
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
 from briscola_ai.ai.models import load_value_model_npz
+from briscola_ai.ai.numba.value_dataset import (
+    COLLECT_WINDOW,
+    PHASE_ENDGAME,
+    PHASE_PIMC_WINDOW,
+    collect_value_dataset_batch_numba,
+    warm_up_numba_value_dataset,
+)
 
 _ROOT = Path(__file__).resolve().parents[1]
 
@@ -96,6 +103,110 @@ def test_generate_value_dataset_and_train_value_roundtrip(tmp_path: Path) -> Non
     assert model.hidden_dim == 8
     pred = model.predict_points(np.zeros((int(FEATURE_DIM_2P_V3),), dtype=np.float32), current_score_delta=4.0)
     assert isinstance(pred, float)
+
+
+def test_generate_value_dataset_numba_npz_roundtrip(tmp_path: Path) -> None:
+    """Il generatore compatto Numba deve produrre un `.npz` allenabile dal trainer value."""
+    generator = _load_script_module("generate_value_dataset_numba")
+    train_value = _load_script_module("train_value")
+
+    feature_dim = int(FEATURE_DIM_2P_V3)
+    model_path = tmp_path / "policy.npz"
+    np.savez(
+        model_path,
+        w1=np.zeros((feature_dim, 1), dtype=np.float32),
+        b1=np.zeros(1, dtype=np.float32),
+        w2=np.zeros((1, 40), dtype=np.float32),
+        b2=np.zeros(40, dtype=np.float32),
+        metadata_json=json.dumps(
+            {
+                "model": "mlp",
+                "feature_dim": feature_dim,
+                "encoder_version": "v3",
+                "inference_overkill_guard": True,
+                "label": "policy-test",
+            }
+        ),
+    )
+
+    data_path = tmp_path / "value_numba.npz"
+    summary = generator.generate_value_dataset_numba(
+        model_path=model_path,
+        out_path=data_path,
+        num_games=8,
+        seed=456,
+        epsilon=0.1,
+        batch_games=4,
+        collect_mode="window",
+        max_unknown_cards=8,
+        include_endgame=True,
+        max_records=None,
+        feature_dtype="float16",
+    )
+
+    assert summary["records_written"] > 0
+    assert summary["phase_pimc_window"] > 0
+    assert data_path.exists()
+
+    dataset = train_value.load_value_dataset(data_path, encoder_version="v3", target="residual")
+    assert dataset.x.shape[0] == summary["records_written"]
+    assert dataset.x.shape[1] == feature_dim
+    assert dataset.y.shape == (dataset.x.shape[0],)
+    assert set(dataset.phases.tolist()) <= {"early", "mid", "pimc_window", "endgame"}
+
+    model_out = tmp_path / "value_model_numba.npz"
+    old_argv = sys.argv
+    try:
+        sys.argv = [
+            "train_value.py",
+            "--data",
+            str(data_path),
+            "--out",
+            str(model_out),
+            "--hidden-dim",
+            "8",
+            "--epochs",
+            "1",
+            "--batch-size",
+            "8",
+            "--seed",
+            "456",
+        ]
+        assert train_value.main() == 0
+    finally:
+        sys.argv = old_argv
+    assert load_value_model_npz(model_out).feature_dim == feature_dim
+
+
+def test_numba_value_dataset_collector_shapes_are_valid() -> None:
+    """Il collector Numba deve salvare solo osservazioni valide e target in range Briscola."""
+    warm_up_numba_value_dataset()
+    feature_dim = int(FEATURE_DIM_2P_V3)
+    w1 = np.zeros((feature_dim, 1), dtype=np.float32)
+    b1 = np.zeros(1, dtype=np.float32)
+    w2 = np.zeros((1, 40), dtype=np.float32)
+    b2 = np.zeros(40, dtype=np.float32)
+
+    batch = collect_value_dataset_batch_numba(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        overkill_guard_enabled=True,
+        epsilon=0.2,
+        collect_mode=COLLECT_WINDOW,
+        max_unknown_cards=8,
+        include_endgame=True,
+        game_seeds=np.asarray([100, 101, 102], dtype=np.int64),
+    )
+    valid = batch.valid
+    assert batch.games_completed == 3
+    assert batch.xs.shape == (3, 40, feature_dim)
+    assert int(np.sum(valid)) > 0
+    assert np.all(np.isfinite(batch.xs[valid]))
+    assert np.all(batch.final_delta[valid] >= -120)
+    assert np.all(batch.final_delta[valid] <= 120)
+    assert set(batch.phase[valid].tolist()) <= {PHASE_PIMC_WINDOW, PHASE_ENDGAME}
 
 
 def test_value_dataset_v6_continuation_labels_each_state(tmp_path: Path) -> None:
