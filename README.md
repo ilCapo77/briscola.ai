@@ -98,7 +98,9 @@ Lo **stesso** gioco è implementato a tre livelli, tenuti **in parità dai test*
 
 - **dominio** (`domain/engine.py`) — il motore "standard": puro, immutabile, leggibile. È la **fonte di verità**, usato da backend, UI e test. Ottimizzato per chiarezza, non per velocità.
 - **fast** (`ai/fast/`) — riscrittura 2‑player su **interi/array NumPy** (niente oggetti `Card`/`GameState`): stessa logica, molto più veloce. Serve a self‑play, training ed evaluation massivi.
-- **numba** (`ai/numba/`) — gli stessi kernel del fast path compilati **JIT con Numba**: ancora più rapidi.
+- **numba** (`ai/numba/`) — gli stessi kernel del fast path compilati **JIT con Numba**: ancora più rapidi. Include
+  anche entrypoint training-first per componenti neurali avanzati, come il core depth‑1 di V-lookahead su stati
+  numerici già determinizzati.
 
 Negli script si scelgono con `--engine domain|fast|numba` (es. `evaluate_agents.py`, `--rollout-engine`/`--fast-rollout` in `train_a2c.py`). Regola d'oro: il dominio decide la correttezza; fast/numba devono dare **risultati identici** (se cambi una regola nel dominio, aggiorna anche fast/numba e i test di parità). I numeri di throughput sono nella sezione [Performance](#performance-fast-path-pythonnumba).
 
@@ -230,9 +232,12 @@ L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in ver
 - `bc_model_pimc_16x8` – modello locale `.npz` scelto dalla UI + PIMC 16×8 nel semi‑finale + solver esatto nel finale.
 
 Il **solver endgame** calcola la mossa ottima esatta con minimax a mazzo vuoto. `ai/endgame/solver.py` resta
-l'oracolo didattico sul dominio canonico; il runtime usa `ai/endgame/fast_solver.py`, equivalente ma basato su
-card id numerici. L’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola
-`PlayerObservation`.
+l'oracolo didattico sul dominio canonico; `ai/endgame/fast_solver.py` è il solver completo numerico/Python;
+`ai/endgame/numba_solver.py` è il path choose-only JIT usato nel loop caldo e riusabile dai futuri training Numba.
+Per la V-lookahead esiste anche `ai/numba/value_lookahead.py`: è un kernel depth‑1 da array numerici per training ed
+evaluation su stati già determinizzati. Non sostituisce il runtime UI anti-cheat, che continua a partire da
+`PlayerObservation` e a determinizzare esplicitamente l'information set.
+L’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
 
 ### Raccolta dati ed export
 
@@ -391,6 +396,8 @@ PIMC quando valuta foglie di lookahead corta.
 - `scripts/evaluate_value_lookahead.py`: Stage 1 domain-only. Misura un agente `v6 + solver + V-lookahead depth-1`
   contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead. Il guard
   anti-overkill è attivo di default sulle decisioni V-lookahead; usa `--disable-overkill-guard` solo per A/B test.
+- `ai/numba/value_lookahead.py`: core JIT training-first dello stesso schema depth‑1, ma su array di stato già
+  determinizzati. Serve per futuri rollout/evaluation veloci senza passare da oggetti dominio a ogni mossa.
 - `scripts/evaluate_value_lookahead_quality.py`: confronta decision-quality del candidato e della baseline contro
   `heuristic_v1` sullo stesso seed.
 

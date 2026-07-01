@@ -67,6 +67,18 @@ def _provision_startup_models() -> list[str]:
     return messages
 
 
+def _warm_up_runtime_kernels() -> None:
+    """
+    Compila best-effort i kernel JIT usati nel runtime.
+
+    Serve soprattutto per `bc_model_value_lookahead_8x8`/PIMC: il solver endgame Numba viene chiamato nel finale,
+    quindi conviene pagare la compilazione allo startup invece che durante una mossa del giocatore.
+    """
+    from .ai.endgame import warm_up_numba_endgame_solver
+
+    warm_up_numba_endgame_solver()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -111,6 +123,11 @@ async def lifespan(app: FastAPI):
             print(provisioning_msg)
     except Exception as exc:  # difesa extra: il provisioning non deve impedire l'avvio
         print(f"Model provisioning: errore inatteso, ignorato ({exc!r}).")
+
+    try:
+        _warm_up_runtime_kernels()
+    except Exception as exc:  # difesa extra: i kernel JIT non devono impedire l'avvio
+        print(f"Runtime warm-up: errore inatteso, ignorato ({exc!r}).")
 
     cleanup_task = asyncio.create_task(backend_server.cleanup_inactive_games())
     try:

@@ -42,8 +42,9 @@ Non fare un v7 solo replicando lo stesso recipe con più partite: lo scaling pol
 ### Solver Endgame È Deployabile
 
 Il solver endgame 2-player a mazzo vuoto è esatto. `ai/endgame/solver.py` resta l'oracolo didattico basato su
-`domain.step()`, mentre il runtime usa `ai/endgame/fast_solver.py`, equivalente su card id numerici e coperto da test
-di parità. Viene eseguito solo dopo ricostruzione da `PlayerObservation`.
+`domain.step()`, `ai/endgame/fast_solver.py` è il solver completo numerico/Python, e il loop caldo usa
+`ai/endgame/numba_solver.py` choose-only JIT, equivalente e coperto da test di parità. Viene eseguito solo dopo
+ricostruzione da `PlayerObservation`.
 
 Decisione: `v6 + solver` resta una variante runtime valida e a basso rischio, ma non è il default UI mentre raccogliamo
 feedback umano comparabile sul v6 puro e sugli agenti avanzati.
@@ -108,8 +109,11 @@ Stato:
 
 - implementati `ValueLookaheadAgent` e `scripts/evaluate_value_lookahead.py`;
 - deployato in `v0.16.0` come seconda scelta vicina a `bc_model`; default UI resta v6 puro;
-- solver finale runtime migrato a `fast_solver.py` numerico, con parità contro il solver canonico e uso condiviso da
-  `HybridEndgameAgent`, `PIMCAgent` e `ValueLookaheadAgent`;
+- solver finale runtime migrato a `numba_solver.py` choose-only JIT, con parità contro il solver canonico e uso
+  condiviso da `HybridEndgameAgent`, `PIMCAgent` e `ValueLookaheadAgent`; l'entrypoint array è pensato anche per
+  futuri training Numba;
+- aggiunto `ai/numba/value_lookahead.py`: core depth-1 V-lookahead JIT su stati numerici già determinizzati, utile per
+  futuri rollout/training veloci; non sostituisce il path runtime anti-cheat che parte da `PlayerObservation`;
 - `v0.17.x` aggiunge diagnostica event-log runtime, health check Postgres con reconnect e
   `scripts/inspect_event_log_game.py` per isolare mismatch DB/log;
 - provisioning cloud attivo per `value_v0_h128_clean50k_seed20260701.npz` via

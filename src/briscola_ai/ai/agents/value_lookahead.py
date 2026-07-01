@@ -25,7 +25,7 @@ from ...domain.engine import PlayCardAction, step
 from ...domain.observation import PlayerObservation, make_player_observation
 from ...domain.state import GameState
 from ..encoding.observation_encoder import encode_player_observation_2p
-from ..endgame.fast_solver import solve_endgame_fast
+from ..endgame.numba_solver import choose_endgame_card_numba
 from ..models.bc_model import apply_overkill_guard_second_hand
 from ..models.value_model import MLPValueModel, infer_value_encoder_version
 from .base import Agent
@@ -123,7 +123,7 @@ class ValueLookaheadAgent:
 
         if observation.deck_size == 0:
             try:
-                card_index = solve_endgame_fast(reconstruct_endgame_state(observation)).best_card_index
+                card_index = choose_endgame_card_numba(reconstruct_endgame_state(observation))
                 if 0 <= card_index < len(observation.hand):
                     self.metrics.endgame_solver_decisions += 1
                     return card_index

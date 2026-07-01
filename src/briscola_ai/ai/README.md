@@ -10,19 +10,23 @@ dover leggere subito i path ottimizzati.
   l'implementazione e' separata in `base.py`, `rule_based.py`, `hybrid_endgame.py`, `registry.py`.
 - `models/`: caricamento modelli `.npz`, agente BC/A2C, catalogo server-side e provisioning.
 - `endgame/`: solver esatto del finale 2-player a mazzo vuoto; `solver.py` e' l'oracolo didattico
-  su dominio canonico, `fast_solver.py` e' il runtime numerico equivalente coperto da test di parita'.
+  su dominio canonico, `fast_solver.py` e' il solver completo numerico/Python, `numba_solver.py` e'
+  il choose-only JIT per runtime caldo e futuri loop di training.
 - `encoding/`: spazio azioni e encoder observation -> feature/mask per i modelli.
 - `training/`: componenti di training condivisi (curriculum, reward shaping, opponent mix, regolarizzazioni).
 - `evaluation/`: valutazione offline, matrici benchmark e metriche di qualita' decisionale.
 - `fast/`: motore 2-player mutabile in Python/NumPy per rollout veloci.
 - `numba/`: path JIT ad alto throughput. `core.py` contiene regole/euristiche numeriche,
-  `observation.py` encoder e kernel condivisi, `mlp.py` wrapper MLP/A2C, `types.py` DTO.
+  `observation.py` encoder e kernel condivisi, `value_lookahead.py` il core depth-1 su stati
+  numerici determinizzati, `mlp.py` wrapper MLP/A2C, `types.py` DTO.
 
 ## Regola didattica
 
 Il dominio canonico resta in `briscola_ai.domain`. Gli agenti ricevono sempre
 `PlayerObservation`, mai `GameState` completo, salvo moduli-oracolo espliciti come
 `endgame.solver`/`endgame.fast_solver` che sono usati solo dopo ricostruzione lecita dell'informazione.
+Il kernel `numba.value_lookahead` e' destinato a training/evaluation su stati gia' determinizzati:
+non campiona information set e non sostituisce l'agente runtime anti-cheat.
 
 ## Import
 
