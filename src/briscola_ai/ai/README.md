@@ -9,7 +9,8 @@ dover leggere subito i path ottimizzati.
 - `agents/`: agenti giocabili nel backend/UI. La facciata `__init__.py` esporta l'API pubblica;
   l'implementazione e' separata in `base.py`, `rule_based.py`, `hybrid_endgame.py`, `registry.py`.
 - `models/`: caricamento modelli `.npz`, agente BC/A2C, catalogo server-side e provisioning.
-- `endgame/`: solver esatto del finale 2-player a mazzo vuoto.
+- `endgame/`: solver esatto del finale 2-player a mazzo vuoto; `solver.py` e' l'oracolo didattico
+  su dominio canonico, `fast_solver.py` e' il runtime numerico equivalente coperto da test di parita'.
 - `encoding/`: spazio azioni e encoder observation -> feature/mask per i modelli.
 - `training/`: componenti di training condivisi (curriculum, reward shaping, opponent mix, regolarizzazioni).
 - `evaluation/`: valutazione offline, matrici benchmark e metriche di qualita' decisionale.
@@ -21,7 +22,7 @@ dover leggere subito i path ottimizzati.
 
 Il dominio canonico resta in `briscola_ai.domain`. Gli agenti ricevono sempre
 `PlayerObservation`, mai `GameState` completo, salvo moduli-oracolo espliciti come
-`endgame.solver` che sono usati solo dopo ricostruzione lecita dell'informazione.
+`endgame.solver`/`endgame.fast_solver` che sono usati solo dopo ricostruzione lecita dell'informazione.
 
 ## Import
 

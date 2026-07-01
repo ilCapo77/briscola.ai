@@ -15,6 +15,7 @@ from typing import ClassVar
 from ...domain.card_id import card_to_id, id_to_card
 from ...domain.observation import PlayerObservation
 from ...domain.state import GameState, PlayerState
+from ..endgame.fast_solver import solve_endgame_fast
 from ..endgame.solver import solve_endgame
 from .base import Agent, AgentSpec
 from .rule_based import HeuristicAgentV2
@@ -324,6 +325,6 @@ class HybridEndgameAgent:
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
         try:
             reconstructed = reconstruct_endgame_state(observation)
-            return solve_endgame(reconstructed).best_card_index
+            return solve_endgame_fast(reconstructed).best_card_index
         except ValueError:
             return self.fallback.choose_card_index(observation, rng=rng)

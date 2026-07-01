@@ -30,7 +30,7 @@ from ...domain.card_id import card_to_id, id_to_card
 from ...domain.engine import PlayCardAction, step
 from ...domain.observation import PlayerObservation, make_player_observation
 from ...domain.state import GameState, PlayerState
-from ..endgame.solver import solve_endgame
+from ..endgame.fast_solver import solve_endgame_fast
 from .base import Agent, AgentSpec
 from .hybrid_endgame import reconstruct_endgame_state
 from .rule_based import HeuristicAgentV2
@@ -364,7 +364,7 @@ def rollout_to_terminal(
         observation = make_player_observation(cursor, cursor.current_turn)
         if use_endgame_solver and len(cursor.deck) == 0:
             try:
-                card_index = solve_endgame(cursor).best_card_index
+                card_index = solve_endgame_fast(cursor).best_card_index
                 if not 0 <= card_index < len(observation.hand):
                     card_index = _safe_agent_card_index(rollout_agent, observation, rng=rng, metrics=metrics)
             except ValueError:
@@ -423,7 +423,7 @@ class PIMCAgent:
 
         if observation.deck_size == 0 and self.use_endgame_solver:
             try:
-                card_index = solve_endgame(reconstruct_endgame_state(observation)).best_card_index
+                card_index = solve_endgame_fast(reconstruct_endgame_state(observation)).best_card_index
                 if 0 <= card_index < len(observation.hand):
                     self.metrics.endgame_solver_decisions += 1
                     return card_index

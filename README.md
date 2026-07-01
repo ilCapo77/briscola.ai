@@ -229,7 +229,10 @@ L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in ver
   guidata dal value model `value_v0_h128_clean50k_seed20260701.npz` quando restano al massimo 8 carte vive ignote.
 - `bc_model_pimc_16x8` – modello locale `.npz` scelto dalla UI + PIMC 16×8 nel semi‑finale + solver esatto nel finale.
 
-Il **solver endgame** (`ai/endgame/solver.py`) calcola la mossa ottima esatta con minimax a mazzo vuoto; l’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola `PlayerObservation`.
+Il **solver endgame** calcola la mossa ottima esatta con minimax a mazzo vuoto. `ai/endgame/solver.py` resta
+l'oracolo didattico sul dominio canonico; il runtime usa `ai/endgame/fast_solver.py`, equivalente ma basato su
+card id numerici. L’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di finale dalla sola
+`PlayerObservation`.
 
 ### Raccolta dati ed export
 
