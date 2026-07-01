@@ -41,6 +41,8 @@ def test_dashboard_chart_range_tracks_all_progression_rows() -> None:
         ["best_a2c_v3", 17.29, 1_000_000, 0.18],
         ["best_a2c_v4", 17.50, 1_000_000, 0.36],
         ["best_a2c_v5", 17.83, 1_000_000, 0.34],
+        ["best_a2c_v6", 18.40, 5_000_000, 0.46],
+        ["best_a2c_v7", 18.73, 5_000_000, 2.27],
         [],
         ["Current conclusion"],
     ]
@@ -48,9 +50,9 @@ def test_dashboard_chart_range_tracks_all_progression_rows() -> None:
     count = build_model_report.dashboard_progress_row_count(dashboard_rows)
     chart = build_model_report.chart_xml(count)
 
-    assert count == 4
-    assert "Dashboard!$A$6:$A$9" in chart
-    assert "Dashboard!$B$6:$B$9" in chart
+    assert count == 6
+    assert "Dashboard!$A$6:$A$11" in chart
+    assert "Dashboard!$B$6:$B$11" in chart
 
 
 def test_generated_xlsx_chart_reaches_latest_official_best(tmp_path: Path) -> None:
@@ -71,7 +73,7 @@ def test_generated_xlsx_chart_reaches_latest_official_best(tmp_path: Path) -> No
     last_progress_row = first_progress_row + len(expected_models) - 1
 
     assert progress_models == expected_models
-    assert progress_models[-1] == "best_a2c_v6"
+    assert progress_models[-1] == "best_a2c_v7"
 
     with zipfile.ZipFile(out_path) as zf:
         chart_root = ET.fromstring(zf.read("xl/charts/chart1.xml"))

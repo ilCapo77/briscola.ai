@@ -54,7 +54,7 @@ BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC = AgentSpec(
     description_it=(
         "Usa il modello `.npz` scelto dalla UI come policy base, il solver esatto a mazzo vuoto e una lookahead "
         "depth-1 guidata da una rete di valore quando restano al massimo 8 carte vive ignote. È il nuovo "
-        "avversario avanzato più promettente: più forte di v6+solver nei benchmark, ma non ancora default."
+        "avversario avanzato più promettente: più forte del solo modello `.npz`, ma più costoso lato CPU."
     ),
     requires_model_id=VALUE_LOOKAHEAD_MODEL_ID,
 )

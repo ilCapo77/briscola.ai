@@ -5,12 +5,13 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.18.0`.
+- Versione progetto: `0.19.0`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
-- Modello consigliato: `best_a2c_v6.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
-- Default UI: `bc_model` + modello consigliato, cioè v6 puro. È la baseline più leggibile per giocatori umani e audit.
-- Seconda scelta vicina nel menu: `bc_model_value_lookahead_8x8`, cioè v6 + solver finale + V-lookahead depth-1
-  quando restano al massimo 8 carte vive ignote.
+- Modello consigliato: `best_a2c_v7.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
+- Default UI: `bc_model` + modello consigliato, cioè v7 puro. È la nuova policy `.npz` veloce promossa in v0.19.0.
+- Seconda scelta vicina nel menu: `bc_model_value_lookahead_8x8`, cioè modello selezionato (default v7) + solver
+  finale + V-lookahead depth-1 quando restano al massimo 8 carte vive ignote. Resta l'opzione runtime più forte,
+  ma costa più CPU.
 - Altro avversario avanzato selezionabile: `bc_model_pimc_16x8`, cioè PIMC(v6, 16 determinizzazioni, max 8 carte
   vive ignote) + solver finale.
 - Backend: FastAPI + WebSocket, stato in `GameSessionStore` (Redis in cloud), event log SQLite/Postgres.
@@ -26,18 +27,21 @@ nei commit, nei test e nei report.
 
 ## Decisioni Chiuse
 
-### v6 È La Baseline
+### v7 È Il Default `.npz`
 
-`best_a2c_v6.npz` resta il modello ufficiale.
+`best_a2c_v7.npz` è il modello consigliato ufficiale.
 
 Numeri di promozione principali:
 
-- v6 vs v5 big guarded seat-fair: `+0.46` punti medi su 100k partite.
-- holdout v6 vs v5 big: `+0.46`.
-- v6 vs `heuristic_v1`: `+18.40`.
-- decision-quality vs `heuristic_v1`: `+18.58`, `trump_overkill_rate=0.0%`, `trump_waste_rate=0.07%`.
+- v7 vs v6 big holdout seat-fair: `+2.27` punti medi su 100k partite, CI95 `+2.11..+2.44`.
+- `v7 + solver` vs `v6 + solver`, 10k: `+2.27`, CI95 `+1.77..+2.77`.
+- v7 vs `heuristic_v1` big holdout: `+18.73`.
+- decision-quality medium vs `heuristic_v1`: `trump_overkill_rate=0.0%`; `trump_waste_rate` circa `0.3%`
+  contro circa `0.1%` di v6 nello stesso harness, da monitorare.
 
-Non fare un v7 solo replicando lo stesso recipe con più partite: lo scaling policy-only ha rendimento ormai piccolo.
+Contesto: v7 non supera il value-lookahead runtime basato su v6; nel confronto 10k `v7 + solver` perde di `-0.64`,
+CI95 `-1.15..-0.13`. Quindi v7 diventa il default veloce `.npz`, mentre value-lookahead resta l'opzione avanzata più
+forte. Smoke 2k: `value-lookahead(v7)` batte `value-lookahead(v6)` di `+1.93`, da confermare solo se serve.
 
 ### Solver Endgame È Deployabile
 
@@ -46,8 +50,8 @@ Il solver endgame 2-player a mazzo vuoto è esatto. `ai/endgame/solver.py` resta
 `ai/endgame/numba_solver.py` choose-only JIT, equivalente e coperto da test di parità. Viene eseguito solo dopo
 ricostruzione da `PlayerObservation`.
 
-Decisione: `v6 + solver` resta una variante runtime valida e a basso rischio, ma non è il default UI mentre raccogliamo
-feedback umano comparabile sul v6 puro e sugli agenti avanzati.
+Decisione: il solver resta una variante runtime valida e a basso rischio; ora può essere usato sopra v7 per confronti
+offline, mentre il default UI resta `bc_model` puro con `best_a2c_v7.npz`.
 
 ### PIMC È Utile Come Runtime, Non Come Modello Distillato
 
@@ -62,17 +66,16 @@ Decisione: mantenere `bc_model_pimc_16x8` come avversario avanzato selezionabile
 Caveat: i benchmark misurano forza contro v6 nell'harness offline. Contro umani il modello d'avversario nei rollout è
 mis-specificato; validare con audit qualitativo reale.
 
-### Distillazione PIMC In v7: Negativa Per Ora
+### Distillazione PIMC In Policy: Negativa Per Ora
 
 Esperimenti chiusi:
 
 - hard-label PIMC su correzioni search: val acc circa `57%`, non abbastanza.
-- mix deploy-relevant `(coverage v6 + correzioni PIMC pesate)`: peggiora `(v7+solver)` vs `(v6+solver)`.
+- mix deploy-relevant `(coverage v6 + correzioni PIMC pesate)`: peggiora `(candidato+solver)` vs `(v6+solver)`.
 - MLP più larga (`hidden=512`) memorizza il train ma non migliora la generalizzazione.
 - soft-label da `mean_score` PIMC: T=`2` best val acc `56.9%`, T=`5` `55.6%`, T=`10` `52.8%`; non supera hard-label.
 
-Decisione: non promuovere nessun `pimc_v7_*` e non continuare distillazione PIMC in questa MLP/recipe senza una nuova
-ipotesi sostanziale.
+Decisione: non continuare distillazione PIMC in questa MLP/recipe senza una nuova ipotesi sostanziale.
 
 ### V-Lookahead Stage 0: Positivo
 
@@ -87,8 +90,25 @@ Stage 0 validato con dataset `v6 + solver`, `epsilon=0.10`, label pulita `v6-con
 - gate ranking vs diagnostica PIMC 64×8, 5000 record search: top1 `0.7276` vs reference v6 `0.5278`;
   strong/reliable top1 `0.8395` vs `0.6359`; pairwise `0.8016`, strong pairwise `0.8502`; `records_failed=0`.
 
-Decisione: esporre `v6 + solver + V-lookahead depth-1` come avversario selezionabile vicino a `bc_model`. Non è ancora
-un nuovo best `.npz` né il default UI.
+Decisione: esporre `modello selezionato + solver + V-lookahead depth-1` come avversario selezionabile vicino a
+`bc_model`. Resta più forte del solo `.npz` v7, ma costa più CPU e non diventa default.
+
+### A2C Contro Value-Lookahead: Chiuso Positivo
+
+`train_a2c.py` può usare `bc_model_value_lookahead_8x8` come opponent nel fast rollout Numba. In questo path
+l'avversario usa la partita numerica determinizzata come singola determinizzazione (`fast_numba_determinized`):
+è un opponent forte per training/screening, non una replica bit-a-bit dell'agente UI.
+
+Run effettivo:
+
+- 5M partite, warm-start v6, opponent `bc_model_value_lookahead_8x8`, seed `20260701`.
+- esito: promosso come `best_a2c_v7.npz`.
+
+Decisione:
+
+- non ripetere subito lo stesso training;
+- usare v7 come nuova policy base per confronti futuri;
+- se si vuole migliorare ancora, partire da audit reali o da un nuovo value model/value-lookahead con v7 come base.
 
 ### Population League Declassata
 
@@ -100,129 +120,56 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 ## Prossime Azioni
 
-### 1. Monitoraggio Produzione Value-Lookahead
-
-Obiettivo: osservare `bc_model_value_lookahead_8x8` in produzione contro giocatori reali prima di qualunque altra
-promozione o training.
-
-Stato:
-
-- implementati `ValueLookaheadAgent` e `scripts/evaluate_value_lookahead.py`;
-- deployato in `v0.16.0` come seconda scelta vicina a `bc_model`; default UI resta v6 puro;
-- solver finale runtime migrato a `numba_solver.py` choose-only JIT, con parità contro il solver canonico e uso
-  condiviso da `HybridEndgameAgent`, `PIMCAgent` e `ValueLookaheadAgent`; l'entrypoint array è pensato anche per
-  futuri training Numba;
-- aggiunto `ai/numba/value_lookahead.py`: core depth-1 V-lookahead JIT su stati numerici già determinizzati, utile per
-  futuri rollout/training veloci; non sostituisce il path runtime anti-cheat che parte da `PlayerObservation`;
-- `train_a2c.py` può usare `bc_model_value_lookahead_8x8` come opponent nel fast rollout Numba. In questo path
-  l'avversario usa la partita numerica determinizzata come singola determinizzazione (`fast_numba_determinized`):
-  è un opponent forte per training/screening, non una replica bit-a-bit dell'agente UI;
-- `v0.17.x` aggiunge diagnostica event-log runtime, health check Postgres con reconnect e
-  `scripts/inspect_event_log_game.py` per isolare mismatch DB/log;
-- provisioning cloud attivo per `value_v0_h128_clean50k_seed20260701.npz` via
-  `BRISCOLA_VALUE_MODEL_URL`/`BRISCOLA_VALUE_MODEL_SHA256`;
-- il guard anti-overkill è attivo di default sulle sole decisioni V-lookahead; fallback e solver restano invariati;
-- held-out 4000 partite vs `v6 + solver`, seed diverso: avg diff `+2.65`, CI95 `+1.85..+3.45`; score rate `0.5421`,
-  CI95 `0.5267..0.5575`; `0` determinizzazioni/leaf eval fallite; circa `0.016s` per mossa lookahead;
-- decision-quality medium vs `heuristic_v1`: avg diff `+20.09` vs baseline `v6+solver` `+18.60`; trump waste
-  `0.24%` vs `0.21%`; trump overkill `11.84%` vs `11.66%`; low-lead overkill `0.22%` vs `0.40%`.
+### 1. Release E Rollout v7
 
 Fare:
 
-- far giocare 10-20 partite umane contro `bc_model_value_lookahead_8x8`;
-- dopo ogni deploy verificare che `/version` mostri `event_log_mode=dataset`, `event_log_available=true`,
-  `event_log_healthy=true`, `event_log_backend=postgres`, `event_log_database_name=neondb` (o il nome DB atteso) e
-  `event_log_database_host` uguale all'endpoint Neon atteso;
+- creare tag/release `v0.19.0` con asset `best_a2c_v7.npz`;
+- aggiornare in cloud `BRISCOLA_DEFAULT_MODEL_ID`, `BRISCOLA_MODEL_URL` e `BRISCOLA_MODEL_SHA256`;
+- dopo deploy verificare `/version`: `recommended_model=best_a2c_v7.npz`, `recommended_model_present=true`,
+  `event_log_mode=dataset`, `event_log_available=true`, `event_log_healthy=true`;
+- far giocare 10-20 partite umane contro il nuovo default v7 e alcune contro `bc_model_value_lookahead_8x8`;
 - esportare/auditare gli eventi `ai_action`;
-- verificare per ogni partita: conteggio `lookahead`/`solver`/`fallback`, `failed_determinizations=0`,
-  `failed_leaf_evaluations=0`, `overkill_guard_adjustments`, e mosse qualitativamente sospette;
-- classificare ogni mossa sospetta dal `decision_type`: se è `fallback`, il problema è v6; se è `solver`, verificare
-  ricostruzione/endgame; se è `lookahead`, verificare value/guard/determinizzazione.
+- monitorare in particolare `trump_waste`, perché il candidato v7 è leggermente peggiore di v6 nello stesso harness.
 
 Non fare:
 
-- non esporlo come default UI prima di una prova cloud/umana;
-- non chiamarlo v7: non è un nuovo `.npz` policy, è un agente runtime;
-- non avviare run lunghi per inerzia: se si prova A2C contro value-lookahead, fare prima uno screening piccolo con
-  criteri di kill espliciti.
+- non dichiarare v7 più forte del value-lookahead runtime;
+- non avviare un v8 per inerzia: servono prima pattern reali da audit o una nuova ipotesi misurabile.
 
-### 2. Screening A2C Contro Value-Lookahead
-
-Obiettivo: verificare se una policy reattiva A2C può imparare qualcosa giocando contro un opponent più forte
-(`v6 + solver + V-lookahead`) senza spendere subito milioni di partite.
-
-Stato:
-
-- path fast Numba integrato in `train_a2c.py` per `--opponent bc_model_value_lookahead_8x8`;
-- supporta anche mix con baseline rule-based e/o `bc_model` quando tutti i modelli MLP condividono lo stesso
-  `--opponent-model`;
-- metadata del modello salvato includono `opponent_value_model`, `opponent_value_max_unknown_cards` e
-  `opponent_value_lookahead_rollout=fast_numba_determinized`.
-
-Protocollo consigliato:
-
-1. smoke/screening `200k-500k` partite, non `5M`, warm-start da `best_a2c_v6.npz`, encoder v3, guard ON;
-2. valutazione seat-fair contro `v6`, `v6+solver` e `bc_model_value_lookahead_8x8`;
-3. holdout vs `heuristic_v1` e decision-quality prima di qualunque estensione;
-4. se il delta non è positivo con CI o peggiora lo stile, kill dell'idea; se c'è segnale, scalare a `1M-5M`.
-
-Comando base da adattare:
-
-```bash
-uv run python scripts/train_a2c.py \
-  --init data/models/best_a2c_v6.npz \
-  --out data/models/a2c_vs_value_lookahead_screen.npz \
-  --encoder-version v3 \
-  --rollout-engine fast \
-  --fast-rollout numba \
-  --opponent bc_model_value_lookahead_8x8 \
-  --opponent-model data/models/best_a2c_v6.npz \
-  --opponent-value-model data/models/value_v0_h128_clean50k_seed20260701.npz \
-  --opponent-value-max-unknown-cards 8 \
-  --num-games 200000 \
-  --seat-fair \
-  --metrics-mode summary \
-  --inference-overkill-guard
-```
-
-### 3. Monitoraggio Produzione E Audit PIMC
-
-Obiettivo: mantenere `PIMC(v6,16×8)` come confronto avanzato opzionale, senza spostare il focus dal V-lookahead appena
-deployato.
+### 2. Monitoraggio Produzione E Audit Value-Lookahead/PIMC
 
 Fare:
 
-- far giocare qualche partita umana contro `bc_model_pimc_16x8` solo se serve un confronto qualitativo con
-  V-lookahead;
-- esportare/auditare le mosse IA con:
-  - `scripts/audit_event_log_games.py`
-  - `scripts/export_ai_actions.py`
-  - `scripts/report_event_log.py`
-- classificare ogni mossa sospetta come `fallback`, `search` o `endgame_solver`;
+- mantenere `bc_model_value_lookahead_8x8` come opzione avanzata vicina al default;
+- mantenere `bc_model_pimc_16x8` come confronto avanzato opzionale;
+- classificare ogni mossa sospetta dal `decision_type`: se è `fallback`, il problema è la policy base; se è `solver`,
+  verificare ricostruzione/endgame; se è `lookahead`/`search`, verificare value/PIMC/guard/determinizzazione;
 - se emergono errori ricorrenti, trasformarli in una nuova ipotesi misurabile.
 
 Non fare:
 
 - non usare dati umani per training finché volume, consenso, qualità e privacy non sono riverificati;
-- non avviare v7 per inerzia.
+- non avviare v8 per inerzia.
 
-### 4. Hardening Continuo
+### 3. Hardening Continuo
 
 Già aggiunti stress test su:
 
 - solver reale vs solver ricostruito da `PlayerObservation`, anche secondo di mano;
 - determinizzazioni PIMC senza duplicati/leak e con punteggi pubblici coerenti;
-- PIMC search senza determinizzazioni/rollout falliti né mosse normalizzate.
+- PIMC search senza determinizzazioni/rollout falliti né mosse normalizzate;
+- solver/lookahead Numba usabili nei loop di training.
 
 Continuare ad aggiungere test solo quando troviamo un caso reale sospetto o tocchiamo regole/observation/PIMC.
 
-### 5. Nuovo Modello Solo Con Nuova Ipotesi
+### 4. Nuovo Modello Solo Con Nuova Ipotesi
 
-Un nuovo `best_a2c_v7` ha senso solo se c'è un segnale concreto, ad esempio:
+Un nuovo `best_a2c_v8` ha senso solo se c'è un segnale concreto, ad esempio:
 
-- pattern di errore V-lookahead/PIMC/v6 ripetibile da dataset reale;
+- pattern di errore V-lookahead/PIMC/v7 ripetibile da dataset reale;
 - nuova architettura/feature che risolve un limite osservato;
-- teacher/search diverso con evidenza preliminare forte;
+- nuovo value model/value-lookahead con v7 come base e segnale preliminare forte;
 - aumento di volume umano sufficiente e privacy/qualità verificata.
 
 Qualunque promozione deve includere:
@@ -233,7 +180,7 @@ Qualunque promozione deve includere:
 - `trump_waste_rate` e `trump_overkill_rate` non peggiorati materialmente;
 - aggiornamento `docs/reports/model_progress.xlsx` se cambia un best ufficiale.
 
-### 6. PPO/GAE: Bassa Priorità
+### 5. PPO/GAE: Bassa Priorità
 
 Valutare PPO/GAE solo dopo un blocco reale di A2C/PIMC e con esperimento piccolo e isolato. Non introdurre DQN per ora:
 action mask, osservabilità parziale e self-play rendono più coerente restare su policy-gradient.

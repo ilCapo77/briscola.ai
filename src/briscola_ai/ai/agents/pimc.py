@@ -13,7 +13,7 @@ Questo modulo implementa una prima search a inference sopra una policy esistente
 
 Scope
 -----
-È un prototipo offline, non un agente UI di default. Serve a verificare se search + v6 supera v6 puro
+È un prototipo offline, non un agente UI di default. Serve a verificare se search + modello base supera il modello puro
 nel finale/semi-finale prima di investire in integrazione runtime o distillazione teacher.
 """
 

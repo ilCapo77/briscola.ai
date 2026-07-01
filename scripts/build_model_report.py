@@ -127,6 +127,22 @@ MODEL_SPECS: list[ModelSpec] = [
         decision="Promoted as recommended model for the v0.12.0 release.",
         notes="Scaling v6 5M run warm-started from best_a2c_v5 with best_a2c_v5 in the opponent mix.",
     ),
+    ModelSpec(
+        model_id="best_a2c_v7",
+        path=_rel("data/models/best_a2c_v7.npz"),
+        role="official best",
+        status="promoted",
+        order=6,
+        progress_source="data/eval_best_a2c_v7_vs_heuristic_v1_big_holdout_seedrange1000000.json",
+        progress_score=18.7314,
+        h2h_source="data/eval_a2c_vs_value_lookahead_5M_vs_v6_big_holdout_seedrange1000000.json",
+        h2h_score=2.274,
+        decision="Promoted as recommended model for the v0.19.0 release.",
+        notes=(
+            "5M A2C run warm-started from best_a2c_v6 against the fast Numba value-lookahead opponent. "
+            "It becomes the default .npz policy; value-lookahead remains the stronger runtime option."
+        ),
+    ),
 ]
 
 
@@ -288,6 +304,24 @@ MILESTONES: list[dict[str, Any]] = [
             "UI can select bc_model_pimc_16x8(best_a2c_v6); default remains bc_model_hybrid_endgame(best_a2c_v6)."
         ),
         "source": "src/briscola_ai/ai/agents/registry.py + scripts/evaluate_pimc.py + PLAN.md",
+    },
+    {
+        "order": 11,
+        "date": "2026-07-01",
+        "model_id": "best_a2c_v7",
+        "type": "promoted",
+        "decision": "Promote v7 as the recommended .npz policy for v0.19.0.",
+        "why": (
+            "A 5M A2C run against the fast Numba value-lookahead opponent produced a policy that beats v6 "
+            "head-to-head and also improves the v6+solver runtime baseline."
+        ),
+        "evidence": (
+            "Big holdout vs best_a2c_v6 +2.27; medium candidate+solver vs v6+solver +2.27; "
+            "big holdout vs heuristic_v1 +18.73. It remains slightly below v6 value-lookahead runtime "
+            "(-0.64 on 10k), so value-lookahead stays selectable as the advanced option."
+        ),
+        "impact": "Frontend/server/cloud default model moves to best_a2c_v7; value model asset remains unchanged.",
+        "source": "data/models/best_a2c_v7.npz + train_a2c fast_numba_determinized value-lookahead screen",
     },
 ]
 
@@ -653,7 +687,14 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
     models = model_rows()
     promotion = promotion_rows()
     quality = decision_quality_rows()
-    progress_model_ids = {"best_a2c", "best_a2c_v3", "best_a2c_v4", "best_a2c_v5", "best_a2c_v6"}
+    progress_model_ids = {
+        "best_a2c",
+        "best_a2c_v3",
+        "best_a2c_v4",
+        "best_a2c_v5",
+        "best_a2c_v6",
+        "best_a2c_v7",
+    }
     progress_models = [m for m in models if m["model_id"] in progress_model_ids]
 
     dashboard: list[list[Any]] = [
@@ -677,8 +718,9 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v6 is the recommended v0.12.0 model: the 5M scaling checkpoint improves "
-                "big holdout vs heuristic_v1 and beats best_a2c_v5 head-to-head on standard and holdout suites."
+                "best_a2c_v7 is the recommended v0.19.0 .npz policy: the 5M value-lookahead-opponent "
+                "A2C run beats best_a2c_v6 head-to-head and improves the v6+solver runtime baseline. "
+                "The value-lookahead runtime agent remains the stronger advanced option."
             ],
             [],
             ["Quick comparison"],

@@ -30,7 +30,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta ValueLookaheadAgent con engine dominio offline.")
     parser.add_argument(
         "--policy-model",
-        default="data/models/best_a2c_v6.npz",
+        default="data/models/best_a2c_v7.npz",
         help="Path modello `.npz` usato da fallback, continuazione e baseline.",
     )
     parser.add_argument("--value-model", required=True, help="Path value model `.npz`.")

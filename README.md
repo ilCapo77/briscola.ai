@@ -311,7 +311,7 @@ Confronti riproducibili senza UI/server:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v6.npz --agent1 heuristic_v1
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v7.npz --agent1 heuristic_v1
 ```
 
 Concetti chiave:
@@ -328,7 +328,7 @@ Strumenti aggiuntivi:
 - `scripts/evaluate_pimc.py` – prototipo offline PIMC/determinizzazione sopra un modello `.npz`: confronta search vs
   modello puro, control solver (`v6 + solver endgame`) o un'altra config PIMC, con CI su score/avg diff e metriche di
   costo per mossa di search. Serve a valutare sia un eventuale agente live sia l'uso PIMC come teacher per distillare
-  un futuro `best_a2c_v7`.
+  un futuro `best_a2c_v8`.
 - **Guard anti‑overkill** (`inference_overkill_guard`): post‑processing che, da secondo di mano, gioca la briscola vincente **minima**. Attivabile dai metadati del modello (i trainer lo salvano con `--inference-overkill-guard`) o, per A/B, con `BRISCOLA_BC_OVERKILL_GUARD=1`. È deterministico: verifica sempre l’impatto con le metriche.
 
 ### Performance (fast path Python/Numba)
@@ -454,9 +454,9 @@ Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
 - **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
-- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v6. Per allenare contro il best v6 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v6.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
+- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v7. Per allenare contro il best v7 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v7.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
 - **value-lookahead opponent**: nel fast rollout Numba puoi allenare contro `bc_model_value_lookahead_8x8` passando sia
-  `--opponent-model ./data/models/best_a2c_v6.npz` sia
+  `--opponent-model ./data/models/best_a2c_v7.npz` sia
   `--opponent-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz`. Questo path usa lo stato numerico
   già determinizzato del rollout come singola determinizzazione: è un avversario di training forte, non una replica
   bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
@@ -469,14 +469,14 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-Il modello consigliato è **`data/models/best_a2c_v6.npz`** (encoder v3, guard anti‑overkill ON), promosso perché migliora `best_a2c_v5` nel confronto head‑to‑head big e migliora l'holdout vs `heuristic_v1` senza regressioni materiali su spreco/overkill di briscole. In UI, quando disponibile, il default è `bc_model`: v6 puro, senza solver/search aggiunti, così la baseline resta leggibile durante test umani e audit. Subito vicino nel menu resta selezionabile `bc_model_value_lookahead_8x8`, che usa v6 come policy base più solver finale e lookahead guidata da value model. `best_a2c_v5.npz` resta selezionabile per confronto se presente nella directory modelli; il vecchio `best_a2c.npz` resta utile per regressioni v2. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v6 è in `PLAN.md`.
+Il modello consigliato è **`data/models/best_a2c_v7.npz`** (encoder v3, guard anti‑overkill ON), promosso perché batte `best_a2c_v6` nel confronto head‑to‑head big e migliora anche la baseline runtime `v6 + solver`. In UI, quando disponibile, il default è `bc_model`: v7 puro, senza solver/search aggiunti. Subito vicino nel menu resta selezionabile `bc_model_value_lookahead_8x8`, che usa il modello `.npz` selezionato (default v7) come policy base più solver finale e lookahead guidata da value model; resta più forte di v7 puro, ma costa più CPU. `best_a2c_v6.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v7 è in `PLAN.md`.
 
-Il ramo corrente usa `best_a2c_v6.npz` come modello consigliato e salva `ai_action` in modalità dataset per auditare le mosse IA/search. Per abilitare `bc_model_value_lookahead_8x8` serve anche il value model `value_v0_h128_clean50k_seed20260701.npz` in `BRISCOLA_MODELS_DIR`; il catalogo modelli UI non lo mostra come policy selezionabile perché è un asset interno del lookahead. Il provisioning scarica la policy consigliata e, se configurate le env dedicate, anche il value model.
+Il ramo corrente usa `best_a2c_v7.npz` come modello consigliato e salva `ai_action` in modalità dataset per auditare le mosse IA/search. Per abilitare `bc_model_value_lookahead_8x8` serve anche il value model `value_v0_h128_clean50k_seed20260701.npz` in `BRISCOLA_MODELS_DIR`; il catalogo modelli UI non lo mostra come policy selezionabile perché è un asset interno del lookahead. Il provisioning scarica la policy consigliata e, se configurate le env dedicate, anche il value model.
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v6.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.12.1/best_a2c_v6.npz
-BRISCOLA_MODEL_SHA256=b047a319c3505936d11127a3a2e29b9ca3a2b93676569a2ea8ce186a5e29a951
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v7.npz
+BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.19.0/best_a2c_v7.npz
+BRISCOLA_MODEL_SHA256=89df3bc4f61a09972a13ddf7a0fea3f740eb1d296a8a8d85f4a942d8e6aeafe3
 BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
 BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
 ```
@@ -503,8 +503,8 @@ Esempio di confronto testa‑a‑testa tra due modelli:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v6.npz \
-  --agent1 bc_model --agent1-model ./data/models/best_a2c_v5.npz
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v7.npz \
+  --agent1 bc_model --agent1-model ./data/models/best_a2c_v6.npz
 ```
 
 ## Stato e roadmap

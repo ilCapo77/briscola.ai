@@ -6,7 +6,7 @@ Contesto
 --------
 `scripts/generate_pimc_teacher_dataset.py` produce un JSONL ricco di diagnostica per ogni
 mossa (vedi blocco `teacher.search_diagnostics`: margine pareggiato, SE, CI95, ecc.). La maggior
-parte di quelle righe NON è segnale utile per un `best_a2c_v7` distillato:
+parte di quelle righe NON è segnale utile per un nuovo best distillato:
 
 - gli esempi `fallback`/`endgame_solver` coincidono col modello base o col solver runtime, che
   eseguiamo già a inference e non vogliamo comprimere nei pesi;

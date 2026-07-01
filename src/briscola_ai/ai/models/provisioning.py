@@ -20,7 +20,7 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 # Id del modello consigliato (coerente con la baseline ufficiale e con `/version`).
-DEFAULT_MODEL_ID = "best_a2c_v6.npz"
+DEFAULT_MODEL_ID = "best_a2c_v7.npz"
 
 # Id del value model usato dall'agente selezionabile `bc_model_value_lookahead_8x8`.
 VALUE_LOOKAHEAD_MODEL_ID = "value_v0_h128_clean50k_seed20260701.npz"

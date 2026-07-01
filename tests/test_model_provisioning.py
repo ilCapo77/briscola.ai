@@ -181,7 +181,7 @@ def test_startup_provisioning_downloads_policy_and_value_model(
     tmp_path: Path,
 ) -> None:
     """Lo startup deve poter scaricare sia la policy consigliata sia il value model del lookahead."""
-    policy_bytes = b"policy-v6"
+    policy_bytes = b"policy-v7"
     value_bytes = b"value-lookahead"
     policy_src = tmp_path / "policy-source.npz"
     value_src = tmp_path / "value-source.npz"
@@ -197,7 +197,7 @@ def test_startup_provisioning_downloads_policy_and_value_model(
 
     messages = _provision_startup_models()
 
-    assert (models_dir / "best_a2c_v6.npz").read_bytes() == policy_bytes
+    assert (models_dir / "best_a2c_v7.npz").read_bytes() == policy_bytes
     assert (models_dir / "value_v0_h128_clean50k_seed20260701.npz").read_bytes() == value_bytes
     assert any(msg.startswith("Model provisioning:") for msg in messages)
     assert any(msg.startswith("Value model provisioning:") for msg in messages)

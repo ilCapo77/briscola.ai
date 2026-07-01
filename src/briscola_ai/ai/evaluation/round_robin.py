@@ -189,10 +189,10 @@ class RoundRobinResult:
 
 def default_round_robin_players(models_dir: str | Path = "data/models") -> list[RoundRobinPlayer]:
     """
-    Popolazione minima consigliata per la pre-validazione v7.
+    Popolazione minima consigliata per la pre-validazione di nuovi candidati.
 
     `best_a2c.npz` e' trattato come ancora legacy v2 in valutazione; i modelli storici encoder v3
-    restano invece v3/v4/v5/v6. Il training multi-opponent non deve usare il legacy v2.
+    restano invece v3/v4/v5/v6/v7. Il training multi-opponent non deve usare il legacy v2.
     """
     root = Path(models_dir)
     return [
@@ -201,6 +201,7 @@ def default_round_robin_players(models_dir: str | Path = "data/models") -> list[
         RoundRobinPlayer("best_a2c_v4", "model", str(root / "best_a2c_v4.npz")),
         RoundRobinPlayer("best_a2c_v5", "model", str(root / "best_a2c_v5.npz")),
         RoundRobinPlayer("best_a2c_v6", "model", str(root / "best_a2c_v6.npz")),
+        RoundRobinPlayer("best_a2c_v7", "model", str(root / "best_a2c_v7.npz")),
         RoundRobinPlayer("heuristic_v1", "fast"),
     ]
 

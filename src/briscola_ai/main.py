@@ -30,7 +30,7 @@ def _provision_startup_models() -> list[str]:
     """
     Provisioning best-effort degli asset `.npz` necessari in cloud.
 
-    La policy consigliata (`best_a2c_v6.npz`, o override `BRISCOLA_DEFAULT_MODEL_ID`) resta il modello principale.
+    La policy consigliata (`best_a2c_v7.npz`, o override `BRISCOLA_DEFAULT_MODEL_ID`) resta il modello principale.
     Il value model e' opzionale ma necessario per rendere disponibile `bc_model_value_lookahead_8x8`: lo scarichiamo
     solo se l'operatore imposta `BRISCOLA_VALUE_MODEL_URL` o un pin `BRISCOLA_VALUE_MODEL_SHA256`.
     """

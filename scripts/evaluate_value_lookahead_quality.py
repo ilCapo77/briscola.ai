@@ -40,7 +40,7 @@ def _run_quality(agent, *, num_games: int, seed: int, workers: int):
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta decision-quality di ValueLookaheadAgent vs heuristic_v1.")
-    parser.add_argument("--policy-model", default="data/models/best_a2c_v6.npz")
+    parser.add_argument("--policy-model", default="data/models/best_a2c_v7.npz")
     parser.add_argument("--value-model", required=True)
     parser.add_argument("--benchmark", choices=["small", "medium", "big"], default="small")
     parser.add_argument("--num-games", type=int, default=0, help="Override esplicito per smoke/test; 0 usa benchmark.")
