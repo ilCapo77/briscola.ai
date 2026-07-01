@@ -100,7 +100,7 @@ Lo **stesso** gioco è implementato a tre livelli, tenuti **in parità dai test*
 - **fast** (`ai/fast/`) — riscrittura 2‑player su **interi/array NumPy** (niente oggetti `Card`/`GameState`): stessa logica, molto più veloce. Serve a self‑play, training ed evaluation massivi.
 - **numba** (`ai/numba/`) — gli stessi kernel del fast path compilati **JIT con Numba**: ancora più rapidi. Include
   anche entrypoint training-first per componenti neurali avanzati, come il core depth‑1 di V-lookahead su stati
-  numerici già determinizzati.
+  numerici già determinizzati e il collector A2C che può usarlo come avversario fast.
 
 Negli script si scelgono con `--engine domain|fast|numba` (es. `evaluate_agents.py`, `--rollout-engine`/`--fast-rollout` in `train_a2c.py`). Regola d'oro: il dominio decide la correttezza; fast/numba devono dare **risultati identici** (se cambi una regola nel dominio, aggiorna anche fast/numba e i test di parità). I numeri di throughput sono nella sezione [Performance](#performance-fast-path-pythonnumba).
 
@@ -397,7 +397,8 @@ PIMC quando valuta foglie di lookahead corta.
   contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead. Il guard
   anti-overkill è attivo di default sulle decisioni V-lookahead; usa `--disable-overkill-guard` solo per A/B test.
 - `ai/numba/value_lookahead.py`: core JIT training-first dello stesso schema depth‑1, ma su array di stato già
-  determinizzati. Serve per futuri rollout/evaluation veloci senza passare da oggetti dominio a ogni mossa.
+  determinizzati. Serve per rollout/evaluation veloci senza passare da oggetti dominio a ogni mossa; `train_a2c.py`
+  può usarlo come opponent `bc_model_value_lookahead_8x8` nel fast rollout Numba.
 - `scripts/evaluate_value_lookahead_quality.py`: confronta decision-quality del candidato e della baseline contro
   `heuristic_v1` sullo stesso seed.
 
@@ -454,6 +455,11 @@ Tecniche utili (tutte come flag, vedi `--help`):
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
 - **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
 - **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v6. Per allenare contro il best v6 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v6.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
+- **value-lookahead opponent**: nel fast rollout Numba puoi allenare contro `bc_model_value_lookahead_8x8` passando sia
+  `--opponent-model ./data/models/best_a2c_v6.npz` sia
+  `--opponent-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz`. Questo path usa lo stato numerico
+  già determinizzato del rollout come singola determinizzazione: è un avversario di training forte, non una replica
+  bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
 - **curriculum** (`--curriculum easy_standard_hard`) per stage easy→standard→hard.
 
 **Pipeline riproducibile** (`scripts/run_experiment.py`): un comando unico fa training → evaluation matrix → manifest → aggiorna il best locale. Supporta `--rollout-engine fast --fast-rollout numba` e `--eval-engine numba` per i run lunghi. Output in `data/models/` e `benchmarks/experiments/<name>/`.

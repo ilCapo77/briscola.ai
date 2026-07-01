@@ -114,6 +114,9 @@ Stato:
   futuri training Numba;
 - aggiunto `ai/numba/value_lookahead.py`: core depth-1 V-lookahead JIT su stati numerici già determinizzati, utile per
   futuri rollout/training veloci; non sostituisce il path runtime anti-cheat che parte da `PlayerObservation`;
+- `train_a2c.py` può usare `bc_model_value_lookahead_8x8` come opponent nel fast rollout Numba. In questo path
+  l'avversario usa la partita numerica determinizzata come singola determinizzazione (`fast_numba_determinized`):
+  è un opponent forte per training/screening, non una replica bit-a-bit dell'agente UI;
 - `v0.17.x` aggiunge diagnostica event-log runtime, health check Postgres con reconnect e
   `scripts/inspect_event_log_game.py` per isolare mismatch DB/log;
 - provisioning cloud attivo per `value_v0_h128_clean50k_seed20260701.npz` via
@@ -140,9 +143,49 @@ Non fare:
 
 - non esporlo come default UI prima di una prova cloud/umana;
 - non chiamarlo v7: non è un nuovo `.npz` policy, è un agente runtime;
-- non avviare nuovo training finché non emerge un pattern reale misurabile dalle partite/audit.
+- non avviare run lunghi per inerzia: se si prova A2C contro value-lookahead, fare prima uno screening piccolo con
+  criteri di kill espliciti.
 
-### 2. Monitoraggio Produzione E Audit PIMC
+### 2. Screening A2C Contro Value-Lookahead
+
+Obiettivo: verificare se una policy reattiva A2C può imparare qualcosa giocando contro un opponent più forte
+(`v6 + solver + V-lookahead`) senza spendere subito milioni di partite.
+
+Stato:
+
+- path fast Numba integrato in `train_a2c.py` per `--opponent bc_model_value_lookahead_8x8`;
+- supporta anche mix con baseline rule-based e/o `bc_model` quando tutti i modelli MLP condividono lo stesso
+  `--opponent-model`;
+- metadata del modello salvato includono `opponent_value_model`, `opponent_value_max_unknown_cards` e
+  `opponent_value_lookahead_rollout=fast_numba_determinized`.
+
+Protocollo consigliato:
+
+1. smoke/screening `200k-500k` partite, non `5M`, warm-start da `best_a2c_v6.npz`, encoder v3, guard ON;
+2. valutazione seat-fair contro `v6`, `v6+solver` e `bc_model_value_lookahead_8x8`;
+3. holdout vs `heuristic_v1` e decision-quality prima di qualunque estensione;
+4. se il delta non è positivo con CI o peggiora lo stile, kill dell'idea; se c'è segnale, scalare a `1M-5M`.
+
+Comando base da adattare:
+
+```bash
+uv run python scripts/train_a2c.py \
+  --init data/models/best_a2c_v6.npz \
+  --out data/models/a2c_vs_value_lookahead_screen.npz \
+  --encoder-version v3 \
+  --rollout-engine fast \
+  --fast-rollout numba \
+  --opponent bc_model_value_lookahead_8x8 \
+  --opponent-model data/models/best_a2c_v6.npz \
+  --opponent-value-model data/models/value_v0_h128_clean50k_seed20260701.npz \
+  --opponent-value-max-unknown-cards 8 \
+  --num-games 200000 \
+  --seat-fair \
+  --metrics-mode summary \
+  --inference-overkill-guard
+```
+
+### 3. Monitoraggio Produzione E Audit PIMC
 
 Obiettivo: mantenere `PIMC(v6,16×8)` come confronto avanzato opzionale, senza spostare il focus dal V-lookahead appena
 deployato.
@@ -163,7 +206,7 @@ Non fare:
 - non usare dati umani per training finché volume, consenso, qualità e privacy non sono riverificati;
 - non avviare v7 per inerzia.
 
-### 3. Hardening Continuo
+### 4. Hardening Continuo
 
 Già aggiunti stress test su:
 
@@ -173,7 +216,7 @@ Già aggiunti stress test su:
 
 Continuare ad aggiungere test solo quando troviamo un caso reale sospetto o tocchiamo regole/observation/PIMC.
 
-### 4. Nuovo Modello Solo Con Nuova Ipotesi
+### 5. Nuovo Modello Solo Con Nuova Ipotesi
 
 Un nuovo `best_a2c_v7` ha senso solo se c'è un segnale concreto, ad esempio:
 
@@ -190,7 +233,7 @@ Qualunque promozione deve includere:
 - `trump_waste_rate` e `trump_overkill_rate` non peggiorati materialmente;
 - aggiornamento `docs/reports/model_progress.xlsx` se cambia un best ufficiale.
 
-### 5. PPO/GAE: Bassa Priorità
+### 6. PPO/GAE: Bassa Priorità
 
 Valutare PPO/GAE solo dopo un blocco reale di A2C/PIMC e con esperimento piccolo e isolato. Non introdurre DQN per ora:
 action mask, osservabilità parziale e self-play rendono più coerente restare su policy-gradient.

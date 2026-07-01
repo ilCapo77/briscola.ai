@@ -6,10 +6,16 @@ import numpy as np
 
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
 from briscola_ai.ai.endgame.solver import solve_endgame
+from briscola_ai.ai.numba.core import numba_agent_code
 from briscola_ai.ai.numba.value_lookahead import (
+    OPPONENT_MODE_MODEL,
+    OPPONENT_MODE_RULE,
+    OPPONENT_MODE_VALUE_LOOKAHEAD,
     arrays_from_game_state_for_value_lookahead,
     choose_value_lookahead_card_numba,
     choose_value_lookahead_card_numba_arrays,
+    collect_a2c_batch_numba_value_lookahead_2p,
+    collect_a2c_trajectory_numba_value_lookahead_2p,
     warm_up_numba_value_lookahead,
 )
 from briscola_ai.domain.card_id import card_to_id
@@ -184,3 +190,108 @@ def test_value_lookahead_array_entrypoint_returns_valid_card_index() -> None:
     assert np.isfinite(score)
     assert state.players[state.current_turn].hand[int(card_index)] == Card(Suit.CLUBS, Rank.TWO)
     assert card_to_id(state.players[state.current_turn].hand[int(card_index)]) == 1
+
+
+def test_value_lookahead_a2c_trajectory_collector_shapes_are_valid() -> None:
+    """Il collector A2C value-aware deve produrre gli stessi buffer del rollout Numba standard."""
+    policy_w1, policy_b1, policy_w2, policy_b2, value_w1, value_b1, value_w2 = _weights()
+    wv = np.zeros((policy_w1.shape[1],), dtype=np.float32)
+
+    traj = collect_a2c_trajectory_numba_value_lookahead_2p(
+        w1=policy_w1,
+        b1=policy_b1,
+        w2=policy_w2,
+        b2=policy_b2,
+        wv=wv,
+        bv=0.0,
+        opponent_mode=OPPONENT_MODE_VALUE_LOOKAHEAD,
+        opponent_code=0,
+        opponent_w1=policy_w1,
+        opponent_b1=policy_b1,
+        opponent_w2=policy_w2,
+        opponent_b2=policy_b2,
+        opponent_overkill_guard=True,
+        value_w1=value_w1,
+        value_b1=value_b1,
+        value_w2=value_w2,
+        value_b2=0.0,
+        value_target_scale=120.0,
+        value_target_is_residual=True,
+        value_max_unknown_cards=8,
+        game_seed=20260701,
+        policy_seat=0,
+    )
+
+    step_count = int(traj.rewards.shape[0])
+    assert 0 < step_count <= 20
+    assert traj.xs.shape == (step_count, int(FEATURE_DIM_2P_V3))
+    assert traj.probs.shape == (step_count, 40)
+    assert np.all(traj.action_ids >= 0)
+
+
+def test_value_lookahead_a2c_batch_supports_rule_model_and_value_modes() -> None:
+    """Il batch può mescolare baseline, MLP e value-lookahead usando un solo set di pesi opponent."""
+    policy_w1, policy_b1, policy_w2, policy_b2, value_w1, value_b1, value_w2 = _weights()
+    wv = np.zeros((policy_w1.shape[1],), dtype=np.float32)
+    modes = np.asarray([OPPONENT_MODE_RULE, OPPONENT_MODE_MODEL, OPPONENT_MODE_VALUE_LOOKAHEAD], dtype=np.int64)
+    codes = np.asarray([numba_agent_code("random"), 0, 0], dtype=np.int64)
+    seeds = np.asarray([101, 102, 103], dtype=np.int64)
+    seats = np.asarray([0, 1, 0], dtype=np.int64)
+
+    batch = collect_a2c_batch_numba_value_lookahead_2p(
+        w1=policy_w1,
+        b1=policy_b1,
+        w2=policy_w2,
+        b2=policy_b2,
+        wv=wv,
+        bv=0.0,
+        opponent_modes=modes,
+        opponent_codes=codes,
+        opponent_w1=policy_w1,
+        opponent_b1=policy_b1,
+        opponent_w2=policy_w2,
+        opponent_b2=policy_b2,
+        opponent_overkill_guard=True,
+        value_w1=value_w1,
+        value_b1=value_b1,
+        value_w2=value_w2,
+        value_b2=0.0,
+        value_target_scale=120.0,
+        value_target_is_residual=True,
+        value_max_unknown_cards=8,
+        game_seeds=seeds,
+        policy_seats=seats,
+    )
+
+    assert batch.step_counts.shape == (3,)
+    assert np.all(batch.step_counts > 0)
+    assert batch.xs.shape[0] == 3
+    for index in range(3):
+        single = collect_a2c_trajectory_numba_value_lookahead_2p(
+            w1=policy_w1,
+            b1=policy_b1,
+            w2=policy_w2,
+            b2=policy_b2,
+            wv=wv,
+            bv=0.0,
+            opponent_mode=int(modes[index]),
+            opponent_code=int(codes[index]),
+            opponent_w1=policy_w1,
+            opponent_b1=policy_b1,
+            opponent_w2=policy_w2,
+            opponent_b2=policy_b2,
+            opponent_overkill_guard=True,
+            value_w1=value_w1,
+            value_b1=value_b1,
+            value_w2=value_w2,
+            value_b2=0.0,
+            value_target_scale=120.0,
+            value_target_is_residual=True,
+            value_max_unknown_cards=8,
+            game_seed=int(seeds[index]),
+            policy_seat=int(seats[index]),
+        )
+        count = int(batch.step_counts[index])
+        assert count == int(single.rewards.shape[0])
+        np.testing.assert_array_equal(batch.action_ids[index, :count], single.action_ids)
+        np.testing.assert_allclose(batch.rewards[index, :count], single.rewards)

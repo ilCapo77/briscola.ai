@@ -20,23 +20,30 @@ con il proprio protocollo di training/evaluation.
 from __future__ import annotations
 
 import numpy as np
-from numba import njit
+from numba import njit, prange
 
 from ...domain.card_id import card_to_id
 from ...domain.state import GameState
+from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
 from ..endgame.numba_solver import choose_endgame_card_numba_arrays
-from .core import ACTION_DIM
+from .core import ACTION_DIM, _choose_policy_card_index_numba, _shuffle_deck_numba
 from .observation import (
     _action_id_to_hand_index_numba,
     _apply_numba_card_index,
     _apply_overkill_guard_numba,
     _argmax_mlp_policy_action_numba,
+    _record_mlp_policy_decision_numba,
+    _trump_overkill_penalty_numba,
     encode_fast_observation_arrays_numba,
 )
+from .types import NumbaA2CBatch, NumbaA2CTrajectory
 
 _MAX_DECK_SIZE_2P = 34
 _HAND_CAPACITY_2P = 3
 _TABLE_CAPACITY_2P = 2
+OPPONENT_MODE_RULE = 0
+OPPONENT_MODE_MODEL = 1
+OPPONENT_MODE_VALUE_LOOKAHEAD = 2
 
 
 def arrays_from_game_state_for_value_lookahead(
@@ -541,4 +548,976 @@ def warm_up_numba_value_lookahead() -> None:
         seen_cards,
         out_of_play_cards,
         True,
+    )
+
+
+def _as_float32_matrix(name: str, value: np.ndarray) -> np.ndarray:
+    """Normalizza un peso 2D a float32 contiguo."""
+    arr = np.asarray(value, dtype=np.float32)
+    if arr.ndim != 2:
+        raise ValueError(f"{name} deve essere una matrice 2D, ottenuto shape={arr.shape}")
+    return np.ascontiguousarray(arr)
+
+
+def _as_float32_vector(name: str, value: np.ndarray) -> np.ndarray:
+    """Normalizza un vettore 1D a float32 contiguo."""
+    arr = np.asarray(value, dtype=np.float32)
+    if arr.ndim != 1:
+        raise ValueError(f"{name} deve essere un vettore 1D, ottenuto shape={arr.shape}")
+    return np.ascontiguousarray(arr)
+
+
+def _overkill_penalty_mode_code(mode: str) -> int:
+    """Codifica la modalità reward shaping anti-overkill per il core JIT."""
+    normalized = str(mode).strip().lower()
+    if normalized == "flat":
+        return 0
+    if normalized == "gap":
+        return 1
+    raise ValueError(f"overkill_penalty_mode non supportato: {mode!r}")
+
+
+def _validate_a2c_value_lookahead_inputs(
+    *,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+) -> tuple[np.ndarray, ...]:
+    """Valida e normalizza i tensori necessari al collector value-lookahead."""
+    w1_arr = _as_float32_matrix("w1", w1)
+    b1_arr = _as_float32_vector("b1", b1)
+    w2_arr = _as_float32_matrix("w2", w2)
+    b2_arr = _as_float32_vector("b2", b2)
+    wv_arr = _as_float32_vector("wv", wv)
+    opponent_w1_arr = _as_float32_matrix("opponent_w1", opponent_w1)
+    opponent_b1_arr = _as_float32_vector("opponent_b1", opponent_b1)
+    opponent_w2_arr = _as_float32_matrix("opponent_w2", opponent_w2)
+    opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
+    value_w1_arr = _as_float32_matrix("value_w1", value_w1)
+    value_b1_arr = _as_float32_vector("value_b1", value_b1)
+    value_w2_arr = _as_float32_vector("value_w2", value_w2)
+
+    feature_dim = int(w1_arr.shape[0])
+    hidden_dim = int(w1_arr.shape[1])
+    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        raise ValueError(
+            f"w1 feature_dim={feature_dim}; "
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+        )
+    if b1_arr.shape != (hidden_dim,):
+        raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
+    if w2_arr.shape != (hidden_dim, ACTION_DIM):
+        raise ValueError(f"w2 shape={w2_arr.shape}; atteso {(hidden_dim, ACTION_DIM)}")
+    if b2_arr.shape != (ACTION_DIM,):
+        raise ValueError(f"b2 shape={b2_arr.shape}; atteso {(ACTION_DIM,)}")
+    if wv_arr.shape != (hidden_dim,):
+        raise ValueError(f"wv shape={wv_arr.shape}; atteso {(hidden_dim,)}")
+
+    opponent_feature_dim = int(opponent_w1_arr.shape[0])
+    opponent_hidden_dim = int(opponent_w1_arr.shape[1])
+    if opponent_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        raise ValueError(
+            f"opponent_w1 feature_dim={opponent_feature_dim}; "
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+        )
+    if opponent_b1_arr.shape != (opponent_hidden_dim,):
+        raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opponent_hidden_dim,)}")
+    if opponent_w2_arr.shape != (opponent_hidden_dim, ACTION_DIM):
+        raise ValueError(f"opponent_w2 shape={opponent_w2_arr.shape}; atteso {(opponent_hidden_dim, ACTION_DIM)}")
+    if opponent_b2_arr.shape != (ACTION_DIM,):
+        raise ValueError(f"opponent_b2 shape={opponent_b2_arr.shape}; atteso {(ACTION_DIM,)}")
+
+    value_hidden_dim = int(value_w1_arr.shape[1])
+    if int(value_w1_arr.shape[0]) != int(opponent_w1_arr.shape[0]):
+        raise ValueError(
+            f"value_w1 feature_dim={int(value_w1_arr.shape[0])}; "
+            f"atteso feature_dim opponent={int(opponent_w1_arr.shape[0])}"
+        )
+    if value_b1_arr.shape != (value_hidden_dim,):
+        raise ValueError(f"value_b1 shape={value_b1_arr.shape}; atteso {(value_hidden_dim,)}")
+    if value_w2_arr.shape != (value_hidden_dim,):
+        raise ValueError(f"value_w2 shape={value_w2_arr.shape}; atteso {(value_hidden_dim,)}")
+
+    return (
+        w1_arr,
+        b1_arr,
+        w2_arr,
+        b2_arr,
+        wv_arr,
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        value_w1_arr,
+        value_b1_arr,
+        value_w2_arr,
+    )
+
+
+@njit(cache=True)
+def _choose_training_opponent_card_index_numba(
+    opponent_mode: int,
+    opponent_code: int,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+    value_b2: float,
+    value_target_scale: float,
+    value_target_is_residual: bool,
+    value_max_unknown_cards: int,
+    opponent_overkill_guard: bool,
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    points: np.ndarray,
+    deck: np.ndarray,
+    deck_size: int,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    table_size: int,
+    current_turn: int,
+    trump_card: int,
+    seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
+) -> int:
+    """Dispatch dell'avversario nel collector A2C con supporto V-lookahead determinized."""
+    if opponent_mode == OPPONENT_MODE_VALUE_LOOKAHEAD:
+        unknown_live_cards = int(hand_sizes[1 - current_turn]) + int(deck_size)
+        if deck_size == 0 or unknown_live_cards <= int(value_max_unknown_cards):
+            card_index, _score = choose_value_lookahead_card_numba_arrays(
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                value_w1,
+                value_b1,
+                value_w2,
+                value_b2,
+                value_target_scale,
+                value_target_is_residual,
+                hands,
+                hand_sizes,
+                points,
+                deck,
+                deck_size,
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+                seen_cards,
+                out_of_play_cards,
+                opponent_overkill_guard,
+            )
+            if 0 <= card_index < hand_sizes[current_turn]:
+                return int(card_index)
+
+        # Fuori finestra: stesso fallback MLP dell'agente runtime (solver gestito sopra a mazzo vuoto).
+        opponent_mode = OPPONENT_MODE_MODEL
+
+    if opponent_mode == OPPONENT_MODE_MODEL:
+        action_id = _argmax_mlp_policy_action_numba(
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            current_turn,
+            seen_cards,
+            out_of_play_cards,
+        )
+        action_id = _apply_overkill_guard_numba(
+            action_id,
+            hands,
+            hand_sizes,
+            current_turn,
+            table_cards,
+            table_players,
+            table_size,
+            trump_card,
+            opponent_overkill_guard,
+        )
+        return _action_id_to_hand_index_numba(hands, hand_sizes, current_turn, action_id)
+
+    return _choose_policy_card_index_numba(
+        opponent_code,
+        hands,
+        hand_sizes,
+        current_turn,
+        table_cards,
+        table_players,
+        table_size,
+        deck_size,
+        trump_card,
+        seen_cards,
+    )
+
+
+@njit(cache=True)
+def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_mode: int,
+    opponent_code: int,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+    value_b2: float,
+    value_target_scale: float,
+    value_target_is_residual: bool,
+    value_max_unknown_cards: int,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int,
+    overkill_penalty_mode_code: int,
+    seed: int,
+    policy_seat: int,
+    xs: np.ndarray,
+    z1s: np.ndarray,
+    hs: np.ndarray,
+    masks: np.ndarray,
+    probs: np.ndarray,
+    action_ids: np.ndarray,
+    value_preds: np.ndarray,
+    rewards: np.ndarray,
+) -> tuple[int, int, int, int, float]:
+    """
+    Raccoglie una partita A2C full-JIT contro opponent value-lookahead determinized.
+
+    La policy trainata resta anti-cheat: le sue osservazioni sono sempre encode da vista pubblica.
+    L'opponent avanzato, invece, usa lo stato determinizzato del rollout come una singola
+    determinizzazione: e' un avversario di training forte, non una replica bit-a-bit della UI.
+    """
+    shuffled = _shuffle_deck_numba(seed)
+
+    deck = np.empty(_MAX_DECK_SIZE_2P, dtype=np.int64)
+    hands = np.empty((2, _HAND_CAPACITY_2P), dtype=np.int64)
+    hand_sizes = np.zeros(2, dtype=np.int64)
+
+    deck_size_source = ACTION_DIM
+    for _ in range(3):
+        for player_index in range(2):
+            deck_size_source -= 1
+            hands[player_index, hand_sizes[player_index]] = shuffled[deck_size_source]
+            hand_sizes[player_index] += 1
+
+    deck_size_source -= 1
+    trump_card = shuffled[deck_size_source]
+    deck[0] = trump_card
+    for i in range(deck_size_source):
+        deck[i + 1] = shuffled[i]
+    deck_size = deck_size_source + 1
+
+    points = np.zeros(2, dtype=np.int64)
+    table_cards = np.empty(_TABLE_CAPACITY_2P, dtype=np.int64)
+    table_players = np.empty(_TABLE_CAPACITY_2P, dtype=np.int64)
+    table_size = 0
+    current_turn = 0
+    seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    seen_cards[trump_card] = 1
+    out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+
+    step_count = 0
+    entropy_sum = 0.0
+    safety = 5000
+    while safety > 0:
+        safety -= 1
+
+        while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
+            opp_card_index = _choose_training_opponent_card_index_numba(
+                opponent_mode,
+                opponent_code,
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                value_w1,
+                value_b1,
+                value_w2,
+                value_b2,
+                value_target_scale,
+                value_target_is_residual,
+                value_max_unknown_cards,
+                opponent_overkill_guard,
+                hands,
+                hand_sizes,
+                points,
+                deck,
+                deck_size,
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+                seen_cards,
+                out_of_play_cards,
+            )
+            deck_size, table_size, current_turn = _apply_numba_card_index(
+                hands,
+                hand_sizes,
+                points,
+                deck,
+                deck_size,
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+                opp_card_index,
+                seen_cards,
+                out_of_play_cards,
+            )
+
+        if hand_sizes[0] == 0 and hand_sizes[1] == 0:
+            break
+
+        diff_before = points[policy_seat] - points[1 - policy_seat]
+        action_id, value_pred, entropy = _record_mlp_policy_decision_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            wv,
+            bv,
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            policy_seat,
+            seen_cards,
+            out_of_play_cards,
+            xs,
+            z1s,
+            hs,
+            masks,
+            probs,
+            step_count,
+        )
+        policy_card_index = _action_id_to_hand_index_numba(hands, hand_sizes, current_turn, action_id)
+        action_ids[step_count] = action_id
+        value_preds[step_count] = value_pred
+        entropy_sum += entropy
+        extra_penalty = _trump_overkill_penalty_numba(
+            hands,
+            hand_sizes,
+            table_cards,
+            table_players,
+            table_size,
+            trump_card,
+            policy_seat,
+            policy_card_index,
+            overkill_penalty_beta,
+            overkill_low_lead_points_max,
+            overkill_penalty_mode_code,
+        )
+
+        deck_size, table_size, current_turn = _apply_numba_card_index(
+            hands,
+            hand_sizes,
+            points,
+            deck,
+            deck_size,
+            table_cards,
+            table_players,
+            table_size,
+            current_turn,
+            trump_card,
+            policy_card_index,
+            seen_cards,
+            out_of_play_cards,
+        )
+
+        while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
+            opp_card_index = _choose_training_opponent_card_index_numba(
+                opponent_mode,
+                opponent_code,
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                value_w1,
+                value_b1,
+                value_w2,
+                value_b2,
+                value_target_scale,
+                value_target_is_residual,
+                value_max_unknown_cards,
+                opponent_overkill_guard,
+                hands,
+                hand_sizes,
+                points,
+                deck,
+                deck_size,
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+                seen_cards,
+                out_of_play_cards,
+            )
+            deck_size, table_size, current_turn = _apply_numba_card_index(
+                hands,
+                hand_sizes,
+                points,
+                deck,
+                deck_size,
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+                opp_card_index,
+                seen_cards,
+                out_of_play_cards,
+            )
+
+        diff_after = points[policy_seat] - points[1 - policy_seat]
+        rewards[step_count] = float(diff_after - diff_before) / 120.0 + extra_penalty
+        step_count += 1
+
+    policy_points = points[policy_seat]
+    opponent_points = points[1 - policy_seat]
+    if policy_points > opponent_points:
+        winner_out = 0
+    elif opponent_points > policy_points:
+        winner_out = 1
+    else:
+        winner_out = -1
+    avg_entropy = entropy_sum / float(step_count) if step_count > 0 else 0.0
+    return (
+        int(policy_points),
+        int(opponent_points),
+        int(winner_out),
+        int(step_count),
+        float(avg_entropy),
+    )
+
+
+@njit(cache=True)
+def _collect_mlp_policy_value_lookahead_game_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_mode: int,
+    opponent_code: int,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+    value_b2: float,
+    value_target_scale: float,
+    value_target_is_residual: bool,
+    value_max_unknown_cards: int,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int,
+    overkill_penalty_mode_code: int,
+    seed: int,
+    policy_seat: int,
+) -> tuple[
+    int,
+    int,
+    int,
+    int,
+    float,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Wrapper JIT: alloca i buffer per una singola partita contro opponent value-aware."""
+    max_steps = 20
+    feature_dim = w1.shape[0]
+    hidden_dim = w1.shape[1]
+    xs = np.zeros((max_steps, feature_dim), dtype=np.float32)
+    z1s = np.zeros((max_steps, hidden_dim), dtype=np.float32)
+    hs = np.zeros((max_steps, hidden_dim), dtype=np.float32)
+    masks = np.zeros((max_steps, ACTION_DIM), dtype=np.bool_)
+    probs = np.zeros((max_steps, ACTION_DIM), dtype=np.float32)
+    action_ids = np.full(max_steps, -1, dtype=np.int64)
+    value_preds = np.zeros(max_steps, dtype=np.float32)
+    rewards = np.zeros(max_steps, dtype=np.float32)
+
+    policy_points, opponent_points, winner, step_count, avg_entropy = (
+        _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            wv,
+            bv,
+            opponent_mode,
+            opponent_code,
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            opponent_overkill_guard,
+            value_w1,
+            value_b1,
+            value_w2,
+            value_b2,
+            value_target_scale,
+            value_target_is_residual,
+            value_max_unknown_cards,
+            overkill_penalty_beta,
+            overkill_low_lead_points_max,
+            overkill_penalty_mode_code,
+            seed,
+            policy_seat,
+            xs,
+            z1s,
+            hs,
+            masks,
+            probs,
+            action_ids,
+            value_preds,
+            rewards,
+        )
+    )
+    return (
+        int(policy_points),
+        int(opponent_points),
+        int(winner),
+        int(step_count),
+        float(avg_entropy),
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    )
+
+
+@njit(cache=True, parallel=True)
+def _collect_mlp_policy_value_lookahead_batch_numba(
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_modes: np.ndarray,
+    opponent_codes: np.ndarray,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+    value_b2: float,
+    value_target_scale: float,
+    value_target_is_residual: bool,
+    value_max_unknown_cards: int,
+    overkill_penalty_beta: float,
+    overkill_low_lead_points_max: int,
+    overkill_penalty_mode_code: int,
+    game_seeds: np.ndarray,
+    policy_seats: np.ndarray,
+) -> tuple[
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+]:
+    """Batch full-JIT per training A2C contro opponent rule/model/value-lookahead."""
+    batch_size = game_seeds.shape[0]
+    max_steps = 20
+    feature_dim = w1.shape[0]
+    hidden_dim = w1.shape[1]
+
+    policy_points = np.zeros(batch_size, dtype=np.int64)
+    opponent_points = np.zeros(batch_size, dtype=np.int64)
+    winners = np.zeros(batch_size, dtype=np.int64)
+    step_counts = np.zeros(batch_size, dtype=np.int64)
+    avg_entropies = np.zeros(batch_size, dtype=np.float32)
+    xs = np.zeros((batch_size, max_steps, feature_dim), dtype=np.float32)
+    z1s = np.zeros((batch_size, max_steps, hidden_dim), dtype=np.float32)
+    hs = np.zeros((batch_size, max_steps, hidden_dim), dtype=np.float32)
+    masks = np.zeros((batch_size, max_steps, ACTION_DIM), dtype=np.bool_)
+    probs = np.zeros((batch_size, max_steps, ACTION_DIM), dtype=np.float32)
+    action_ids = np.full((batch_size, max_steps), -1, dtype=np.int64)
+    value_preds = np.zeros((batch_size, max_steps), dtype=np.float32)
+    rewards = np.zeros((batch_size, max_steps), dtype=np.float32)
+
+    for game_idx in prange(batch_size):
+        p_points, o_points, winner, steps, avg_entropy = _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
+            w1,
+            b1,
+            w2,
+            b2,
+            wv,
+            bv,
+            int(opponent_modes[game_idx]),
+            int(opponent_codes[game_idx]),
+            opponent_w1,
+            opponent_b1,
+            opponent_w2,
+            opponent_b2,
+            opponent_overkill_guard,
+            value_w1,
+            value_b1,
+            value_w2,
+            value_b2,
+            value_target_scale,
+            value_target_is_residual,
+            value_max_unknown_cards,
+            overkill_penalty_beta,
+            overkill_low_lead_points_max,
+            overkill_penalty_mode_code,
+            int(game_seeds[game_idx]),
+            int(policy_seats[game_idx]),
+            xs[game_idx],
+            z1s[game_idx],
+            hs[game_idx],
+            masks[game_idx],
+            probs[game_idx],
+            action_ids[game_idx],
+            value_preds[game_idx],
+            rewards[game_idx],
+        )
+        policy_points[game_idx] = p_points
+        opponent_points[game_idx] = o_points
+        winners[game_idx] = winner
+        step_counts[game_idx] = steps
+        avg_entropies[game_idx] = avg_entropy
+
+    return (
+        policy_points,
+        opponent_points,
+        winners,
+        step_counts,
+        avg_entropies,
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    )
+
+
+def collect_a2c_trajectory_numba_value_lookahead_2p(
+    *,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_mode: int,
+    opponent_code: int,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+    value_b2: float,
+    value_target_scale: float,
+    value_target_is_residual: bool,
+    value_max_unknown_cards: int,
+    game_seed: int,
+    policy_seat: int,
+    overkill_penalty_beta: float = 0.0,
+    overkill_low_lead_points_max: int = 2,
+    overkill_penalty_mode: str = "flat",
+) -> NumbaA2CTrajectory:
+    """Raccoglie una traiettoria A2C contro opponent rule/model/value-lookahead determinized."""
+    if policy_seat not in (0, 1):
+        raise ValueError(f"policy_seat fuori range: {policy_seat}")
+    if int(value_max_unknown_cards) < 0:
+        raise ValueError("value_max_unknown_cards deve essere >= 0")
+    if float(overkill_penalty_beta) < 0.0:
+        raise ValueError("overkill_penalty_beta deve essere >= 0")
+    if int(overkill_low_lead_points_max) < 0:
+        raise ValueError("overkill_low_lead_points_max deve essere >= 0")
+    if int(opponent_mode) not in {OPPONENT_MODE_RULE, OPPONENT_MODE_MODEL, OPPONENT_MODE_VALUE_LOOKAHEAD}:
+        raise ValueError(f"opponent_mode non supportato: {opponent_mode}")
+    mode_code = _overkill_penalty_mode_code(overkill_penalty_mode)
+    (
+        w1_arr,
+        b1_arr,
+        w2_arr,
+        b2_arr,
+        wv_arr,
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        value_w1_arr,
+        value_b1_arr,
+        value_w2_arr,
+    ) = _validate_a2c_value_lookahead_inputs(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
+        value_w1=value_w1,
+        value_b1=value_b1,
+        value_w2=value_w2,
+    )
+
+    (
+        policy_points,
+        opponent_points,
+        winner,
+        step_count,
+        avg_entropy,
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    ) = _collect_mlp_policy_value_lookahead_game_numba(
+        w1_arr,
+        b1_arr,
+        w2_arr,
+        b2_arr,
+        wv_arr,
+        float(bv),
+        int(opponent_mode),
+        int(opponent_code),
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        bool(opponent_overkill_guard),
+        value_w1_arr,
+        value_b1_arr,
+        value_w2_arr,
+        float(value_b2),
+        float(value_target_scale),
+        bool(value_target_is_residual),
+        int(value_max_unknown_cards),
+        float(overkill_penalty_beta),
+        int(overkill_low_lead_points_max),
+        int(mode_code),
+        int(game_seed),
+        int(policy_seat),
+    )
+    count = int(step_count)
+    return NumbaA2CTrajectory(
+        policy_points=int(policy_points),
+        opponent_points=int(opponent_points),
+        winner=int(winner),
+        avg_entropy=float(avg_entropy),
+        xs=xs[:count].copy(),
+        z1s=z1s[:count].copy(),
+        hs=hs[:count].copy(),
+        action_masks=masks[:count].copy(),
+        probs=probs[:count].copy(),
+        action_ids=action_ids[:count].copy(),
+        value_preds=value_preds[:count].copy(),
+        rewards=rewards[:count].copy(),
+    )
+
+
+def collect_a2c_batch_numba_value_lookahead_2p(
+    *,
+    w1: np.ndarray,
+    b1: np.ndarray,
+    w2: np.ndarray,
+    b2: np.ndarray,
+    wv: np.ndarray,
+    bv: float,
+    opponent_modes: np.ndarray,
+    opponent_codes: np.ndarray,
+    opponent_w1: np.ndarray,
+    opponent_b1: np.ndarray,
+    opponent_w2: np.ndarray,
+    opponent_b2: np.ndarray,
+    opponent_overkill_guard: bool,
+    value_w1: np.ndarray,
+    value_b1: np.ndarray,
+    value_w2: np.ndarray,
+    value_b2: float,
+    value_target_scale: float,
+    value_target_is_residual: bool,
+    value_max_unknown_cards: int,
+    game_seeds: np.ndarray,
+    policy_seats: np.ndarray,
+    overkill_penalty_beta: float = 0.0,
+    overkill_low_lead_points_max: int = 2,
+    overkill_penalty_mode: str = "flat",
+) -> NumbaA2CBatch:
+    """Raccoglie un batch A2C contro opponent rule/model/value-lookahead determinized."""
+    seeds_arr = np.asarray(game_seeds, dtype=np.int64)
+    seats_arr = np.asarray(policy_seats, dtype=np.int64)
+    modes_arr = np.asarray(opponent_modes, dtype=np.int64)
+    codes_arr = np.asarray(opponent_codes, dtype=np.int64)
+    if seeds_arr.ndim != 1:
+        raise ValueError(f"game_seeds deve essere 1D, ottenuto shape={seeds_arr.shape}")
+    if seats_arr.shape != seeds_arr.shape:
+        raise ValueError(f"Shape mismatch: policy_seats={seats_arr.shape} game_seeds={seeds_arr.shape}")
+    if modes_arr.shape != seeds_arr.shape:
+        raise ValueError(f"Shape mismatch: opponent_modes={modes_arr.shape} game_seeds={seeds_arr.shape}")
+    if codes_arr.shape != seeds_arr.shape:
+        raise ValueError(f"Shape mismatch: opponent_codes={codes_arr.shape} game_seeds={seeds_arr.shape}")
+    if not np.all((seats_arr == 0) | (seats_arr == 1)):
+        raise ValueError("policy_seats deve contenere solo 0/1")
+    if not np.all(
+        (modes_arr == OPPONENT_MODE_RULE)
+        | (modes_arr == OPPONENT_MODE_MODEL)
+        | (modes_arr == OPPONENT_MODE_VALUE_LOOKAHEAD)
+    ):
+        raise ValueError("opponent_modes contiene modalità non supportate")
+    if int(value_max_unknown_cards) < 0:
+        raise ValueError("value_max_unknown_cards deve essere >= 0")
+    if float(overkill_penalty_beta) < 0.0:
+        raise ValueError("overkill_penalty_beta deve essere >= 0")
+    if int(overkill_low_lead_points_max) < 0:
+        raise ValueError("overkill_low_lead_points_max deve essere >= 0")
+    mode_code = _overkill_penalty_mode_code(overkill_penalty_mode)
+    (
+        w1_arr,
+        b1_arr,
+        w2_arr,
+        b2_arr,
+        wv_arr,
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        value_w1_arr,
+        value_b1_arr,
+        value_w2_arr,
+    ) = _validate_a2c_value_lookahead_inputs(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=b2,
+        wv=wv,
+        opponent_w1=opponent_w1,
+        opponent_b1=opponent_b1,
+        opponent_w2=opponent_w2,
+        opponent_b2=opponent_b2,
+        value_w1=value_w1,
+        value_b1=value_b1,
+        value_w2=value_w2,
+    )
+
+    (
+        policy_points,
+        opponent_points,
+        winners,
+        step_counts,
+        avg_entropies,
+        xs,
+        z1s,
+        hs,
+        masks,
+        probs,
+        action_ids,
+        value_preds,
+        rewards,
+    ) = _collect_mlp_policy_value_lookahead_batch_numba(
+        w1_arr,
+        b1_arr,
+        w2_arr,
+        b2_arr,
+        wv_arr,
+        float(bv),
+        np.ascontiguousarray(modes_arr),
+        np.ascontiguousarray(codes_arr),
+        opponent_w1_arr,
+        opponent_b1_arr,
+        opponent_w2_arr,
+        opponent_b2_arr,
+        bool(opponent_overkill_guard),
+        value_w1_arr,
+        value_b1_arr,
+        value_w2_arr,
+        float(value_b2),
+        float(value_target_scale),
+        bool(value_target_is_residual),
+        int(value_max_unknown_cards),
+        float(overkill_penalty_beta),
+        int(overkill_low_lead_points_max),
+        int(mode_code),
+        np.ascontiguousarray(seeds_arr),
+        np.ascontiguousarray(seats_arr),
+    )
+    return NumbaA2CBatch(
+        policy_points=policy_points,
+        opponent_points=opponent_points,
+        winners=winners,
+        step_counts=step_counts,
+        avg_entropies=avg_entropies,
+        xs=xs,
+        z1s=z1s,
+        hs=hs,
+        action_masks=masks,
+        probs=probs,
+        action_ids=action_ids,
+        value_preds=value_preds,
+        rewards=rewards,
     )

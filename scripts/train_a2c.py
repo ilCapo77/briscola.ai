@@ -60,10 +60,19 @@ from briscola_ai.ai.fast.evaluation import FAST_EVALUATION_AGENT_NAMES, choose_f
 from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.fast.state_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.models.provisioning import VALUE_LOOKAHEAD_MODEL_ID
+from briscola_ai.ai.models.value_model import MLPValueModel, load_value_model_npz
 from briscola_ai.ai.numba.core import numba_agent_code
 from briscola_ai.ai.numba.mlp import collect_a2c_batch_numba_2p, collect_a2c_trajectory_numba_2p
 from briscola_ai.ai.numba.observation import encode_fast_observation_numba_2p
 from briscola_ai.ai.numba.types import NumbaA2CBatch, NumbaA2CTrajectory
+from briscola_ai.ai.numba.value_lookahead import (
+    OPPONENT_MODE_MODEL,
+    OPPONENT_MODE_RULE,
+    OPPONENT_MODE_VALUE_LOOKAHEAD,
+    collect_a2c_batch_numba_value_lookahead_2p,
+    collect_a2c_trajectory_numba_value_lookahead_2p,
+)
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
@@ -143,11 +152,36 @@ class OpponentPool:
 
 
 @dataclass(frozen=True, slots=True)
+class NamedAgentProxy:
+    """Proxy leggero: conserva un nome canonico per logging delegando le mosse a un agente reale."""
+
+    display_name: str
+    inner: Agent
+
+    @property
+    def name(self) -> str:
+        return self.display_name
+
+    def choose_card_index(self, observation, *, rng: random.Random) -> int:
+        return int(self.inner.choose_card_index(observation, rng=rng))
+
+
+@dataclass(frozen=True, slots=True)
 class FastNumbaModelOpponent:
     """Opponent MLP caricato da `.npz` per il rollout A2C Numba."""
 
     agent: BCModelAgent
     model: MLPBCModel
+
+
+@dataclass(frozen=True, slots=True)
+class FastNumbaValueLookaheadOpponent:
+    """Opponent value-lookahead determinized per `--rollout-engine fast --fast-rollout numba`."""
+
+    agent: BCModelAgent
+    model: MLPBCModel
+    value_model: MLPValueModel
+    max_unknown_cards: int = 8
 
 
 @dataclass
@@ -390,6 +424,55 @@ def _load_fast_numba_model_opponent(*, opponent_name: str, opponent_model_path: 
             f"{int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}."
         )
     return FastNumbaModelOpponent(agent=agent, model=agent.model)
+
+
+def _load_fast_numba_value_lookahead_opponent(
+    *,
+    opponent_model_path: str,
+    opponent_value_model_path: str,
+    max_unknown_cards: int,
+) -> FastNumbaValueLookaheadOpponent:
+    """
+    Carica l'opponent `bc_model_value_lookahead_8x8` per il rollout A2C Numba.
+
+    Nota: nel fast rollout questo opponent usa lo stato numerico determinizzato della partita
+    come singola determinizzazione. È pensato come avversario di training forte, non come replica
+    bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
+    """
+    if not opponent_model_path.strip():
+        raise ValueError("`bc_model_value_lookahead_8x8` nel fast rollout richiede `--opponent-model <policy.npz>`.")
+    value_path = opponent_value_model_path.strip()
+    if not value_path:
+        value_path = str(Path("data/models") / VALUE_LOOKAHEAD_MODEL_ID)
+
+    agent = build_agent("bc_model", model_path=Path(opponent_model_path.strip()))
+    if not isinstance(agent, BCModelAgent):
+        raise ValueError("`bc_model_value_lookahead_8x8` richiede una policy base BCModelAgent.")
+    if not isinstance(agent.model, MLPBCModel):
+        raise ValueError("Il fast rollout Numba supporta solo policy base `.npz` MLP (w1/b1/w2/b2).")
+    value_model = load_value_model_npz(Path(value_path))
+    if int(value_model.feature_dim) != int(agent.model.feature_dim):
+        raise ValueError(
+            "Value model non compatibile con policy opponent: "
+            f"value.feature_dim={int(value_model.feature_dim)} policy.feature_dim={int(agent.model.feature_dim)}."
+        )
+    if int(max_unknown_cards) < 0:
+        raise ValueError("--opponent-value-max-unknown-cards deve essere >= 0")
+    return FastNumbaValueLookaheadOpponent(
+        agent=agent,
+        model=agent.model,
+        value_model=value_model,
+        max_unknown_cards=int(max_unknown_cards),
+    )
+
+
+def _fast_numba_opponent_mode_for_name(name: str, *, value_lookahead_name: str | None) -> int:
+    """Codifica il tipo opponent per il collector A2C value-aware."""
+    if value_lookahead_name is not None and name == value_lookahead_name:
+        return OPPONENT_MODE_VALUE_LOOKAHEAD
+    if name in {"best_a2c", "bc_model"}:
+        return OPPONENT_MODE_MODEL
+    return OPPONENT_MODE_RULE
 
 
 def _numba_batch_trajectory_at(batch: NumbaA2CBatch, index: int) -> NumbaA2CTrajectory:
@@ -805,7 +888,22 @@ def main() -> int:
         "--opponent-model",
         default="",
         help=(
-            "Path al modello `.npz` quando `--opponent bc_model` (supportato nel rollout domain e fast-rollout numba)."
+            "Path al modello `.npz` quando `--opponent bc_model` o `bc_model_value_lookahead_8x8` "
+            "(supportato nel rollout domain e fast-rollout numba)."
+        ),
+    )
+    parser.add_argument(
+        "--opponent-value-model",
+        default=str(Path("data/models") / VALUE_LOOKAHEAD_MODEL_ID),
+        help=("Path al value model `.npz` quando l'opponent è `bc_model_value_lookahead_8x8` nel fast rollout Numba."),
+    )
+    parser.add_argument(
+        "--opponent-value-max-unknown-cards",
+        type=int,
+        default=8,
+        help=(
+            "Finestra dell'opponent value-lookahead nel fast rollout Numba: usa lookahead se "
+            "mano avversaria + mazzo <= questo valore; altrimenti fallback MLP."
         ),
     )
     parser.add_argument("--num-games", type=int, default=20000, help="Numero partite di training (2-player).")
@@ -946,6 +1044,8 @@ def main() -> int:
         raise ValueError("--bc-anchor-beta deve essere >= 0")
     if float(args.bc_anchor_beta) > 0.0 and not str(args.bc_anchor).strip():
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
+    if int(args.opponent_value_max_unknown_cards) < 0:
+        raise ValueError("--opponent-value-max-unknown-cards deve essere >= 0")
     rollout_engine = str(args.rollout_engine)
     fast_encoder = str(args.fast_encoder)
     fast_rollout = str(args.fast_rollout)
@@ -988,67 +1088,135 @@ def main() -> int:
 
     opponent_pool: OpponentPool | None = None
     fast_numba_model_opponent: FastNumbaModelOpponent | None = None
+    fast_numba_value_lookahead_opponent: FastNumbaValueLookaheadOpponent | None = None
     fast_numba_model_mix_name: str | None = None
+    fast_numba_value_mix_name: str | None = None
     opponent_mix_raw = args.opponent_mix.strip()
     if opponent_mix_raw:
         items = parse_opponent_mix(opponent_mix_raw)
         if rollout_engine == "fast":
             model_mix_names = [item.name for item in items if item.name in {"best_a2c", "bc_model"}]
+            value_mix_names = [item.name for item in items if item.name == "bc_model_value_lookahead_8x8"]
             unsupported = [
                 item.name
                 for item in items
                 if item.name not in FAST_EVALUATION_AGENT_NAMES
-                and not (fast_rollout == "numba" and item.name in {"best_a2c", "bc_model"})
+                and not (
+                    fast_rollout == "numba" and item.name in {"best_a2c", "bc_model", "bc_model_value_lookahead_8x8"}
+                )
             ]
             if unsupported:
                 supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
                 raise ValueError(
                     f"`--rollout-engine fast` supporta opponent mix con: {supported}; "
-                    "`best_a2c`/`bc_model` sono supportati solo con `--fast-rollout numba`. "
+                    "`best_a2c`/`bc_model`/`bc_model_value_lookahead_8x8` sono supportati solo "
+                    "con `--fast-rollout numba`. "
                     f"Non supportati: {unsupported}"
+                )
+            if value_mix_names and "best_a2c" in model_mix_names:
+                raise ValueError(
+                    "`bc_model_value_lookahead_8x8` in opponent mix può essere combinato con `bc_model` "
+                    "o baseline rule-based, ma non con `best_a2c`: il fast batch usa un solo set di pesi modello."
                 )
             if len(set(model_mix_names)) > 1:
                 raise ValueError(
                     "`--opponent-mix` fast Numba supporta al massimo un tipo di opponent modello "
                     "(`best_a2c` oppure `bc_model`) per batch."
                 )
+            if len(set(value_mix_names)) > 1:
+                raise ValueError("`--opponent-mix` contiene più varianti value-lookahead non supportate.")
+            if fast_rollout == "numba" and value_mix_names:
+                fast_numba_value_mix_name = value_mix_names[0]
+                fast_numba_value_lookahead_opponent = _load_fast_numba_value_lookahead_opponent(
+                    opponent_model_path=str(args.opponent_model),
+                    opponent_value_model_path=str(args.opponent_value_model),
+                    max_unknown_cards=int(args.opponent_value_max_unknown_cards),
+                )
             if fast_rollout == "numba" and model_mix_names:
                 fast_numba_model_mix_name = model_mix_names[0]
-                fast_numba_model_opponent = _load_fast_numba_model_opponent(
-                    opponent_name=fast_numba_model_mix_name,
-                    opponent_model_path=str(args.opponent_model),
-                )
+                if fast_numba_value_lookahead_opponent is not None and fast_numba_model_mix_name == "bc_model":
+                    fast_numba_model_opponent = FastNumbaModelOpponent(
+                        agent=fast_numba_value_lookahead_opponent.agent,
+                        model=fast_numba_value_lookahead_opponent.model,
+                    )
+                else:
+                    fast_numba_model_opponent = _load_fast_numba_model_opponent(
+                        opponent_name=fast_numba_model_mix_name,
+                        opponent_model_path=str(args.opponent_model),
+                    )
         agents_by_name = {}
         for item in items:
             if item.name == "bc_model":
-                if fast_numba_model_opponent is None or fast_numba_model_mix_name != "bc_model":
+                if fast_numba_model_opponent is None or (
+                    fast_numba_model_mix_name != "bc_model" and fast_numba_value_lookahead_opponent is None
+                ):
                     raise ValueError("`bc_model` in `--opponent-mix` richiede fast Numba e `--opponent-model`.")
-                agents_by_name[item.name] = fast_numba_model_opponent.agent
+                agents_by_name[item.name] = NamedAgentProxy(item.name, fast_numba_model_opponent.agent)
+            elif item.name == "bc_model_value_lookahead_8x8":
+                if rollout_engine == "fast":
+                    if fast_numba_value_lookahead_opponent is None:
+                        raise ValueError(
+                            "`bc_model_value_lookahead_8x8` in `--opponent-mix` richiede fast Numba, "
+                            "`--opponent-model` e `--opponent-value-model`."
+                        )
+                    agents_by_name[item.name] = NamedAgentProxy(
+                        item.name,
+                        fast_numba_value_lookahead_opponent.agent,
+                    )
+                else:
+                    if not str(args.opponent_model).strip():
+                        raise ValueError(
+                            "`bc_model_value_lookahead_8x8` in `--opponent-mix` richiede `--opponent-model <path.npz>`."
+                        )
+                    agents_by_name[item.name] = build_agent(
+                        item.name,
+                        model_path=Path(str(args.opponent_model).strip()),
+                    )
             else:
                 agents_by_name[item.name] = build_agent(item.name)
         opponent_pool = OpponentPool(items=items, agents_by_name=agents_by_name)
         opponent = agents_by_name[items[0].name]
     else:
         opponent_name = str(args.opponent)
-        if rollout_engine == "fast" and opponent_name in {"best_a2c", "bc_model"}:
+        if rollout_engine == "fast" and opponent_name == "bc_model_value_lookahead_8x8":
+            if fast_rollout != "numba":
+                raise ValueError("Opponent value-lookahead nel fast path richiede `--fast-rollout numba`.")
+            fast_numba_value_mix_name = opponent_name
+            fast_numba_value_lookahead_opponent = _load_fast_numba_value_lookahead_opponent(
+                opponent_model_path=str(args.opponent_model),
+                opponent_value_model_path=str(args.opponent_value_model),
+                max_unknown_cards=int(args.opponent_value_max_unknown_cards),
+            )
+            fast_numba_model_opponent = FastNumbaModelOpponent(
+                agent=fast_numba_value_lookahead_opponent.agent,
+                model=fast_numba_value_lookahead_opponent.model,
+            )
+            opponent = NamedAgentProxy(opponent_name, fast_numba_value_lookahead_opponent.agent)
+        elif rollout_engine == "fast" and opponent_name in {"best_a2c", "bc_model"}:
             if fast_rollout != "numba":
                 raise ValueError("Opponent `.npz` nel fast path richiede `--fast-rollout numba`.")
             fast_numba_model_opponent = _load_fast_numba_model_opponent(
                 opponent_name=opponent_name,
                 opponent_model_path=str(args.opponent_model),
             )
-            opponent = fast_numba_model_opponent.agent
+            opponent = NamedAgentProxy(opponent_name, fast_numba_model_opponent.agent)
         elif rollout_engine == "fast" and opponent_name not in FAST_EVALUATION_AGENT_NAMES:
             supported = ", ".join(sorted(FAST_EVALUATION_AGENT_NAMES))
             raise ValueError(
                 f"`--rollout-engine fast` supporta avversari fast-compatible ({supported}) "
-                "oppure `best_a2c`/`bc_model` con `--fast-rollout numba`. "
+                "oppure `best_a2c`/`bc_model`/`bc_model_value_lookahead_8x8` con `--fast-rollout numba`. "
                 f"Ottenuto: {args.opponent!r}"
             )
+        elif opponent_name == "bc_model_value_lookahead_8x8":
+            if not str(args.opponent_model).strip():
+                raise ValueError("`--opponent bc_model_value_lookahead_8x8` richiede `--opponent-model <path.npz>`.")
+            opponent = build_agent(opponent_name, model_path=Path(str(args.opponent_model).strip()))
         elif opponent_name == "bc_model":
             if not str(args.opponent_model).strip():
                 raise ValueError("`--opponent bc_model` richiede `--opponent-model <path.npz>`.")
-            opponent = build_agent("bc_model", model_path=Path(str(args.opponent_model).strip()))
+            opponent = NamedAgentProxy(
+                "bc_model", build_agent("bc_model", model_path=Path(str(args.opponent_model).strip()))
+            )
         else:
             opponent = build_agent(opponent_name)
 
@@ -1136,6 +1304,7 @@ def main() -> int:
 
     num_games = int(args.num_games)
     use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba"
+    use_value_lookahead_numba_rollout = use_numba_batch_rollout and fast_numba_value_lookahead_opponent is not None
     numba_batch: NumbaA2CBatch | None = None
     numba_batch_offset = 0
 
@@ -1196,6 +1365,15 @@ def main() -> int:
             "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
             "opponent": str(args.opponent) if not opponent_mix_raw else None,
             "opponent_model": str(args.opponent_model).strip() or None,
+            "opponent_value_model": (
+                str(args.opponent_value_model).strip() if fast_numba_value_lookahead_opponent is not None else None
+            ),
+            "opponent_value_max_unknown_cards": (
+                int(args.opponent_value_max_unknown_cards) if fast_numba_value_lookahead_opponent is not None else None
+            ),
+            "opponent_value_lookahead_rollout": (
+                "fast_numba_determinized" if use_value_lookahead_numba_rollout else None
+            ),
             "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
             "init": args.init.strip() or None,
             "encoder": f"encode_observation_2p:{encoder_version}",
@@ -1274,55 +1452,135 @@ def main() -> int:
                         )
                         opponent_codes = None
                         opponent_model_enabled_flags = None
+                        opponent_modes = None
                         if opponent_pool is not None:
                             sampled_names = [
                                 sample_opponent_name(opponent_pool.items, rng=rng_opponent_select)
                                 for _ in range(batch_size)
                             ]
-                            opponent_codes = np.asarray(
-                                [
-                                    0 if name == fast_numba_model_mix_name else numba_agent_code(name)
-                                    for name in sampled_names
-                                ],
-                                dtype=np.int64,
+                            if use_value_lookahead_numba_rollout:
+                                opponent_modes = np.asarray(
+                                    [
+                                        _fast_numba_opponent_mode_for_name(
+                                            name,
+                                            value_lookahead_name=fast_numba_value_mix_name,
+                                        )
+                                        for name in sampled_names
+                                    ],
+                                    dtype=np.int64,
+                                )
+                                opponent_codes = np.asarray(
+                                    [
+                                        numba_agent_code(name)
+                                        if _fast_numba_opponent_mode_for_name(
+                                            name,
+                                            value_lookahead_name=fast_numba_value_mix_name,
+                                        )
+                                        == OPPONENT_MODE_RULE
+                                        else 0
+                                        for name in sampled_names
+                                    ],
+                                    dtype=np.int64,
+                                )
+                            else:
+                                opponent_codes = np.asarray(
+                                    [
+                                        0 if name == fast_numba_model_mix_name else numba_agent_code(name)
+                                        for name in sampled_names
+                                    ],
+                                    dtype=np.int64,
+                                )
+                                opponent_model_enabled_flags = np.asarray(
+                                    [name == fast_numba_model_mix_name for name in sampled_names],
+                                    dtype=np.bool_,
+                                )
+                        if use_value_lookahead_numba_rollout:
+                            assert fast_numba_value_lookahead_opponent is not None
+                            value_model = fast_numba_value_lookahead_opponent.value_model
+                            if opponent_modes is None:
+                                mode = _fast_numba_opponent_mode_for_name(
+                                    current_opponent.name,
+                                    value_lookahead_name=fast_numba_value_mix_name,
+                                )
+                                opponent_modes = np.full(batch_size, mode, dtype=np.int64)
+                            if opponent_codes is None:
+                                code = (
+                                    numba_agent_code(current_opponent.name)
+                                    if int(opponent_modes[0]) == OPPONENT_MODE_RULE
+                                    else 0
+                                )
+                                opponent_codes = np.full(batch_size, code, dtype=np.int64)
+                            numba_batch = collect_a2c_batch_numba_value_lookahead_2p(
+                                w1=policy.w1,
+                                b1=policy.b1,
+                                w2=policy.w2,
+                                b2=policy.b2,
+                                wv=policy.wv,
+                                bv=float(policy.bv),
+                                opponent_modes=opponent_modes,
+                                opponent_codes=opponent_codes,
+                                opponent_w1=fast_numba_value_lookahead_opponent.model.w1,
+                                opponent_b1=fast_numba_value_lookahead_opponent.model.b1,
+                                opponent_w2=fast_numba_value_lookahead_opponent.model.w2,
+                                opponent_b2=fast_numba_value_lookahead_opponent.model.b2,
+                                opponent_overkill_guard=bool(
+                                    fast_numba_value_lookahead_opponent.agent.overkill_guard_enabled
+                                ),
+                                value_w1=value_model.w1,
+                                value_b1=value_model.b1,
+                                value_w2=value_model.w2,
+                                value_b2=float(value_model.b2),
+                                value_target_scale=float(value_model.metadata.get("target_scale", 120.0) or 120.0),
+                                value_target_is_residual=value_model.metadata.get("target") == "residual",
+                                value_max_unknown_cards=int(fast_numba_value_lookahead_opponent.max_unknown_cards),
+                                game_seeds=game_seeds,
+                                policy_seats=policy_seats,
+                                overkill_penalty_beta=float(args.overkill_penalty_beta),
+                                overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                                overkill_penalty_mode=str(args.overkill_penalty_mode),
                             )
-                            opponent_model_enabled_flags = np.asarray(
-                                [name == fast_numba_model_mix_name for name in sampled_names],
-                                dtype=np.bool_,
+                        else:
+                            numba_batch = collect_a2c_batch_numba_2p(
+                                w1=policy.w1,
+                                b1=policy.b1,
+                                w2=policy.w2,
+                                b2=policy.b2,
+                                wv=policy.wv,
+                                bv=float(policy.bv),
+                                opponent_name=current_opponent.name,
+                                opponent_w1=(
+                                    fast_numba_model_opponent.model.w1
+                                    if fast_numba_model_opponent is not None
+                                    else None
+                                ),
+                                opponent_b1=(
+                                    fast_numba_model_opponent.model.b1
+                                    if fast_numba_model_opponent is not None
+                                    else None
+                                ),
+                                opponent_w2=(
+                                    fast_numba_model_opponent.model.w2
+                                    if fast_numba_model_opponent is not None
+                                    else None
+                                ),
+                                opponent_b2=(
+                                    fast_numba_model_opponent.model.b2
+                                    if fast_numba_model_opponent is not None
+                                    else None
+                                ),
+                                opponent_overkill_guard=(
+                                    bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
+                                    if fast_numba_model_opponent is not None
+                                    else False
+                                ),
+                                game_seeds=game_seeds,
+                                policy_seats=policy_seats,
+                                opponent_codes=opponent_codes,
+                                opponent_model_enabled_flags=opponent_model_enabled_flags,
+                                overkill_penalty_beta=float(args.overkill_penalty_beta),
+                                overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                                overkill_penalty_mode=str(args.overkill_penalty_mode),
                             )
-                        numba_batch = collect_a2c_batch_numba_2p(
-                            w1=policy.w1,
-                            b1=policy.b1,
-                            w2=policy.w2,
-                            b2=policy.b2,
-                            wv=policy.wv,
-                            bv=float(policy.bv),
-                            opponent_name=current_opponent.name,
-                            opponent_w1=(
-                                fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None
-                            ),
-                            opponent_b1=(
-                                fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None
-                            ),
-                            opponent_w2=(
-                                fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None
-                            ),
-                            opponent_b2=(
-                                fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None
-                            ),
-                            opponent_overkill_guard=(
-                                bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
-                                if fast_numba_model_opponent is not None
-                                else False
-                            ),
-                            game_seeds=game_seeds,
-                            policy_seats=policy_seats,
-                            opponent_codes=opponent_codes,
-                            opponent_model_enabled_flags=opponent_model_enabled_flags,
-                            overkill_penalty_beta=float(args.overkill_penalty_beta),
-                            overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
-                            overkill_penalty_mode=str(args.overkill_penalty_mode),
-                        )
                         batch_grad_stats = _accumulate_numba_batch_grads(
                             policy=policy,
                             batch=numba_batch,
@@ -1349,37 +1607,75 @@ def main() -> int:
                     if numba_batch_offset >= int(numba_batch.step_counts.shape[0]):
                         numba_batch = None
                 else:
-                    numba_traj = collect_a2c_trajectory_numba_2p(
-                        w1=policy.w1,
-                        b1=policy.b1,
-                        w2=policy.w2,
-                        b2=policy.b2,
-                        wv=policy.wv,
-                        bv=float(policy.bv),
-                        opponent_name=current_opponent.name,
-                        opponent_w1=(
-                            fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None
-                        ),
-                        opponent_b1=(
-                            fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None
-                        ),
-                        opponent_w2=(
-                            fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None
-                        ),
-                        opponent_b2=(
-                            fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None
-                        ),
-                        opponent_overkill_guard=(
-                            bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
-                            if fast_numba_model_opponent is not None
-                            else False
-                        ),
-                        game_seed=game_seed,
-                        policy_seat=policy_seat,
-                        overkill_penalty_beta=float(args.overkill_penalty_beta),
-                        overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
-                        overkill_penalty_mode=str(args.overkill_penalty_mode),
-                    )
+                    if use_value_lookahead_numba_rollout:
+                        assert fast_numba_value_lookahead_opponent is not None
+                        value_model = fast_numba_value_lookahead_opponent.value_model
+                        mode = _fast_numba_opponent_mode_for_name(
+                            current_opponent.name,
+                            value_lookahead_name=fast_numba_value_mix_name,
+                        )
+                        code = numba_agent_code(current_opponent.name) if mode == OPPONENT_MODE_RULE else 0
+                        numba_traj = collect_a2c_trajectory_numba_value_lookahead_2p(
+                            w1=policy.w1,
+                            b1=policy.b1,
+                            w2=policy.w2,
+                            b2=policy.b2,
+                            wv=policy.wv,
+                            bv=float(policy.bv),
+                            opponent_mode=mode,
+                            opponent_code=code,
+                            opponent_w1=fast_numba_value_lookahead_opponent.model.w1,
+                            opponent_b1=fast_numba_value_lookahead_opponent.model.b1,
+                            opponent_w2=fast_numba_value_lookahead_opponent.model.w2,
+                            opponent_b2=fast_numba_value_lookahead_opponent.model.b2,
+                            opponent_overkill_guard=bool(
+                                fast_numba_value_lookahead_opponent.agent.overkill_guard_enabled
+                            ),
+                            value_w1=value_model.w1,
+                            value_b1=value_model.b1,
+                            value_w2=value_model.w2,
+                            value_b2=float(value_model.b2),
+                            value_target_scale=float(value_model.metadata.get("target_scale", 120.0) or 120.0),
+                            value_target_is_residual=value_model.metadata.get("target") == "residual",
+                            value_max_unknown_cards=int(fast_numba_value_lookahead_opponent.max_unknown_cards),
+                            game_seed=game_seed,
+                            policy_seat=policy_seat,
+                            overkill_penalty_beta=float(args.overkill_penalty_beta),
+                            overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                            overkill_penalty_mode=str(args.overkill_penalty_mode),
+                        )
+                    else:
+                        numba_traj = collect_a2c_trajectory_numba_2p(
+                            w1=policy.w1,
+                            b1=policy.b1,
+                            w2=policy.w2,
+                            b2=policy.b2,
+                            wv=policy.wv,
+                            bv=float(policy.bv),
+                            opponent_name=current_opponent.name,
+                            opponent_w1=(
+                                fast_numba_model_opponent.model.w1 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_b1=(
+                                fast_numba_model_opponent.model.b1 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_w2=(
+                                fast_numba_model_opponent.model.w2 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_b2=(
+                                fast_numba_model_opponent.model.b2 if fast_numba_model_opponent is not None else None
+                            ),
+                            opponent_overkill_guard=(
+                                bool(fast_numba_model_opponent.agent.overkill_guard_enabled)
+                                if fast_numba_model_opponent is not None
+                                else False
+                            ),
+                            game_seed=game_seed,
+                            policy_seat=policy_seat,
+                            overkill_penalty_beta=float(args.overkill_penalty_beta),
+                            overkill_low_lead_points_max=int(args.overkill_low_lead_points_max),
+                            overkill_penalty_mode=str(args.overkill_penalty_mode),
+                        )
                 numba_traj_for_backprop = None if use_numba_batch_rollout else numba_traj
                 traj = []
                 avg_entropy = float(numba_traj.avg_entropy)

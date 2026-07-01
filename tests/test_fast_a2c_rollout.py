@@ -58,6 +58,30 @@ def _write_dummy_mlp_model(path: Path, *, feature_dim: int = 248, hidden_dim: in
     )
 
 
+def _write_dummy_value_model(path: Path, *, feature_dim: int = 310, hidden_dim: int = 4) -> None:
+    """Scrive un piccolo value model MLP compatibile con `load_value_model_npz`."""
+    encoder_version = "v1"
+    if feature_dim == 288:
+        encoder_version = "v2"
+    elif feature_dim == 310:
+        encoder_version = "v3"
+    metadata = {
+        "format": "value_mlp_v1",
+        "feature_dim": feature_dim,
+        "encoder_version": encoder_version,
+        "target": "residual",
+        "target_scale": 120.0,
+    }
+    np.savez(
+        path,
+        w1=np.zeros((feature_dim, hidden_dim), dtype=np.float32),
+        b1=np.zeros((hidden_dim,), dtype=np.float32),
+        w2=np.zeros((hidden_dim,), dtype=np.float32),
+        b2=np.asarray([0.0], dtype=np.float32),
+        metadata_json=json.dumps(metadata),
+    )
+
+
 @pytest.mark.parametrize(
     ("fast_rollout", "fast_encoder"),
     [
@@ -360,6 +384,65 @@ def test_train_a2c_fast_numba_rollout_supports_v3_bc_model_in_opponent_mix(tmp_p
         {"name": "bc_model", "prob": 0.5},
         {"name": "random", "prob": 0.5},
     ]
+
+
+def test_train_a2c_fast_numba_rollout_supports_value_lookahead_opponent(tmp_path: Path) -> None:
+    """Il trainer A2C può usare il value-lookahead Numba come opponent fast determinizzato."""
+    out_path = tmp_path / "a2c_fast_numba_value_lookahead_smoke.npz"
+    opponent_path = tmp_path / "opponent_v3.npz"
+    value_path = tmp_path / "value_v3.npz"
+    _write_dummy_mlp_model(opponent_path, feature_dim=310)
+    _write_dummy_value_model(value_path, feature_dim=310)
+    script_path = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
+
+    subprocess.run(
+        [
+            sys.executable,
+            str(script_path),
+            "--out",
+            str(out_path),
+            "--encoder-version",
+            "v3",
+            "--rollout-engine",
+            "fast",
+            "--fast-rollout",
+            "numba",
+            "--opponent",
+            "bc_model_value_lookahead_8x8",
+            "--opponent-model",
+            str(opponent_path),
+            "--opponent-value-model",
+            str(value_path),
+            "--opponent-value-max-unknown-cards",
+            "8",
+            "--num-games",
+            "4",
+            "--seed",
+            "123",
+            "--hidden-dim",
+            "8",
+            "--update-every",
+            "2",
+            "--log-every",
+            "1",
+        ],
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+
+    assert out_path.exists()
+    with np.load(out_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+
+    assert metadata["encoder_version"] == "v3"
+    assert metadata["rollout_engine"] == "fast"
+    assert metadata["fast_rollout"] == "numba"
+    assert metadata["opponent"] == "bc_model_value_lookahead_8x8"
+    assert metadata["opponent_model"] == str(opponent_path)
+    assert metadata["opponent_value_model"] == str(value_path)
+    assert metadata["opponent_value_max_unknown_cards"] == 8
+    assert metadata["opponent_value_lookahead_rollout"] == "fast_numba_determinized"
 
 
 def test_train_a2c_saves_update_aligned_checkpoints(tmp_path: Path) -> None:

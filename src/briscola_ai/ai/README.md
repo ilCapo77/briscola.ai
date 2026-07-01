@@ -18,7 +18,7 @@ dover leggere subito i path ottimizzati.
 - `fast/`: motore 2-player mutabile in Python/NumPy per rollout veloci.
 - `numba/`: path JIT ad alto throughput. `core.py` contiene regole/euristiche numeriche,
   `observation.py` encoder e kernel condivisi, `value_lookahead.py` il core depth-1 su stati
-  numerici determinizzati, `mlp.py` wrapper MLP/A2C, `types.py` DTO.
+  numerici determinizzati e il collector A2C value-aware, `mlp.py` wrapper MLP/A2C, `types.py` DTO.
 
 ## Regola didattica
 
@@ -26,7 +26,9 @@ Il dominio canonico resta in `briscola_ai.domain`. Gli agenti ricevono sempre
 `PlayerObservation`, mai `GameState` completo, salvo moduli-oracolo espliciti come
 `endgame.solver`/`endgame.fast_solver` che sono usati solo dopo ricostruzione lecita dell'informazione.
 Il kernel `numba.value_lookahead` e' destinato a training/evaluation su stati gia' determinizzati:
-non campiona information set e non sostituisce l'agente runtime anti-cheat.
+non campiona information set e non sostituisce l'agente runtime anti-cheat. Quando e' usato come
+opponent in `train_a2c.py`, la policy candidata continua a ricevere solo feature da osservazione
+lecita; e' l'avversario di training a usare la determinizzazione numerica gia' presente nel rollout.
 
 ## Import
 
