@@ -441,6 +441,36 @@ Il vincolo attivo è il MAESTRO: la prossima leva è l'expert a tutta partita
 (value model v4 + lookahead dalla prima carta, nota §6), eventualmente con belief-weighted
 determinizations, per ridare pendenza al segnale di sparring.
 
+**Risultati capitolo "expert a tutta partita" (2026-07-03) — NEGATIVO, con curva dose-risposta.**
+Costruito e misurato: value model v4 full-game (dataset 50k partite × tutte le fasi, storia
+reale anche nelle etichette; MAE 14.1 vs baseline 16.2, sign 0.743), storia reale nelle
+simulazioni determinizzate del V-lookahead (kernel + runtime + determinize), finestra
+estendibile a tutta partita. Gate vs controllo v8+solver (400 partite, det 16):
+
+| Finestra (unknown) | Esito |
+|---|---|
+| 8 | **+1.80** (CI +0.86..+2.75) |
+| 12 | +0.57 n.s. |
+| 16 | −0.88 n.s. |
+| 22 | −2.56 |
+| 34 (tutta partita) | **−5.16** (CI −7.80..−2.51) |
+| 8 con value_v0 (v3) | +1.78 — identico a v1 |
+
+Diagnosi: a inizio/metà partita il valore di una posizione è dominato dal caso del mazzo
+(MAE ~14 punti è irriducibile lì); il depth-1 argmax su V rumorosa amplifica il rumore e
+perde dall'istinto della policy. Il V-lookahead funziona SOLO dove V è affidabile (finestra
+endgame), e lì le feature v4 non aggiungono nulla (la storia conta poco quando le carte
+viste dicono già quasi tutto). **Kill dell'expert full-game via value depth-1.**
+
+Conseguenza strategica: l'edge del maestro VL sul suo allievo si restringe per costruzione
+(+2.27 su v6 → +1.80 su v8): lo sparring contro VL(v8) comprerebbe ~+0.2-0.4. L'headroom
+DIMOSTRATO residuo è l'oracle PIMC 64×10 (+3.76, Fase 0.b): search a ROLLOUT (media sul
+rumore invece di fidarsi di una stima V), costosa. Strade per un eventuale prossimo ciclo:
+(a) PIMC-as-teacher nei kernel numba (rollout veloci esistono, serve l'orchestrazione);
+(b) investire sulla search RUNTIME del prodotto (l'avversario avanzato che i giocatori
+affrontano) invece che sul training della policy. Nota positiva collaterale: la storia
+reale nelle simulazioni VL rimuove la nota "base smemorata" della promozione v8.
+
 **Iterazione 2 — capacità, con warm start preservato.** Se l'iterazione 1 è positiva ma
 modesta, si allarga l'hidden (256/512) SENZA ripartire da zero (la Fase 0.c mostra che
 from-scratch costa −5.4): widening **net2net** (clonazione dei neuroni esistenti + rumore

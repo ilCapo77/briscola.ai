@@ -292,8 +292,12 @@ nello stesso giorno: capacità net2net 128→256 marginale (+0.18 confuso con un
 operatore in più); belief come input della policy NEGATIVA (−0.56 vs il proprio init:
 è informazione ridondante — funzione delle stesse feature v4 — e il gradiente che la
 insegue erode l'istinto). **Tutte le leve lato allievo sono esaurite: il vincolo è il
-maestro.** Prossimo passo: expert a tutta partita (value v4 + lookahead dalla prima
-carta, piano §6).
+maestro.** Il capitolo "expert a tutta
+partita" (2026-07-03) è stato costruito e misurato: NEGATIVO con curva dose-risposta
+pulita (finestra 8: +1.80; tutta partita: −5.16) — il depth-1 su V rumorosa perde
+dall'istinto della policy fuori dal finale, e il value v4 è identico al v3 nel suo regime
+(+1.80 vs +1.78). Kill. L'headroom dimostrato residuo è la search a rollout (oracle PIMC
++3.76): opzioni nel piano §6 (PIMC-as-teacher nei kernel, o search runtime del prodotto).
 
 **Promozione v8 (2026-07-03, release v0.22.0):** `best_a2c_v8.npz` = iter2-h256
 (encoder v4 + Net2Net 256, catena v7→pad v4→5M vs VL(v7)→widening→5M). Gate: vs v7
