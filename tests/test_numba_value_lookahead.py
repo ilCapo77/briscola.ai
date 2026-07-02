@@ -135,7 +135,7 @@ def test_value_lookahead_arrays_from_game_state_matches_public_observation_bits(
         points1=trick_points((Card(Suit.SWORDS, Rank.KING),)),
     )
 
-    *_, seen_cards, out_of_play_cards = arrays_from_game_state_for_value_lookahead(state)
+    *_, seen_cards, out_of_play_cards, _trick_hist, _num_tricks = arrays_from_game_state_for_value_lookahead(state)
     observation = make_player_observation(state, 0)
 
     assert seen_cards.tolist() == list(observation.seen_cards_onehot)

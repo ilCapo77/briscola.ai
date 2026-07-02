@@ -329,7 +329,13 @@ def main() -> int:
     parser.add_argument("--data", required=True, help="Dataset value-observation: JSONL canonico o .npz compatto")
     parser.add_argument("--out", required=True, help="Path del value model .npz da salvare")
     parser.add_argument(
-        "--encoder-version", choices=["v1", "v2", "v3"], default="v3", help="Versione encoder osservazioni (default v3)"
+        "--encoder-version",
+        choices=["v1", "v2", "v3", "v4"],
+        default="v3",
+        help=(
+            "Versione encoder osservazioni (default v3). Per dataset .npz pre-encodati "
+            "viene INFERITA dalla dimensione delle feature se incoerente col flag."
+        ),
     )
     parser.add_argument("--hidden-dim", type=int, default=128, help="Neuroni hidden layer della MLP (default 128)")
     parser.add_argument(
@@ -355,6 +361,19 @@ def main() -> int:
     loss_name: LossName = str(args.loss)  # type: ignore[assignment]
 
     dataset = load_value_dataset(data_path, encoder_version=encoder_version, target=target)
+    # Dataset .npz pre-encodato: la dimensione delle feature e' la verita'; se il flag
+    # non coincide, inferiamo la versione corretta (metadata coerenti nel modello salvato).
+    from briscola_ai.ai.encoding.observation_encoder import feature_dim_for_encoder_version
+
+    actual_dim = int(dataset.x.shape[1])
+    if actual_dim != int(feature_dim_for_encoder_version(encoder_version)):
+        for candidate in ("v1", "v2", "v3", "v4"):
+            if actual_dim == int(feature_dim_for_encoder_version(candidate)):  # type: ignore[arg-type]
+                print(f"encoder-version inferita dal dataset: {candidate} (feature_dim={actual_dim})")
+                encoder_version = candidate  # type: ignore[assignment]
+                break
+        else:
+            raise ValueError(f"feature_dim del dataset non riconosciuta: {actual_dim}")
     rng = np.random.default_rng(int(args.seed))
     n, d = dataset.x.shape
     idx = np.arange(n)

@@ -35,6 +35,7 @@ from .observation import (
     _record_mlp_policy_decision_numba,
     _trump_overkill_penalty_numba,
     encode_fast_observation_arrays_numba,
+    encode_fast_observation_arrays_v4_numba,
 )
 from .types import NumbaA2CBatch, NumbaA2CTrajectory
 
@@ -49,7 +50,20 @@ OPPONENT_MODE_VALUE_LOOKAHEAD = 2
 def arrays_from_game_state_for_value_lookahead(
     state: GameState,
 ) -> tuple[
-    np.ndarray, np.ndarray, np.ndarray, np.ndarray, int, np.ndarray, np.ndarray, int, int, int, np.ndarray, np.ndarray
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    int,
+    np.ndarray,
+    np.ndarray,
+    int,
+    int,
+    int,
+    np.ndarray,
+    np.ndarray,
+    np.ndarray,
+    int,
 ]:
     """
     Converte un `GameState` 2-player in array compatibili con il kernel V-lookahead.
@@ -100,6 +114,17 @@ def arrays_from_game_state_for_value_lookahead(
             seen_cards[card_id] = 1
             out_of_play_cards[card_id] = 1
 
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    num_tricks = min(len(state.trick_history), 20)
+    for index in range(num_tricks):
+        record = state.trick_history[index]
+        (lead_card, lead_player), (resp_card, _resp_player) = record.cards
+        trick_hist[index, 0] = card_to_id(lead_card)
+        trick_hist[index, 1] = int(lead_player)
+        trick_hist[index, 2] = card_to_id(resp_card)
+        trick_hist[index, 3] = int(record.winner_index)
+        trick_hist[index, 4] = int(record.points)
+
     return (
         hands,
         hand_sizes,
@@ -113,6 +138,8 @@ def arrays_from_game_state_for_value_lookahead(
         card_to_id(state.trump_card),
         seen_cards,
         out_of_play_cards,
+        trick_hist,
+        num_tricks,
     )
 
 
@@ -225,24 +252,43 @@ def _predict_value_points_numba(
     player_index: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
 ) -> float:
     """Forward del value model scalare in punti dal punto di vista di `player_index`."""
     feature_dim = value_w1.shape[0]
     hidden_dim = value_w1.shape[1]
-    features, _action_mask = encode_fast_observation_arrays_numba(
-        hands,
-        hand_sizes,
-        points,
-        table_cards,
-        table_size,
-        deck_size,
-        current_turn,
-        trump_card,
-        player_index,
-        seen_cards,
-        out_of_play_cards,
-        feature_dim,
-    )
+    if feature_dim == int(FEATURE_DIM_2P_V4):
+        features, _action_mask = encode_fast_observation_arrays_v4_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            player_index,
+            seen_cards,
+            out_of_play_cards,
+            trick_hist,
+            num_tricks,
+        )
+    else:
+        features, _action_mask = encode_fast_observation_arrays_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            player_index,
+            seen_cards,
+            out_of_play_cards,
+            feature_dim,
+        )
 
     raw = float(value_b2)
     for hidden_index in range(hidden_dim):
@@ -284,6 +330,8 @@ def choose_value_lookahead_card_numba_arrays(
     trump_card: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
     overkill_guard_enabled: bool,
 ) -> tuple[int, float]:
     """
@@ -328,11 +376,12 @@ def choose_value_lookahead_card_numba_arrays(
         ) = _copy_state_arrays(
             hands, hand_sizes, points, deck, table_cards, table_players, seen_cards, out_of_play_cards
         )
-        # Storia dummy per la simulazione determinizzata: i modelli qui dentro sono <= v3
-        # (la storia non entra nelle loro feature); serve solo a soddisfare il contratto
-        # di _apply/_argmax. Allocata per-candidato: il contatore riparte sempre da 0.
-        sim_trick_hist = np.zeros((20, 5), dtype=np.int64)
+        # Storia REALE copiata per-candidato: la simulazione la estende con le prese
+        # simulate, cosi' policy base e value model v4 giocano/valutano CON la memoria
+        # (le copie isolano i candidati tra loro e dallo stato radice).
+        sim_trick_hist = trick_hist.copy()
         sim_trick_count = np.zeros(1, dtype=np.int64)
+        sim_trick_count[0] = num_tricks
 
         candidate_deck_size, candidate_table_size, candidate_turn = _apply_numba_card_index(
             candidate_hands,
@@ -456,6 +505,8 @@ def choose_value_lookahead_card_numba_arrays(
                 leaf_player,
                 candidate_seen,
                 candidate_out_of_play,
+                sim_trick_hist,
+                sim_trick_count[0],
             )
             score = leaf_score if leaf_player == root_player else -leaf_score
 
@@ -558,6 +609,8 @@ def warm_up_numba_value_lookahead() -> None:
         20,
         seen_cards,
         out_of_play_cards,
+        np.zeros((20, 5), dtype=np.int64),
+        0,
         True,
     )
 
@@ -642,10 +695,16 @@ def _validate_a2c_value_lookahead_inputs(
 
     opponent_feature_dim = int(opponent_w1_arr.shape[0])
     opponent_hidden_dim = int(opponent_w1_arr.shape[1])
-    if opponent_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+    if opponent_feature_dim not in (
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+    ):
         raise ValueError(
             f"opponent_w1 feature_dim={opponent_feature_dim}; "
-            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
         )
     if opponent_b1_arr.shape != (opponent_hidden_dim,):
         raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opponent_hidden_dim,)}")
@@ -739,6 +798,8 @@ def _choose_training_opponent_card_index_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                num_tricks,
                 opponent_overkill_guard,
             )
             if 0 <= card_index < hand_sizes[current_turn]:

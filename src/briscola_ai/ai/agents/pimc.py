@@ -442,6 +442,9 @@ def determinize_observation(
         game_over=False,
         winner_index=None,
         winning_team=None,
+        # La storia delle prese e' informazione PUBBLICA dell'osservazione: va preservata
+        # nello stato determinizzato, cosi' policy/value v4 simulano CON la memoria reale.
+        trick_history=observation.trick_history,
     )
 
 
