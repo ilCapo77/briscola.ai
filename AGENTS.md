@@ -50,7 +50,7 @@ Deps di runtime per il cloud: `redis` (game store) e `psycopg` (event log Postgr
 
 ### Runtime & deploy (variabili d'ambiente)
 
-Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-replica) servono Redis + i provisioning. Il sito è live su `https://briscolaai.fastapicloud.dev`; l'entrypoint per `fastapi run` è lo shim `main:app` nella root.
+Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-replica) servono Redis + i provisioning. Il sito è live su `https://ai.briscola.dev`; l'entrypoint per `fastapi run` è lo shim `main:app` nella root.
 
 - `REDIS_URL` (o `BRISCOLA_REDIS_URL`): attiva `RedisGameSessionStore` + pub/sub realtime. Se assente → in-memory + WebSocket diretto.
 - `DATABASE_URL` (o `BRISCOLA_DATABASE_URL`): attiva l'event log su Postgres. Se assente → SQLite (`BRISCOLA_EVENT_DB_PATH`) o disabilitato.

@@ -6,7 +6,7 @@ nei commit, nei test e nei report.
 ## Stato Corrente
 
 - Versione progetto: `0.21.1`.
-- Produzione: <https://briscolaai.fastapicloud.dev>.
+- Produzione: <https://ai.briscola.dev>.
 - Modello consigliato: `best_a2c_v7.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
 - Default UI: `bc_model` + modello consigliato, cioè v7 puro. È la nuova policy `.npz` veloce promossa in v0.19.0.
 - Seconda scelta vicina nel menu: `bc_model_value_lookahead_8x8`, cioè modello selezionato (default v7) + solver

@@ -291,7 +291,7 @@ DATABASE_URL=... python scripts/export_ai_actions.py \
   --out ./data/prod_pimc_ai_actions.jsonl
 ```
 
-**Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://briscolaai.fastapicloud.dev>.
+**Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://ai.briscola.dev>.
 
 ### Simulazioni e self‑play (headless)
 
@@ -585,7 +585,7 @@ python scripts/evaluate_agents.py --benchmark medium --engine domain \
 
 ## Stato e roadmap
 
-Il gioco è **online** su <https://briscolaai.fastapicloud.dev> (deploy su FastAPI Cloud: stato partita su Redis, realtime via pub/sub, event log Postgres opzionale). Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
+Il gioco è **online** su <https://ai.briscola.dev> (deploy su FastAPI Cloud: stato partita su Redis, realtime via pub/sub, event log Postgres opzionale). Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
 
 ## Licenza
 
