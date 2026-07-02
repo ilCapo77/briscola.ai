@@ -680,6 +680,7 @@ async def meta() -> dict:
         "event_log_mode": mode,
         **event_log_runtime_metadata(),
         "dataset_requires_consent": mode == "dataset",
+        "debug_state_endpoint_enabled": _debug_state_endpoint_enabled(),
         "cors_allow_origins": cors_allow_origins,
     }
 

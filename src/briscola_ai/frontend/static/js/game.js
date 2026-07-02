@@ -69,8 +69,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
     const getState = () => store.getState();
 
-    // Metadati runtime del server (es. modalità raccolta dati).
-    let serverMeta = { dataset_requires_consent: false };
+    // Metadati runtime del server (es. modalità raccolta dati e debug full-state).
+    let serverMeta = { dataset_requires_consent: false, debug_state_endpoint_enabled: false };
 
     const loadAiAgentMetadata = async () => {
         try {
@@ -85,7 +85,7 @@ document.addEventListener('DOMContentLoaded', () => {
             });
         } catch (error) {
             // Se non riusciamo a caricare i meta, manteniamo la UI in modalità "no consent required".
-            serverMeta = { dataset_requires_consent: false };
+            serverMeta = { dataset_requires_consent: false, debug_state_endpoint_enabled: false };
             UI.setDataCollectionConsent({ required: false, description_it: '' });
         }
 
@@ -323,6 +323,12 @@ document.addEventListener('DOMContentLoaded', () => {
     const _setDebugPeekActive = (active) => {
         const next = active === true;
         if (debugPeekActive === next) return;
+
+        if (next && serverMeta?.debug_state_endpoint_enabled !== true) {
+            UI.showTurnMessage('Debug carte disabilitato su questo server');
+            return;
+        }
+
         debugPeekActive = next;
         debugPeekRequestId += 1;
 

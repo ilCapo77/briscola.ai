@@ -180,6 +180,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
     assert payload["event_log_backend"] is None
     assert payload["event_log_database_name"] is None
     assert payload["event_log_database_host"] is None
+    assert payload["debug_state_endpoint_enabled"] is False
 
     log = EventLog(EventLogConfig(path=str(tmp_path / "events.sqlite3")))
     server.app.state.event_log = log
@@ -211,6 +212,11 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
     payload2 = r2.json()
     assert payload2["event_log_mode"] == "debug"
     assert payload2["dataset_requires_consent"] is False
+
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
+    r3 = client.get("/meta")
+    assert r3.status_code == 200
+    assert r3.json()["debug_state_endpoint_enabled"] is True
 
 
 def test_create_game_requires_consent_in_dataset_mode(monkeypatch: pytest.MonkeyPatch) -> None:
