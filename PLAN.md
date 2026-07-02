@@ -225,14 +225,13 @@ Debito minore residuo dalla review v0.21.0 (nessuno è urgente; prenderli quando
 
 - DX script: `scripts/_common.py` come package (parser agent-spec e manifest condivisi) e `logging` al posto di
   `print` — unico asse della review rinviato per intero (churn alto, beneficio modesto);
-- dominio: validare `data["schema"]` in `game_state_from_dict`; fissare il tipo di `RULES_VERSION`; test sui path
-  d'errore (`who_wins_trick([])`, `id_to_card` fuori range, `step` a partita finita con `after == before`);
 - backend: test end-to-end del WebSocket attraverso l'app (subscriber + fan-out reveal/trick/refresh); gestione
-  riconnessione Redis a livello store; polling fallback UI senza backoff (700ms fissi);
-- AI: documentare/forzare l'assunzione "una istanza `PIMCAgent`/`ValueLookaheadAgent` per partita" (metrics mutabili
-  in dataclass frozen non thread-safe); RNG serial vs parallel non riproducibile cross-`workers` in
-  `decision_quality` (documentato ma footgun);
+  riconnessione Redis a livello store;
+- AI: RNG serial vs parallel non riproducibile cross-`workers` in `decision_quality` (documentato ma footgun);
 - frontend: zero test JS; CSS monolitico (883 righe).
+
+Chiusi come quick-win post-v0.21.0: validazione `schema` in `game_state_from_dict`, tipo di `RULES_VERSION`,
+test sui path d'errore del dominio, backoff sul polling UI, nota di concorrenza su PIMC/ValueLookahead.
 
 ### 4. Nuovo Modello Solo Con Nuova Ipotesi
 
