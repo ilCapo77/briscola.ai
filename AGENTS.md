@@ -100,6 +100,7 @@ Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Il b
 - **Documentation-first**: docstring chiare e dettagliate per moduli/classi/funzioni pubbliche (intento, input/output, invarianti).
 - **Commenting-first**: spiega logica non ovvia, edge case, e cosa asserisce ogni scenario di test.
 - **Agent communication**: per ogni iterazione spiega cosa è cambiato e perché in modo didattico (assunzioni, ragionamento, come verificare in locale).
+- **Comandi lunghi al maintainer**: i job che superano ~5 minuti (training, valutazioni grosse) NON vanno lanciati dall'agente restando in attesa. Prepara il comando ESATTO pronto da incollare, con output su file di log (`nohup ... > log 2>&1 &`) e i path degli artefatti attesi; indica cosa guardare nel log per capire l'esito e qual è il passo successivo. Il maintainer lo lancia quando vuole; l'agente riprende dai log/artefatti (anche in una sessione successiva) e registra i risultati in `PLAN.md`/`docs/plans/`.
 
 ## Testing
 
