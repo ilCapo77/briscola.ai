@@ -122,6 +122,14 @@ def _load_value_model_npz_uncached(path: Path) -> MLPValueModel:
         if fmt != "value_mlp_v1":
             raise ValueError(f"Formato value model non supportato: {fmt!r}")
 
+        # `target` cambia la SEMANTICA di `predict_points` (residuo da sommare al delta
+        # corrente vs delta assoluto): un modello senza questo metadato verrebbe interpretato
+        # silenziosamente come assoluto, corrompendo il value-lookahead senza alcun errore.
+        # Lo richiediamo esplicito, come già facciamo per `encoder_version`.
+        target = metadata.get("target")
+        if target not in {"residual", "absolute"}:
+            raise ValueError(f"Value model senza metadata.target valido: {target!r} (atteso 'residual' o 'absolute')")
+
         w1 = np.asarray(data["w1"], dtype=np.float32)
         b1 = np.asarray(data["b1"], dtype=np.float32)
         w2_raw = np.asarray(data["w2"], dtype=np.float32)

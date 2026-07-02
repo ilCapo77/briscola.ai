@@ -79,20 +79,31 @@ def _create_deck() -> list[Card]:
     return deck
 
 
-def new_game_state(num_players: int, player_names: Optional[list[str]] = None, *, seed: int = 0) -> GameState:
+def new_game_state(
+    num_players: int, player_names: Optional[list[str]] = None, *, seed: Optional[int] = None
+) -> GameState:
     """
     Crea uno stato iniziale pronto per giocare (shuffle + deal).
 
     Argomenti:
         num_players: 2 o 4
         player_names: lista nomi (default: Giocatore 1..N)
-        seed: seed per lo shuffle del mazzo (riproducibilità)
+        seed: seed per lo shuffle del mazzo. Se `None` (default) viene estratto un seed
+            casuale: chi ha bisogno di riproducibilità DEVE passarlo esplicitamente.
+
+    Nota sul default:
+    in passato il default era `seed=0`, cioè ogni chiamata senza seed produceva la STESSA
+    partita. Per una pipeline dati/self-play è un footgun silenzioso (dataset degeneri di
+    partite identiche senza alcun warning), quindi il default ora è la casualità esplicita.
     """
 
     import random
 
     if num_players not in (2, 4):
         raise ValueError("La Briscola supporta solo 2 o 4 giocatori")
+
+    if seed is None:
+        seed = random.SystemRandom().randrange(0, 2**32)
 
     is_team_game = num_players == 4
     teams = ((0, 2), (1, 3)) if is_team_game else None

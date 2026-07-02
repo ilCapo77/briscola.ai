@@ -5,6 +5,13 @@ Build the significant-model Excel report.
 The report is intentionally curated: it tracks official best models, one teacher
 model, and only the rejected candidates that explain an important decision. It
 does not try to dump every experiment under `benchmarks/experiments/`.
+
+Reproducibility note (important): this script reads LOCAL, gitignored artifacts —
+the `.npz` models in `data/models/` and the evaluation JSONs in
+`benchmarks/experiments/` and `data/`. The committed `docs/reports/model_progress.xlsx`
+is therefore a maintainer-curated artifact: it can only be regenerated on a machine
+that has those artifacts (the historical `.npz` files are tens of MB and are not
+tracked on purpose). CI and clean clones skip the tests that need these inputs.
 """
 
 from __future__ import annotations
