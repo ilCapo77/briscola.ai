@@ -296,8 +296,12 @@ maestro.** Il capitolo "expert a tutta
 partita" (2026-07-03) è stato costruito e misurato: NEGATIVO con curva dose-risposta
 pulita (finestra 8: +1.80; tutta partita: −5.16) — il depth-1 su V rumorosa perde
 dall'istinto della policy fuori dal finale, e il value v4 è identico al v3 nel suo regime
-(+1.80 vs +1.78). Kill. L'headroom dimostrato residuo è la search a rollout (oracle PIMC
-+3.76): opzioni nel piano §6 (PIMC-as-teacher nei kernel, o search runtime del prodotto).
+(+1.80 vs +1.78). Kill. L'headroom dimostrato residuo era la search a rollout: la strada
+(b) è stata eseguita e RILASCIATA (v0.23.0): nuovo avversario avanzato
+`bc_model_pimc_belief_64x10` (PIMC 64 det pesate dalla belief, finestra 10) — +3.66 vs
+v8+solver (CI +3.32..+4.00, 4k), contro il +2.12 del value-lookahead. La belief è in
+produzione nel suo ruolo giusto. Resta nel piano §6 la strada (a) (PIMC-as-teacher nei
+kernel numba) come eventuale prossimo ciclo di training.
 
 **Promozione v8 (2026-07-03, release v0.22.0):** `best_a2c_v8.npz` = iter2-h256
 (encoder v4 + Net2Net 256, catena v7→pad v4→5M vs VL(v7)→widening→5M). Gate: vs v7

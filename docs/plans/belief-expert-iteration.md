@@ -483,10 +483,16 @@ PIMC vs controllo v8+solver (400 partite, seed 42, ~73 ms/mossa pensata):
 
 La belief vale ~+0.8 nel suo posto naturale (pesare le determinizzazioni), e il rollout
 degrada con grazia dove la V collassava. Candidato prodotto: **avversario avanzato
-PIMC 64×10 belief su base v8** — più del doppio dell'edge dell'avanzato attuale, latenza
-compatibile col gioco umano. Prossimi passi (prossimo ciclo): conferma su 2-4k partite,
-head-to-head vs VL 16×8, provisioning belief (env BRISCOLA_BELIEF_MODEL_URL + asset),
-registry/catalogo/UI, release 0.23.0.
+PIMC 64×10 belief su base v8**.
+
+**CONFERMATO e RILASCIATO (v0.23.0, 2026-07-03).** Conferme su 4.000 partite seat-fair,
+stessi semi per entrambi i candidati vs controllo v8+solver:
+- `bc_model_pimc_belief_64x10`: **+3.66** (CI +3.32..+4.00), 0.267 s/partita;
+- VL 16×8 (avanzato precedente): +2.12 (CI +1.83..+2.41).
+CI disgiunte: il nuovo avanzato è più forte di ~+1.5 sull'attuale. In produzione come
+opzione selezionabile (`bc_model_pimc_belief_64x10`), belief provisionata via
+`BRISCOLA_BELIEF_MODEL_URL/SHA256`. La belief network è così arrivata in produzione
+nel suo ruolo giusto: pesare i mondi simulati, non imboccare la policy.
 
 **Iterazione 2 — capacità, con warm start preservato.** Se l'iterazione 1 è positiva ma
 modesta, si allarga l'hidden (256/512) SENZA ripartire da zero (la Fase 0.c mostra che
