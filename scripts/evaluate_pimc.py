@@ -18,6 +18,7 @@ from briscola_ai.ai.agents import PIMCAgent
 from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
 from briscola_ai.ai.evaluation.round_robin import seat_fair_avg_point_diff_ci, seat_fair_score_rate_ci
 from briscola_ai.ai.models import BCModelAgent
+from briscola_ai.ai.models.belief_model import load_belief_model_npz
 
 
 def main() -> int:
@@ -67,18 +68,33 @@ def main() -> int:
         default=None,
         help="Soglia carte ignote dell'opponent `pimc`. Default: stesso valore di --max-unknown-cards.",
     )
+    parser.add_argument(
+        "--belief-model",
+        default="",
+        help="Belief model .npz per l'agente A: determinizzazioni pesate invece che uniformi (Fase 2).",
+    )
+    parser.add_argument(
+        "--belief-uniform-mix",
+        type=float,
+        default=0.10,
+        help="Frazione di uniforme mescolata ai pesi belief (pavimento anti punti-ciechi). Default: 0.10.",
+    )
     parser.add_argument("--out-json", default="", help="Path JSON opzionale per salvare il risultato.")
 
     args = parser.parse_args()
     model_path = Path(args.model)
     model_agent = BCModelAgent.from_npz(model_path)
+    belief_model = load_belief_model_npz(args.belief_model) if args.belief_model.strip() else None
+    belief_label = f",belief={Path(args.belief_model).name},mix={args.belief_uniform_mix}" if belief_model else ""
     pimc_agent = PIMCAgent(
         rollout_agent=model_agent,
         fallback=model_agent,
         num_determinizations=args.determinizations,
         max_unknown_cards=args.max_unknown_cards,
         use_endgame_solver=not args.disable_endgame_solver,
-        name=f"pimc({model_path.name})",
+        belief_model=belief_model,
+        belief_uniform_mix=args.belief_uniform_mix,
+        name=f"pimc({model_path.name}{belief_label})",
     )
     if args.opponent == "control":
         opponent_determinizations = args.determinizations

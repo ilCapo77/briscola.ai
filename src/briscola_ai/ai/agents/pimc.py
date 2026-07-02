@@ -30,7 +30,9 @@ from ...domain.card_id import card_to_id, id_to_card
 from ...domain.engine import PlayCardAction, step
 from ...domain.observation import PlayerObservation, make_player_observation
 from ...domain.state import GameState, PlayerState
+from ..encoding.observation_encoder import encode_player_observation_2p
 from ..endgame.numba_solver import choose_endgame_card_numba
+from ..models.belief_model import MLPBeliefModel, infer_belief_encoder_version
 from .base import Agent, AgentSpec
 from .hybrid_endgame import reconstruct_endgame_state
 from .rule_based import HeuristicAgentV2
@@ -236,12 +238,106 @@ def _safe_agent_card_index(
     return 0
 
 
-def determinize_observation(observation: PlayerObservation, *, rng: random.Random) -> GameState:
+def belief_card_weights(
+    belief_model: MLPBeliefModel,
+    observation: PlayerObservation,
+    *,
+    uniform_mix: float = 0.10,
+) -> dict[int, float]:
+    """
+    Calcola i pesi per-carta con cui campionare la mano avversaria nelle determinizzazioni.
+
+    - encoda l'osservazione con l'encoder del belief model (tipicamente v4) e ne prende
+      le probabilità sigmoid per le sole carte IGNOTE (non in mano mia, non fuori gioco);
+    - mescola con l'uniforme (`uniform_mix`): una belief mal calibrata che assegna ~0 a una
+      carta che l'avversario ha davvero renderebbe quel mondo impossibile da campionare
+      (punto cieco sistematico); il mix garantisce un pavimento di esplorazione.
+
+    Anti-cheat: input = sola osservazione lecita; la rete è un'inferenza, non una lettura.
+    """
+    if not 0.0 <= float(uniform_mix) <= 1.0:
+        raise ValueError(f"uniform_mix fuori range: {uniform_mix}")
+
+    encoder_version = infer_belief_encoder_version(belief_model)
+    encoded = encode_player_observation_2p(observation, version=encoder_version)
+    import numpy as np  # import locale: pimc.py resta importabile senza numpy nel resto del modulo
+
+    probs = belief_model.predict_probs(np.asarray(encoded.features, dtype=np.float32))
+
+    my_hand_ids = {card_to_id(card) for card in observation.hand}
+    out_of_play_ids = {i for i, flag in enumerate(observation.out_of_play_cards_onehot) if flag}
+    unknown_ids = sorted(set(range(40)) - my_hand_ids - out_of_play_ids)
+    if not unknown_ids:
+        return {}
+
+    pool_probs = [max(float(probs[card_id]), 0.0) for card_id in unknown_ids]
+    total = sum(pool_probs)
+    n = len(unknown_ids)
+    mix = float(uniform_mix)
+    if total <= 0.0:
+        # Belief degenerata: pesi uniformi (equivale al comportamento storico).
+        return {card_id: 1.0 for card_id in unknown_ids}
+    return {
+        card_id: (1.0 - mix) * (p / total) + mix * (1.0 / n) for card_id, p in zip(unknown_ids, pool_probs, strict=True)
+    }
+
+
+def _weighted_sample_without_replacement(
+    pool: list[int],
+    k: int,
+    weights: dict[int, float],
+    rng: random.Random,
+) -> list[int]:
+    """
+    Campiona `k` elementi da `pool` senza rimpiazzo, con probabilità proporzionale ai pesi.
+
+    Schema "successive sampling": a ogni estrazione la probabilità è proporzionale al peso
+    residuo. È l'approssimazione standard della distribuzione condizionata sulle mani
+    (esatta per k=1, ottima in pratica per k piccolo come qui: 1-3 carte).
+
+    Robustezza: pesi mancanti/negativi valgono 0; se il totale residuo è 0 si degrada
+    all'uniforme sul resto del pool (mai un crash per una belief mal calibrata).
+    """
+    if k > len(pool):
+        raise ValueError(f"Campione richiesto ({k}) maggiore del pool ({len(pool)})")
+    candidates = list(pool)
+    residual = [max(float(weights.get(card_id, 0.0)), 0.0) for card_id in candidates]
+    chosen: list[int] = []
+    for _ in range(k):
+        total = sum(residual)
+        if total <= 0.0:
+            idx = rng.randrange(len(candidates))
+        else:
+            r = rng.random() * total
+            acc = 0.0
+            idx = len(candidates) - 1
+            for i, w in enumerate(residual):
+                acc += w
+                if r <= acc:
+                    idx = i
+                    break
+        chosen.append(candidates.pop(idx))
+        residual.pop(idx)
+    return chosen
+
+
+def determinize_observation(
+    observation: PlayerObservation,
+    *,
+    rng: random.Random,
+    card_weights: dict[int, float] | None = None,
+) -> GameState:
     """
     Campiona uno `GameState` completo compatibile con una `PlayerObservation`.
 
     Anti-cheat: usa solo mano osservata, tavolo, dimensioni mani, deck_size e carte fuori gioco
     pubbliche (`out_of_play_cards_onehot`). Non usa mai lo stato reale nascosto.
+
+    `card_weights` (opzionale, Fase 2 belief): pesi per card id con cui campionare la mano
+    avversaria invece dell'uniforme. I pesi vengono da una belief network allenata su self-play
+    (input = osservazione lecita), quindi restano anti-cheat: sono un'INFERENZA, non una lettura
+    dello stato nascosto. Con `None` il comportamento è identico allo storico (uniforme),
+    bit-per-bit a parità di rng.
     """
     _validate_pimc_observation(observation)
 
@@ -285,7 +381,12 @@ def determinize_observation(observation: PlayerObservation, *, rng: random.Rando
     if len(deck_forced_ids) > deck_size:
         raise ValueError("Deck size incoerente con la briscola pubblica")
 
-    opponent_hand_ids = set(rng.sample(sorted(opponent_pool), opponent_hand_size))
+    if card_weights is None:
+        opponent_hand_ids = set(rng.sample(sorted(opponent_pool), opponent_hand_size))
+    else:
+        opponent_hand_ids = set(
+            _weighted_sample_without_replacement(sorted(opponent_pool), opponent_hand_size, card_weights, rng)
+        )
     deck_rest_ids = list(opponent_pool - opponent_hand_ids)
     rng.shuffle(deck_rest_ids)
     if len(deck_rest_ids) != deck_size - len(deck_forced_ids):
@@ -406,6 +507,10 @@ class PIMCAgent:
     num_determinizations: int = 32
     max_unknown_cards: int = 10
     use_endgame_solver: bool = True
+    # Fase 2 (belief): se presente, le determinizzazioni campionano la mano avversaria
+    # con i pesi della belief network invece che uniformemente.
+    belief_model: MLPBeliefModel | None = None
+    belief_uniform_mix: float = 0.10
     name: str = "pimc"
     metrics: PIMCSearchStats = field(default_factory=PIMCSearchStats, repr=False, compare=False)
     last_search_diagnostics: PIMCSearchDiagnostics | None = field(
@@ -453,11 +558,14 @@ class PIMCAgent:
         local_failed_rollouts = 0
 
         determinizations = max(1, int(self.num_determinizations))
+        card_weights: dict[int, float] | None = None
+        if self.belief_model is not None:
+            card_weights = belief_card_weights(self.belief_model, observation, uniform_mix=self.belief_uniform_mix)
         try:
             for sample_index in range(determinizations):
                 sample_rng = random.Random(rng.randrange(0, 2**32) ^ (sample_index * 0x9E3779B9))
                 try:
-                    sampled_state = determinize_observation(observation, rng=sample_rng)
+                    sampled_state = determinize_observation(observation, rng=sample_rng, card_weights=card_weights)
                 except ValueError:
                     self.metrics.failed_determinizations += 1
                     local_failed_determinizations += 1

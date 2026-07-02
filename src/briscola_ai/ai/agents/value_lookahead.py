@@ -27,10 +27,11 @@ from ...domain.state import GameState
 from ..encoding.observation_encoder import encode_player_observation_2p
 from ..endgame.numba_solver import choose_endgame_card_numba
 from ..models.bc_model import apply_overkill_guard_second_hand
+from ..models.belief_model import MLPBeliefModel
 from ..models.value_model import MLPValueModel, infer_value_encoder_version
 from .base import Agent
 from .hybrid_endgame import reconstruct_endgame_state
-from .pimc import determinize_observation, rollout_to_terminal, unknown_live_card_count
+from .pimc import belief_card_weights, determinize_observation, rollout_to_terminal, unknown_live_card_count
 
 
 @dataclass(slots=True)
@@ -116,6 +117,9 @@ class ValueLookaheadAgent:
     num_determinizations: int = 8
     max_unknown_cards: int = 8
     overkill_guard_enabled: bool = True
+    # Fase 2 (belief): come in PIMCAgent, pesa le determinizzazioni con la belief network.
+    belief_model: MLPBeliefModel | None = None
+    belief_uniform_mix: float = 0.10
     name: str = "value_lookahead"
     metrics: ValueLookaheadStats = field(default_factory=ValueLookaheadStats)
 
@@ -168,11 +172,14 @@ class ValueLookaheadAgent:
 
         self.metrics.lookahead_decisions += 1
         started = time.perf_counter()
+        card_weights: dict[int, float] | None = None
+        if self.belief_model is not None:
+            card_weights = belief_card_weights(self.belief_model, observation, uniform_mix=self.belief_uniform_mix)
         try:
             for sample_idx in range(max(1, int(self.num_determinizations))):
                 sample_rng = random.Random(rng.randrange(0, 2**32) ^ (sample_idx * 0x9E3779B9))
                 try:
-                    sampled_state = determinize_observation(observation, rng=sample_rng)
+                    sampled_state = determinize_observation(observation, rng=sample_rng, card_weights=card_weights)
                 except ValueError:
                     self.metrics.failed_determinizations += 1
                     continue

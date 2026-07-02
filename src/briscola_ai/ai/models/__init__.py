@@ -1,6 +1,7 @@
 """Modelli addestrati e catalogo degli artefatti `.npz`."""
 
 from .bc_model import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
+from .belief_model import MLPBeliefModel, infer_belief_encoder_version, load_belief_model_npz
 from .catalog import (
     LocalModelSpec,
     get_models_dir_from_env,
@@ -24,6 +25,9 @@ __all__ = [
     "list_local_models",
     "load_bc_model_npz",
     "load_value_model_npz",
+    "MLPBeliefModel",
+    "infer_belief_encoder_version",
+    "load_belief_model_npz",
     "infer_value_encoder_version",
     "resolve_model_path",
     "validate_model_compatible_for_ui",
