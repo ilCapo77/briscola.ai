@@ -95,7 +95,7 @@ def main() -> int:
     # Split PER-PARTITA: ogni partita finisce interamente in train o in val.
     modulo = max(2, round(1.0 / max(args.val_frac, 1e-6)))
     is_val = (game_index % modulo) == 0
-    x_tr, y_tr, m_tr, k_tr = x[~is_val], y[~is_val], mask[~is_val], opp_hand_size[~is_val]
+    x_tr, y_tr, m_tr = x[~is_val], y[~is_val], mask[~is_val]
     x_va, y_va, m_va, k_va = x[is_val], y[is_val], mask[is_val], opp_hand_size[is_val]
     print(f"record: train={x_tr.shape[0]} val={x_va.shape[0]} | feature_dim={feature_dim}")
 
