@@ -56,7 +56,12 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.encoding.card_action_space import card_dto_to_action_id
-from briscola_ai.ai.encoding.observation_encoder import EncoderVersion, encode_observation_2p_with_version
+from briscola_ai.ai.encoding.observation_encoder import (
+    FEATURE_DIM_2P_V3,
+    FEATURE_DIM_2P_V4,
+    EncoderVersion,
+    encode_observation_2p_with_version,
+)
 from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
@@ -623,12 +628,13 @@ def main() -> int:
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
     parser.add_argument(
         "--encoder-version",
-        choices=["v1", "v2", "v3"],
+        choices=["v1", "v2", "v3", "v4"],
         default="v1",
         help=(
             "Versione encoder per observation 2-player. "
             "v1=istantaneo (248 dim), v2=v1 + seen_cards_onehot[40] (288 dim, storia pubblica), "
-            "v3=v2 + feature strategiche aggregate (310 dim, solo engine domain)."
+            "v3=v2 + feature strategiche aggregate (310 dim), "
+            "v4=v3 + storia ordinata/attribuita delle prese (369 dim; richiede trick_history nel dataset)."
         ),
     )
     parser.add_argument(
@@ -670,6 +676,15 @@ def main() -> int:
         "--init",
         default="",
         help="Warm-start da un modello `.npz` MLP compatibile (stesse feature); utile per fine-tuning da v6.",
+    )
+    parser.add_argument(
+        "--upgrade-init-v3-to-v4",
+        action="store_true",
+        help=(
+            "Se `--encoder-version v4` e `--init` e' un modello v3 (310 dim), estende w1 con "
+            "righe a zero per le 59 feature nuove: il modello iniziale e' ESATTAMENTE il v3 "
+            "di partenza e impara a usare la storia delle prese durante il fine-tuning."
+        ),
     )
     parser.add_argument(
         "--bc-anchor",
@@ -833,10 +848,28 @@ def main() -> int:
     if init_path:
         init_model = load_bc_model_npz(Path(init_path))
         if int(init_model.feature_dim) != int(d):
-            raise ValueError(
-                "Warm-start non compatibile con l'encoder corrente: "
-                f"init.feature_dim={int(init_model.feature_dim)} dataset.feature_dim={int(d)}."
-            )
+            if (
+                bool(args.upgrade_init_v3_to_v4)
+                and isinstance(init_model, MLPBCModel)
+                and int(init_model.feature_dim) == int(FEATURE_DIM_2P_V3)
+                and int(d) == int(FEATURE_DIM_2P_V4)
+            ):
+                # Upgrade v3 -> v4: pesi a zero sulle 59 feature nuove => il warm start
+                # riproduce esattamente il modello v3, poi il fine-tuning impara la storia.
+                pad = np.zeros((int(d) - int(init_model.feature_dim), init_model.w1.shape[1]), dtype=np.float32)
+                init_model = MLPBCModel(
+                    w1=np.vstack([init_model.w1, pad]).astype(np.float32),
+                    b1=init_model.b1.copy(),
+                    w2=init_model.w2.copy(),
+                    b2=init_model.b2.copy(),
+                    metadata=dict(init_model.metadata),
+                )
+            else:
+                raise ValueError(
+                    "Warm-start non compatibile con l'encoder corrente: "
+                    f"init.feature_dim={int(init_model.feature_dim)} dataset.feature_dim={int(d)}. "
+                    "Per v3 -> v4 puoi usare `--upgrade-init-v3-to-v4`."
+                )
 
     bc_anchor: LoadedBCModel | None = None
     if bc_anchor_path:

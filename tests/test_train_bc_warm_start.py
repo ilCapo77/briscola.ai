@@ -10,7 +10,7 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
 from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.backend.observation_builder import build_observation_dto
 from briscola_ai.domain.state import new_game_state
@@ -183,3 +183,72 @@ def test_train_bc_mlp_supports_init_and_anchor(tmp_path: Path) -> None:
     assert metadata["init"] == str(init_path)
     assert metadata["bc_anchor_path"] == str(init_path)
     assert metadata["bc_anchor_beta"] == 0.01
+
+
+def test_train_bc_upgrade_init_v3_to_v4(tmp_path: Path) -> None:
+    """
+    L'upgrade v3 -> v4 estende `w1` con righe a zero: il warm start parte ESATTAMENTE
+    dal modello v3 (le 59 feature nuove sono inerti) e il training v4 procede senza errori.
+    """
+    data_path = tmp_path / "tiny_v3.jsonl"
+    init_path = tmp_path / "init_v3.npz"
+    out_path = tmp_path / "bc_v4_warm.npz"
+    _write_tiny_v3_jsonl(data_path)
+    _write_tiny_mlp(init_path)
+
+    result = subprocess.run(
+        [
+            sys.executable,
+            str(_ROOT / "scripts" / "train_bc.py"),
+            "--data",
+            str(data_path),
+            "--out",
+            str(out_path),
+            "--encoder-version",
+            "v4",
+            "--model",
+            "mlp",
+            "--init",
+            str(init_path),
+            "--upgrade-init-v3-to-v4",
+            "--epochs",
+            "1",
+            "--batch-size",
+            "4",
+            "--val-frac",
+            "0.25",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(_ROOT),
+    )
+
+    assert result.returncode == 0, f"train_bc v4 fallito:\n{result.stdout}\n{result.stderr}"
+    agent = BCModelAgent.from_npz(out_path)
+    assert agent.encoder_version == "v4"
+    assert int(agent.model.feature_dim) == int(FEATURE_DIM_2P_V4)
+
+    # Senza il flag di upgrade il mismatch deve restare un errore esplicito.
+    result_no_flag = subprocess.run(
+        [
+            sys.executable,
+            str(_ROOT / "scripts" / "train_bc.py"),
+            "--data",
+            str(data_path),
+            "--out",
+            str(tmp_path / "no_flag.npz"),
+            "--encoder-version",
+            "v4",
+            "--model",
+            "mlp",
+            "--init",
+            str(init_path),
+            "--epochs",
+            "1",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=str(_ROOT),
+    )
+    assert result_no_flag.returncode != 0
+    assert "upgrade-init-v3-to-v4" in (result_no_flag.stderr + result_no_flag.stdout)
