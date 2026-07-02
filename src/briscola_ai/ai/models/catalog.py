@@ -31,7 +31,7 @@ from typing import Any
 
 import numpy as np
 
-from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
+from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
 from .bc_model import load_bc_model_npz
 
 
@@ -118,18 +118,27 @@ def validate_model_compatible_for_ui(path: Path) -> None:
       - v1 (248): observation "istantanea" (mano+tavolo+briscola+scalari)
       - v2 (288): v1 + `seen_cards_onehot[40]` (storia pubblica, card counting lecito)
       - v3 (310): v2 + feature strategiche aggregate (briscole/carichi ignoti, fase, presa corrente)
+      - v4 (369): v3 + memoria delle prese (aggregati comportamento avversario + ultime 4 prese)
+      - v4+belief (409): v4 + 40 probabilità della belief network embedded nell'artefatto
 
     Nota:
     se in futuro introduciamo encoder diversi (o 4-player), questa funzione dovrà considerare
     anche `metadata.encoder` e/o `metadata.num_players`.
     """
     model = load_bc_model_npz(path)
-    supported = {int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)}
+    supported = {
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+        int(FEATURE_DIM_2P_V4) + 40,  # policy con belief embedded (il loader valida le chiavi belief_*)
+    }
     if int(model.feature_dim) not in supported:
         raise ValueError(
             "Model feature_dim mismatch: "
             f"model={int(model.feature_dim)} expected={int(FEATURE_DIM_2P_V1)} (v1), "
-            f"{int(FEATURE_DIM_2P_V2)} (v2) or {int(FEATURE_DIM_2P_V3)} (v3)."
+            f"{int(FEATURE_DIM_2P_V2)} (v2), {int(FEATURE_DIM_2P_V3)} (v3), "
+            f"{int(FEATURE_DIM_2P_V4)} (v4) o {int(FEATURE_DIM_2P_V4) + 40} (v4+belief)."
         )
 
 

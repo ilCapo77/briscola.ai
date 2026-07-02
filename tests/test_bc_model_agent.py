@@ -236,6 +236,46 @@ def test_bc_model_cache_invalidated_when_file_changes(tmp_path: Path) -> None:
     assert a2.model is not a1.model  # file cambiato => riletto
 
 
+def test_validate_for_ui_accepts_v4_and_v4_belief_models(tmp_path: Path) -> None:
+    """
+    Regressione promozione v8: il validatore UI deve accettare encoder v4 (369) e
+    policy con belief embedded (409). Il bug originale whitelist-ava solo v1-v3 e il
+    modello promosso appariva "NON COMPATIBILE" nel menu della UI.
+    """
+    import json
+
+    import numpy as np
+
+    from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
+    from briscola_ai.ai.models import validate_model_compatible_for_ui
+
+    rng = np.random.default_rng(0)
+
+    def _write_mlp(path: Path, feature_dim: int, with_belief: bool) -> None:
+        arrays = {
+            "w1": rng.normal(0, 0.05, size=(feature_dim, 4)).astype(np.float32),
+            "b1": np.zeros(4, dtype=np.float32),
+            "w2": rng.normal(0, 0.05, size=(4, 40)).astype(np.float32),
+            "b2": np.zeros(40, dtype=np.float32),
+        }
+        if with_belief:
+            arrays.update(
+                belief_w1=rng.normal(0, 0.05, size=(FEATURE_DIM_2P_V4, 4)).astype(np.float32),
+                belief_b1=np.zeros(4, dtype=np.float32),
+                belief_w2=rng.normal(0, 0.05, size=(4, 40)).astype(np.float32),
+                belief_b2=np.zeros(40, dtype=np.float32),
+            )
+        np.savez(path, **arrays, metadata_json=json.dumps({"format": "mlp_bc_v1", "encoder_version": "v4"}))
+
+    v4_path = tmp_path / "v4.npz"
+    _write_mlp(v4_path, int(FEATURE_DIM_2P_V4), with_belief=False)
+    validate_model_compatible_for_ui(v4_path)  # non deve sollevare
+
+    v4b_path = tmp_path / "v4_belief.npz"
+    _write_mlp(v4b_path, int(FEATURE_DIM_2P_V4) + 40, with_belief=True)
+    validate_model_compatible_for_ui(v4b_path)  # non deve sollevare
+
+
 def test_validate_for_ui_shares_cache_with_from_npz(tmp_path: Path) -> None:
     """La validazione UI e `from_npz` usano lo stesso `load_bc_model_npz` cacheato (no doppia lettura)."""
     from briscola_ai.ai.models import load_bc_model_npz, validate_model_compatible_for_ui
