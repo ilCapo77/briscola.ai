@@ -471,6 +471,23 @@ rumore invece di fidarsi di una stima V), costosa. Strade per un eventuale pross
 affrontano) invece che sul training della policy. Nota positiva collaterale: la storia
 reale nelle simulazioni VL rimuove la nota "base smemorata" della promozione v8.
 
+**Sonde search-a-rollout su base v8 (2026-07-03) — la strada (b) è validata.**
+PIMC vs controllo v8+solver (400 partite, seed 42, ~73 ms/mossa pensata):
+
+| Config | Esito |
+|---|---|
+| PIMC 64×10 uniforme | +3.03 (CI +1.98..+4.08) |
+| **PIMC 64×10 belief-weighted** | **+3.83 (CI +2.74..+4.92)** |
+| PIMC 64×14 belief | +3.33 (finestra più larga non paga) |
+| (riferimento: VL 16×8, avversario avanzato attuale) | +1.80 |
+
+La belief vale ~+0.8 nel suo posto naturale (pesare le determinizzazioni), e il rollout
+degrada con grazia dove la V collassava. Candidato prodotto: **avversario avanzato
+PIMC 64×10 belief su base v8** — più del doppio dell'edge dell'avanzato attuale, latenza
+compatibile col gioco umano. Prossimi passi (prossimo ciclo): conferma su 2-4k partite,
+head-to-head vs VL 16×8, provisioning belief (env BRISCOLA_BELIEF_MODEL_URL + asset),
+registry/catalogo/UI, release 0.23.0.
+
 **Iterazione 2 — capacità, con warm start preservato.** Se l'iterazione 1 è positiva ma
 modesta, si allarga l'hidden (256/512) SENZA ripartire da zero (la Fase 0.c mostra che
 from-scratch costa −5.4): widening **net2net** (clonazione dei neuroni esistenti + rumore
