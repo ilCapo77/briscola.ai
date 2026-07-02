@@ -35,6 +35,7 @@ def _provision_startup_models() -> list[str]:
     """
     from .ai.models import (
         DEFAULT_MODEL_ID,
+        PIMC_BELIEF_MODEL_ID,
         VALUE_LOOKAHEAD_MODEL_ID,
         ensure_model_available,
         get_models_dir_from_env,
@@ -62,6 +63,18 @@ def _provision_startup_models() -> list[str]:
             url_env_name="BRISCOLA_VALUE_MODEL_URL",
         )
         messages.append(f"Value model provisioning: {value_msg}")
+
+    belief_url = os.getenv("BRISCOLA_BELIEF_MODEL_URL")
+    belief_sha256 = os.getenv("BRISCOLA_BELIEF_MODEL_SHA256")
+    if belief_url or belief_sha256:
+        _, belief_msg = ensure_model_available(
+            models_dir=models_dir,
+            model_id=PIMC_BELIEF_MODEL_ID,
+            url=belief_url,
+            sha256=belief_sha256,
+            url_env_name="BRISCOLA_BELIEF_MODEL_URL",
+        )
+        messages.append(f"Belief model provisioning: {belief_msg}")
 
     return messages
 
@@ -216,7 +229,7 @@ async def version_info():
     Utile in cloud per verificare che il modello consigliato sia risolvibile nella directory modelli
     effettiva (che dipende da `BRISCOLA_MODELS_DIR` o dalla working directory).
     """
-    from .ai.models import DEFAULT_MODEL_ID, VALUE_LOOKAHEAD_MODEL_ID, get_models_dir_from_env
+    from .ai.models import DEFAULT_MODEL_ID, PIMC_BELIEF_MODEL_ID, VALUE_LOOKAHEAD_MODEL_ID, get_models_dir_from_env
     from .versioning import get_rules_version
 
     models_dir = get_models_dir_from_env()
@@ -230,6 +243,8 @@ async def version_info():
         "recommended_model_present": (models_dir / recommended_model).exists(),
         "value_lookahead_model": VALUE_LOOKAHEAD_MODEL_ID,
         "value_lookahead_model_present": (models_dir / VALUE_LOOKAHEAD_MODEL_ID).exists(),
+        "pimc_belief_model": PIMC_BELIEF_MODEL_ID,
+        "pimc_belief_model_present": (models_dir / PIMC_BELIEF_MODEL_ID).exists(),
         **backend_server.event_log_runtime_metadata(),
     }
 

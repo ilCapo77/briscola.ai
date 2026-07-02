@@ -9,7 +9,12 @@ from .catalog import (
     resolve_model_path,
     validate_model_compatible_for_ui,
 )
-from .provisioning import DEFAULT_MODEL_ID, VALUE_LOOKAHEAD_MODEL_ID, ensure_model_available
+from .provisioning import (
+    DEFAULT_MODEL_ID,
+    PIMC_BELIEF_MODEL_ID,
+    VALUE_LOOKAHEAD_MODEL_ID,
+    ensure_model_available,
+)
 from .value_model import MLPValueModel, infer_value_encoder_version, load_value_model_npz
 
 __all__ = [
@@ -19,6 +24,7 @@ __all__ = [
     "MLPBCModel",
     "LocalModelSpec",
     "DEFAULT_MODEL_ID",
+    "PIMC_BELIEF_MODEL_ID",
     "VALUE_LOOKAHEAD_MODEL_ID",
     "ensure_model_available",
     "get_models_dir_from_env",

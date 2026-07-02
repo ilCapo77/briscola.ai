@@ -12,6 +12,7 @@ import random
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from briscola_ai.ai.agents import HeuristicAgentV1, HeuristicAgentV2, build_agent, list_agent_specs
 from briscola_ai.ai.agents.hybrid_endgame import reconstruct_endgame_state
@@ -67,6 +68,48 @@ def test_bc_model_pimc_16x8_variant_uses_selected_model(tmp_path: Path) -> None:
     assert isinstance(agent.rollout_agent, BCModelAgent)
     assert agent.fallback.model_path == model_path
     assert agent.rollout_agent.model_path == model_path
+
+
+def test_bc_model_pimc_belief_64x10_variant_builds_with_belief(tmp_path: Path, monkeypatch) -> None:
+    """
+    La variante belief usa il `.npz` selezionato, blocca la config 64x10 e aggancia la
+    belief network dalla directory modelli (regola di provisioning identica al value model).
+    Senza belief nella directory: errore esplicito (opzione non disponibile).
+    """
+    import json
+
+    from briscola_ai.ai.models.provisioning import PIMC_BELIEF_MODEL_ID
+
+    model_path = tmp_path / "selected_model.npz"
+    _write_linear_bc_model(model_path)
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+
+    assert "bc_model_pimc_belief_64x10" in {spec.name for spec in list_agent_specs()}
+
+    # Belief assente -> errore chiaro.
+    with pytest.raises(ValueError, match="belief"):
+        build_agent("bc_model_pimc_belief_64x10", model_path=model_path)
+
+    # Belief minimale valida (formato belief_mlp_v1, encoder v4 = 369 input).
+    from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
+
+    rng = np.random.default_rng(0)
+    np.savez(
+        tmp_path / PIMC_BELIEF_MODEL_ID,
+        w1=rng.normal(0, 0.05, size=(int(FEATURE_DIM_2P_V4), 4)).astype(np.float32),
+        b1=np.zeros(4, dtype=np.float32),
+        w2=rng.normal(0, 0.05, size=(4, 40)).astype(np.float32),
+        b2=np.zeros(40, dtype=np.float32),
+        metadata_json=json.dumps({"format": "belief_mlp_v1", "encoder_version": "v4"}),
+    )
+
+    agent = build_agent("bc_model_pimc_belief_64x10", model_path=model_path)
+    assert isinstance(agent, PIMCAgent)
+    assert agent.name == "bc_model_pimc_belief_64x10"
+    assert agent.num_determinizations == 64
+    assert agent.max_unknown_cards == 10
+    assert agent.belief_model is not None
+    assert agent.use_endgame_solver is True
 
 
 def _play_with_heuristics_until(*, seed: int, max_deck_size: int) -> GameState:

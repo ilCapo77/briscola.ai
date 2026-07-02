@@ -25,6 +25,9 @@ DEFAULT_MODEL_ID = "best_a2c_v8.npz"
 # Id del value model usato dall'agente selezionabile `bc_model_value_lookahead_8x8`.
 VALUE_LOOKAHEAD_MODEL_ID = "value_v0_h128_clean50k_seed20260701.npz"
 
+# Id della belief network usata da `bc_model_pimc_belief_64x10` per pesare le determinizzazioni.
+PIMC_BELIEF_MODEL_ID = "belief_v0_h128_50k_seed20260702.npz"
+
 # Timeout (s) per il download: evita che un endpoint lento/appeso blocchi lo startup dell'app.
 _DEFAULT_DOWNLOAD_TIMEOUT_S = 30.0
 

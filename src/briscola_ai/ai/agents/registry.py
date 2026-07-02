@@ -12,8 +12,9 @@ from pathlib import Path
 
 from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
 from ..models.bc_model import BCModelAgent
+from ..models.belief_model import load_belief_model_npz
 from ..models.catalog import get_models_dir_from_env, resolve_model_path
-from ..models.provisioning import VALUE_LOOKAHEAD_MODEL_ID
+from ..models.provisioning import PIMC_BELIEF_MODEL_ID, VALUE_LOOKAHEAD_MODEL_ID
 from ..models.value_model import load_value_model_npz
 from .base import Agent, AgentSpec
 from .hybrid_endgame import HybridEndgameAgent
@@ -69,6 +70,19 @@ BC_MODEL_PIMC_16X8_SPEC = AgentSpec(
     ),
 )
 
+BC_MODEL_PIMC_BELIEF_64X10_SPEC = AgentSpec(
+    name="bc_model_pimc_belief_64x10",
+    label="Modello locale + PIMC belief",
+    description_it=(
+        "L'avversario più forte: usa il modello `.npz` scelto dalla UI come policy di simulazione, il solver "
+        "esatto a mazzo vuoto e una search PIMC con 64 determinizzazioni PESATE dalla belief network "
+        "(stima di quali carte ha in mano l'avversario, dedotta dal suo comportamento) quando restano al "
+        "massimo 10 carte vive ignote. Nei benchmark batte il modello puro di ~4 punti/partita; è il più "
+        "costoso lato CPU (~0.1s per mossa pensata)."
+    ),
+    requires_model_id=PIMC_BELIEF_MODEL_ID,
+)
+
 BEST_A2C_SPEC = AgentSpec(
     name="best_a2c",
     label="Best A2C (locale)",
@@ -84,12 +98,15 @@ _VALUE_LOOKAHEAD_8X8_DETERMINIZATIONS = 8
 _VALUE_LOOKAHEAD_8X8_MAX_UNKNOWN_CARDS = 8
 _PIMC_16X8_DETERMINIZATIONS = 16
 _PIMC_16X8_MAX_UNKNOWN_CARDS = 8
+_PIMC_BELIEF_64X10_DETERMINIZATIONS = 64
+_PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS = 10
 _SELECTED_MODEL_AGENT_NAMES = frozenset(
     {
         BC_MODEL_SPEC.name,
         BC_MODEL_HYBRID_ENDGAME_SPEC.name,
         BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC.name,
         BC_MODEL_PIMC_16X8_SPEC.name,
+        BC_MODEL_PIMC_BELIEF_64X10_SPEC.name,
     }
 )
 
@@ -123,6 +140,7 @@ def list_agent_specs() -> list[AgentSpec]:
         BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC,
         BC_MODEL_HYBRID_ENDGAME_SPEC,
         BC_MODEL_PIMC_16X8_SPEC,
+        BC_MODEL_PIMC_BELIEF_64X10_SPEC,
     ]
 
 
@@ -229,6 +247,29 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
             max_unknown_cards=_PIMC_16X8_MAX_UNKNOWN_CARDS,
             use_endgame_solver=True,
             name="bc_model_pimc_16x8",
+        )
+
+    if name == "bc_model_pimc_belief_64x10":
+        if model_path is None:
+            raise ValueError("Agente 'bc_model_pimc_belief_64x10' richiede `model_path` (file .npz)")
+        models_dir = get_models_dir_from_env()
+        try:
+            belief_model_path = resolve_model_path(models_dir=models_dir, model_id=PIMC_BELIEF_MODEL_ID)
+        except FileNotFoundError as exc:
+            raise ValueError(
+                "Agente 'bc_model_pimc_belief_64x10' non disponibile: manca la belief network "
+                f"`{PIMC_BELIEF_MODEL_ID}` nella directory modelli."
+            ) from exc
+        belief_model = load_belief_model_npz(belief_model_path)
+        model_agent = BCModelAgent.from_npz(model_path)
+        return PIMCAgent(
+            rollout_agent=model_agent,
+            fallback=model_agent,
+            num_determinizations=_PIMC_BELIEF_64X10_DETERMINIZATIONS,
+            max_unknown_cards=_PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS,
+            use_endgame_solver=True,
+            belief_model=belief_model,
+            name="bc_model_pimc_belief_64x10",
         )
 
     try:
