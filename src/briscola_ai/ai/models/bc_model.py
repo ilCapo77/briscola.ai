@@ -38,6 +38,7 @@ from ..encoding.observation_encoder import (
     encode_player_observation_2p,
     feature_dim_for_encoder_version,
 )
+from ..training.reward_shaping import card_conservation_cost
 
 
 class LoadedBCModel(Protocol):
@@ -219,11 +220,10 @@ def _card_cost_tuple_trump_only(card) -> tuple[int, int]:
     """
     Ordine "economico" tra briscole per post-processing.
 
-    Usiamo un ordine lessicografico:
-    - points (0..11) prima
-    - trick_strength (1..10) poi
+    Delega alla definizione canonica condivisa (`card_conservation_cost`): guard runtime,
+    reward shaping e metriche decision-quality devono usare lo STESSO ordinamento.
     """
-    return (int(card.rank.points), int(card.rank.trick_strength))
+    return card_conservation_cost(card)
 
 
 def _apply_overkill_guard_second_hand(observation: PlayerObservation, *, chosen_card_index: int) -> int:

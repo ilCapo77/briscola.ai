@@ -38,6 +38,7 @@ from ..agents import Agent
 from ..fast.evaluation import FAST_EVALUATION_AGENT_NAMES
 from ..models.bc_model import BCModelAgent, MLPBCModel
 from ..numba.mlp import evaluate_mlp_policy_quality_numba_2p
+from ..training.reward_shaping import card_conservation_cost
 from .match import SeatFairStats, _winner_index_2p  # noqa: PLC2701 (didattico, reuse interno)
 
 
@@ -109,7 +110,9 @@ def _card_cost_for_conservation(*, card, trump_suit) -> tuple[int, int, int]:
     questa non è una regola di gioco: è solo una *metrica* per misurare lo stile di decisione.
     """
     is_trump = 1 if (trump_suit is not None and card.suit == trump_suit) else 0
-    return (is_trump, int(card.rank.points), int(card.rank.trick_strength))
+    # Il costo (points, strength) è la definizione canonica condivisa: vedi
+    # `training/reward_shaping.card_conservation_cost` (stesso ordinamento di guard e shaping).
+    return (is_trump, *card_conservation_cost(card))
 
 
 def _is_trump_overkill_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> Optional[bool]:

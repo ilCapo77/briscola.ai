@@ -13,7 +13,17 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit
 
+from ..card_tables import (
+    CARD_NUMBER_BY_ID_NP,
+    CARD_POINTS_BY_ID_NP,
+    CARD_STRENGTH_BY_ID_NP,
+    CARD_SUIT_BY_ID_NP,
+)
 from ..evaluation import MatchStats, SeatFairStats
+
+# Kernel condiviso "chi vince la presa": vive in `ai/trick_kernel.py` (modulo foglia) per
+# essere importabile anche dal solver endgame senza cicli. L'alias mantiene il nome storico.
+from ..trick_kernel import who_wins_trick_numba_2p as _who_wins_trick_numba
 
 ACTION_DIM = 40
 NUMBA_AGENT_RANDOM = 0
@@ -28,12 +38,12 @@ _NUMBA_AGENT_CODES: dict[str, int] = {
     "heuristic_v1": NUMBA_AGENT_HEURISTIC_V1,
     "heuristic_v2": NUMBA_AGENT_HEURISTIC_V2,
 }
-CARD_SUIT_NUMBA = np.asarray([card_id // 10 for card_id in range(ACTION_DIM)], dtype=np.int64)
-CARD_NUMBER_NUMBA = np.asarray([(card_id % 10) + 1 for card_id in range(ACTION_DIM)], dtype=np.int64)
-_POINTS_BY_NUMBER = np.asarray([0, 11, 0, 10, 0, 0, 0, 0, 2, 3, 4], dtype=np.int64)
-_STRENGTH_BY_NUMBER = np.asarray([0, 10, 1, 9, 2, 3, 4, 5, 6, 7, 8], dtype=np.int64)
-CARD_POINTS_NUMBA = np.asarray([_POINTS_BY_NUMBER[number] for number in CARD_NUMBER_NUMBA], dtype=np.int64)
-CARD_STRENGTH_NUMBA = np.asarray([_STRENGTH_BY_NUMBER[number] for number in CARD_NUMBER_NUMBA], dtype=np.int64)
+# Tabelle numeriche derivate dal dominio canonico: vedi `ai/card_tables.py` (fonte unica).
+# Gli alias locali mantengono i nomi storici usati dai kernel JIT.
+CARD_SUIT_NUMBA = CARD_SUIT_BY_ID_NP
+CARD_NUMBER_NUMBA = CARD_NUMBER_BY_ID_NP
+CARD_POINTS_NUMBA = CARD_POINTS_BY_ID_NP
+CARD_STRENGTH_NUMBA = CARD_STRENGTH_BY_ID_NP
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,33 +79,6 @@ def numba_agent_code(agent_name: str) -> int:
     except KeyError as exc:
         supported = ", ".join(sorted(NUMBA_EVALUATION_AGENT_NAMES))
         raise ValueError(f"Numba supporta solo agenti fast-compatible: {supported}. Ottenuto: {agent_name!r}") from exc
-
-
-@njit(cache=True)
-def _who_wins_trick_numba(
-    first_card: int, first_player: int, second_card: int, second_player: int, trump_card: int
-) -> int:
-    """Determina il vincitore di una presa 2-player usando solo card id."""
-    trump_suit = CARD_SUIT_NUMBA[trump_card]
-    first_suit = CARD_SUIT_NUMBA[first_card]
-    second_suit = CARD_SUIT_NUMBA[second_card]
-
-    first_is_trump = first_suit == trump_suit
-    second_is_trump = second_suit == trump_suit
-    if first_is_trump or second_is_trump:
-        if first_is_trump and not second_is_trump:
-            return first_player
-        if second_is_trump and not first_is_trump:
-            return second_player
-        if CARD_STRENGTH_NUMBA[first_card] >= CARD_STRENGTH_NUMBA[second_card]:
-            return first_player
-        return second_player
-
-    if second_suit != first_suit:
-        return first_player
-    if CARD_STRENGTH_NUMBA[first_card] >= CARD_STRENGTH_NUMBA[second_card]:
-        return first_player
-    return second_player
 
 
 @njit(cache=True)

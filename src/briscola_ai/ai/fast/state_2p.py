@@ -18,15 +18,16 @@ from __future__ import annotations
 import random
 from dataclasses import dataclass
 
+from ..card_tables import CARD_NUMBER_BY_ID, CARD_POINTS_BY_ID, CARD_STRENGTH_BY_ID, CARD_SUIT_BY_ID
+
 ACTION_DIM = 40
 
-# Convenzione carta: `card_id = suit_index * 10 + (number - 1)`.
-CARD_SUIT: tuple[int, ...] = tuple(card_id // 10 for card_id in range(ACTION_DIM))
-CARD_NUMBER: tuple[int, ...] = tuple((card_id % 10) + 1 for card_id in range(ACTION_DIM))
-CARD_POINTS_BY_NUMBER: tuple[int, ...] = (0, 11, 0, 10, 0, 0, 0, 0, 2, 3, 4)
-CARD_STRENGTH_BY_NUMBER: tuple[int, ...] = (0, 10, 1, 9, 2, 3, 4, 5, 6, 7, 8)
-CARD_POINTS: tuple[int, ...] = tuple(CARD_POINTS_BY_NUMBER[number] for number in CARD_NUMBER)
-CARD_STRENGTH: tuple[int, ...] = tuple(CARD_STRENGTH_BY_NUMBER[number] for number in CARD_NUMBER)
+# Tabelle numeriche derivate dal dominio canonico: vedi `ai/card_tables.py` (fonte unica).
+# Gli alias locali mantengono i nomi storici usati in tutto il fast path.
+CARD_SUIT: tuple[int, ...] = CARD_SUIT_BY_ID
+CARD_NUMBER: tuple[int, ...] = CARD_NUMBER_BY_ID
+CARD_POINTS: tuple[int, ...] = CARD_POINTS_BY_ID
+CARD_STRENGTH: tuple[int, ...] = CARD_STRENGTH_BY_ID
 
 
 @dataclass(slots=True)

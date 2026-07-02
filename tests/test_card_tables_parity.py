@@ -32,9 +32,6 @@ from briscola_ai.ai.endgame.numba_solver import (
 from briscola_ai.ai.endgame.numba_solver import (
     _CARD_SUIT_NUMBA as ENDGAME_CARD_SUIT,
 )
-from briscola_ai.ai.endgame.numba_solver import (
-    _who_wins_trick_endgame_numba,
-)
 from briscola_ai.ai.fast.state_2p import (
     CARD_NUMBER,
     CARD_POINTS,
@@ -129,5 +126,6 @@ def test_who_wins_trick_parity_on_all_ordered_pairs(trump_suit_index: int) -> No
                 )
                 == expected
             )
+            # Nota: dopo la de-duplicazione il solver endgame importa la stessa
+            # `_who_wins_trick_numba` del core, quindi questo assert copre entrambi.
             assert _who_wins_trick_numba(first_id, 0, second_id, 1, trump_card_id) == expected
-            assert _who_wins_trick_endgame_numba(first_id, 0, second_id, 1, trump_card_id) == expected

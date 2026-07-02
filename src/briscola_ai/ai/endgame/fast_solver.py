@@ -1,11 +1,18 @@
 """
-Solver endgame 2-player su stato numerico compatto.
+Solver endgame 2-player su stato numerico compatto — ORACOLO PER I TEST, non runtime.
 
-Il solver canonico (`solver.solve_endgame`) e' volutamente scritto sopra `GameState` e
-`domain.engine.step`: massima chiarezza, massima aderenza alla fonte di verita'. Questo
-modulo mantiene lo stesso contratto pubblico, ma sposta il minimax nel formato numerico
-gia' usato dal fast path (`card_id` 0..39). L'obiettivo e' ridurre overhead nel runtime
-degli agenti ibridi/value-lookahead senza cambiare una singola decisione.
+Ruolo attuale (importante):
+nessun agente o loop di training chiama questo modulo a runtime. Il runtime usa
+`numba_solver.choose_endgame_card_numba` (choose-only, JIT); questo modulo resta come
+PONTE DI PARITÀ tra il solver canonico (`solver.solve_endgame`, su `GameState` +
+`domain.step`, con principal variation) e il kernel numerico: implementa lo stesso
+minimax sul formato `card_id` 0..39 mantenendo il contratto completo `EndgameSolution`.
+
+Perché tenerlo:
+- verifica il minimax numerico con la PV completa (il kernel Numba è choose-only e non
+  può essere confrontato sulla PV);
+- se il kernel Numba e il canonico divergessero, questo intermedio localizza il bug
+  (formato numerico vs implementazione JIT).
 
 Invariante: `solve_endgame_fast(state)` deve restituire la stessa mossa ottima e lo stesso
 delta finale di `solve_endgame(state)` per ogni stato valido. I test di parita' proteggono

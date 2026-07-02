@@ -18,17 +18,23 @@ from numba import njit
 
 from ...domain.card_id import card_to_id
 from ...domain.state import GameState
+from ..card_tables import (
+    CARD_NUMBER_BY_ID_NP,
+    CARD_POINTS_BY_ID_NP,
+    CARD_STRENGTH_BY_ID_NP,
+    CARD_SUIT_BY_ID_NP,
+)
+from ..trick_kernel import who_wins_trick_numba_2p as _who_wins_trick_numba
 from .solver import _validate
 
 _HAND_CAPACITY = 3
 _MAX_STACK_DEPTH = 8
 _ACTION_DIM = 40
-_CARD_SUIT_NUMBA = np.asarray([card_id // 10 for card_id in range(_ACTION_DIM)], dtype=np.int64)
-_CARD_NUMBER_NUMBA = np.asarray([(card_id % 10) + 1 for card_id in range(_ACTION_DIM)], dtype=np.int64)
-_POINTS_BY_NUMBER = np.asarray([0, 11, 0, 10, 0, 0, 0, 0, 2, 3, 4], dtype=np.int64)
-_STRENGTH_BY_NUMBER = np.asarray([0, 10, 1, 9, 2, 3, 4, 5, 6, 7, 8], dtype=np.int64)
-_CARD_POINTS_NUMBA = np.asarray([_POINTS_BY_NUMBER[number] for number in _CARD_NUMBER_NUMBA], dtype=np.int64)
-_CARD_STRENGTH_NUMBA = np.asarray([_STRENGTH_BY_NUMBER[number] for number in _CARD_NUMBER_NUMBA], dtype=np.int64)
+# Tabelle numeriche derivate dal dominio canonico: vedi `ai/card_tables.py` (fonte unica).
+_CARD_SUIT_NUMBA = CARD_SUIT_BY_ID_NP
+_CARD_NUMBER_NUMBA = CARD_NUMBER_BY_ID_NP
+_CARD_POINTS_NUMBA = CARD_POINTS_BY_ID_NP
+_CARD_STRENGTH_NUMBA = CARD_STRENGTH_BY_ID_NP
 
 
 def _arrays_from_state(
@@ -66,35 +72,9 @@ def _arrays_from_state(
     )
 
 
-@njit(cache=True)
-def _who_wins_trick_endgame_numba(
-    first_card: int,
-    first_player: int,
-    second_card: int,
-    second_player: int,
-    trump_card: int,
-) -> int:
-    """Determina il vincitore di una presa 2-player usando solo card id."""
-    trump_suit = _CARD_SUIT_NUMBA[trump_card]
-    first_suit = _CARD_SUIT_NUMBA[first_card]
-    second_suit = _CARD_SUIT_NUMBA[second_card]
-
-    first_is_trump = first_suit == trump_suit
-    second_is_trump = second_suit == trump_suit
-    if first_is_trump or second_is_trump:
-        if first_is_trump and not second_is_trump:
-            return first_player
-        if second_is_trump and not first_is_trump:
-            return second_player
-        if _CARD_STRENGTH_NUMBA[first_card] >= _CARD_STRENGTH_NUMBA[second_card]:
-            return first_player
-        return second_player
-
-    if second_suit != first_suit:
-        return first_player
-    if _CARD_STRENGTH_NUMBA[first_card] >= _CARD_STRENGTH_NUMBA[second_card]:
-        return first_player
-    return second_player
+# Nota de-duplicazione: il vincitore della presa è calcolato da `_who_wins_trick_numba`
+# importata da `ai/numba/core.py` — le funzioni `@njit` sono importabili cross-module
+# come normali riferimenti globali, quindi non serve (né conviene) una copia locale.
 
 
 @njit(cache=True)
@@ -234,7 +214,7 @@ def _solve_endgame_stack_numba(
                 table_size[child] = 1
                 current_turn[child] = 1 - mover
             else:
-                winner = _who_wins_trick_endgame_numba(
+                winner = _who_wins_trick_numba(
                     int(table_card[depth]),
                     int(table_player[depth]),
                     int(played),

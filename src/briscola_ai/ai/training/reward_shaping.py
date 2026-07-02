@@ -47,21 +47,31 @@ class TrumpOverkillInfo:
     is_overkill: bool
 
 
-def _trump_cost_tuple(card: Card, *, trump_suit: Suit) -> tuple[int, int]:
+def card_conservation_cost(card: Card) -> tuple[int, int]:
     """
-    Costo "semplice" per conservazione tra briscole.
+    Costo "di conservazione" di una carta: quanto è preziosa da tenere in mano.
 
     Usiamo un ordine lessicografico:
     - points (carichi) prima
     - trick_strength poi
 
     Interpretazione:
-    una briscola con più punti e/o più forza è in media più "preziosa" da conservare,
-    quindi usarla quando una briscola più debole avrebbe vinto è un potenziale overkill.
+    una carta con più punti e/o più forza è in media più "preziosa" da conservare, quindi
+    usarla quando una più debole sarebbe bastata è un potenziale spreco (overkill).
+
+    Nota architetturale: questa è la definizione CANONICA, condivisa da reward shaping,
+    guard anti-overkill dei modelli (`ai/models/bc_model.py`) e metriche decision-quality
+    (`ai/evaluation/decision_quality.py`). Prima esistevano tre copie identiche: cambiarne
+    una sola avrebbe fatto divergere training, guard runtime e metriche in modo silenzioso.
     """
+    return (int(card.rank.points), int(card.rank.trick_strength))
+
+
+def _trump_cost_tuple(card: Card, *, trump_suit: Suit) -> tuple[int, int]:
+    """Come `card_conservation_cost`, ma con la precondizione esplicita che sia una briscola."""
     if card.suit != trump_suit:
         raise ValueError("_trump_cost_tuple atteso su una briscola")
-    return (int(card.rank.points), int(card.rank.trick_strength))
+    return card_conservation_cost(card)
 
 
 def analyze_trump_overkill_second_hand(

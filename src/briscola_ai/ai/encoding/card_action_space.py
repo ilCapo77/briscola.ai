@@ -20,6 +20,9 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
+from ..card_tables import POINTS_BY_NUMBER as _POINTS_BY_NUMBER
+from ..card_tables import TRICK_STRENGTH_BY_NUMBER as _TRICK_STRENGTH_BY_NUMBER
+
 # Ordine semi (coerente con `Suit` in `domain/models.py`).
 SUIT_ORDER: tuple[str, ...] = ("clubs", "cups", "coins", "swords")
 SUIT_TO_INDEX = {suit: i for i, suit in enumerate(SUIT_ORDER)}
@@ -81,8 +84,10 @@ def action_mask_from_hand(hand: list[dict]) -> list[bool]:
 #
 # Nota: i punti sono già disponibili nel `CardDTO`, ma tenere anche queste tabelle
 # è comodo per costruire feature consistenti senza dover dipendere dai DTO.
-POINTS_BY_NUMBER: dict[int, int] = {1: 11, 2: 0, 3: 10, 4: 0, 5: 0, 6: 0, 7: 0, 8: 2, 9: 3, 10: 4}
-TRICK_STRENGTH_BY_NUMBER: dict[int, int] = {1: 10, 3: 9, 10: 8, 9: 7, 8: 6, 7: 5, 6: 4, 5: 3, 4: 2, 2: 1}
+# Le tabelle sono DERIVATE dal dominio canonico via `ai/card_tables.py` (fonte unica):
+# i re-export qui sotto mantengono il nome storico usato dagli altri moduli.
+POINTS_BY_NUMBER: dict[int, int] = _POINTS_BY_NUMBER
+TRICK_STRENGTH_BY_NUMBER: dict[int, int] = _TRICK_STRENGTH_BY_NUMBER
 
 
 @dataclass(frozen=True, slots=True)
