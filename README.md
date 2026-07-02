@@ -189,7 +189,8 @@ pytest                       # test
 pytest --cov=briscola_ai --cov-report=term-missing   # coverage
 ```
 
-Il badge coverage in cima è manuale (Shields.io): aggiornalo dopo `pytest --cov` se la variazione è materiale.
+Il badge coverage in cima si aggiorna automaticamente: la CI, sui push a `master`, ricalcola la percentuale con
+`pytest --cov` e committa il README solo se è cambiata (colore in base alla soglia). Non serve toccarlo a mano.
 
 ## AI & ML
 

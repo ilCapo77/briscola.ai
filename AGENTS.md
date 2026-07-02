@@ -89,7 +89,7 @@ Se le modifiche toccano Python (codice/test), esegui e correggi:
 
 La CI GitHub Actions (`.github/workflows/ci.yml`) replica lo stesso gate (ruff format/check, mypy, pytest+coverage) su ogni push/PR: deve restare allineata a questa sezione.
 
-Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Aggiorna il badge coverage Shields.io in `README.md` quando la copertura cambia in modo materiale. Tieni aggiornato questo file quando cambiano tooling/convenzioni.
+Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Il badge coverage in `README.md` è aggiornato automaticamente dalla CI sui push a `master`: non toccarlo a mano. Tieni aggiornato questo file quando cambiano tooling/convenzioni.
 
 ## Coding Style & Naming
 
