@@ -5,7 +5,7 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.20.1`.
+- Versione progetto: `0.21.0`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
 - Modello consigliato: `best_a2c_v7.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
 - Default UI: `bc_model` + modello consigliato, cioè v7 puro. È la nuova policy `.npz` veloce promossa in v0.19.0.
@@ -28,8 +28,21 @@ nei commit, nei test e nei report.
 - Test-àncora anti-divergenza: `tests/test_card_tables_parity.py` (tabelle punti/forza e `who_wins_trick` di fast,
   numba core, numba solver ed encoding contro `domain.models.Rank`; parità `_card_to_id_fast`↔`card_to_id`) e
   `tests/test_reward_shaping_numba_parity.py` (overkill penalty JIT ↔ reward shaping canonico); il test del solver
-  endgame Numba verifica anche `final_delta_p0_p1` (valore di foglia del value-lookahead).
-- Artefatti locali (`data/`, `benchmarks/`) restano gitignored.
+  endgame Numba verifica anche `final_delta_p0_p1` (valore di foglia del value-lookahead). Da v0.21.0 le tabelle
+  numeriche sono DERIVATE dal dominio in `ai/card_tables.py` (fonte unica) e il kernel "chi vince la presa" è
+  condiviso in `ai/trick_kernel.py`.
+- **Statistica seat-fair (v0.21.0)**: le CI sono calcolate sull'unità COPPIA (stesso mazzo, seat scambiati), non
+  per-partita: le CI storiche erano anti-conservative. Riverifica v7 vs v6 con CI corrette: medium 10k `+2.42`
+  (CI95 coppie `+1.92..+2.91`), big 100k `+2.46` (CI95 coppie `+2.31..+2.62`) → la promozione di v7 resta valida.
+  Usare `seat_fair_avg_point_diff_ci`/`seat_fair_score_rate_ci` per nuove valutazioni.
+- Hardening backend (v0.21.0): mossa IA in thread executor (event loop libero), lock Redis TTL 120s, vincoli
+  Pydantic sugli input, rate limiting su `POST /games` (`BRISCOLA_CREATE_GAME_RATE_LIMIT`, default 30/min/IP),
+  sanificazione nomi giocatore nell'event log in TUTTE le modalità, datetime UTC aware, cap sui buffer per-replica.
+- `new_game_state` senza `seed` ora genera un seed casuale (prima: seed=0 fisso, rischio dataset degeneri).
+- UI accessibile da tastiera (carte come bottoni, aria-live sui messaggi); niente più `alert()`.
+- Test rapidi: `pytest -m "not slow and not numba"` (~3s) esclude subprocess e compilazioni JIT.
+- Artefatti locali (`data/`, `benchmarks/`) restano gitignored; `docs/reports/model_progress.xlsx` è un artefatto
+  curato del maintainer (richiede artefatti locali, non rigenerabile da clone pulito: documentato nello script).
 
 ## Decisioni Chiuse
 

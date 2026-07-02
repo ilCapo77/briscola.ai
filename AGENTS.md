@@ -60,6 +60,7 @@ Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-
 - `BRISCOLA_MODELS_DIR` (default `./data/models/`); `BRISCOLA_CORS_ALLOW_ORIGINS` (default `*`, restringere in prod).
 - `BRISCOLA_REALTIME_MODE` (`ws`|`polling`, override; default `ws`); `BRISCOLA_ASSET_VERSION` (override del cache-busting, che di default deriva da versione + mtime degli static).
 - `BRISCOLA_DEBUG_STATE_ENDPOINT`: abilita la vista full-state di `GET /api/games/{id}` senza `player_index` (mani di tutti + `next_deck_card`, per debug/spectator). Default **disabilitata** (403) per l'anti-cheat: non attivarla in produzione pubblica.
+- `BRISCOLA_CREATE_GAME_RATE_LIMIT`: tetto di partite create per IP al minuto su `POST /api/games` (default `30`; `0` disabilita — la suite test lo azzera via conftest).
 
 ### Pipeline AI (script in `scripts/`)
 
@@ -85,6 +86,7 @@ Se le modifiche toccano Python (codice/test), esegui e correggi:
 - `pytest`
   - singolo file: `pytest tests/test_trick_rules.py`
   - singolo test: `pytest tests/test_trick_rules.py::test_name` (o `pytest -k "pattern"`)
+  - ciclo rapido (salta subprocess e compilazioni JIT): `pytest -m "not slow and not numba"`
   - coverage: `pytest --cov=briscola_ai`
 
 La CI GitHub Actions (`.github/workflows/ci.yml`) replica lo stesso gate (ruff format/check, mypy, pytest+coverage) su ogni push/PR: deve restare allineata a questa sezione.
