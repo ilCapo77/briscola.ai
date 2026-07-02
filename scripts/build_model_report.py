@@ -150,6 +150,24 @@ MODEL_SPECS: list[ModelSpec] = [
             "It becomes the default .npz policy; value-lookahead remains the stronger runtime option."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v8",
+        path=_rel("data/models/best_a2c_v8.npz"),
+        role="official best",
+        status="promoted",
+        order=7,
+        progress_source="benchmarks/experiments/fase3/iter2_h256_vs_heuristic_v1_big.json",
+        progress_score=17.6067,
+        h2h_source="benchmarks/experiments/fase3/iter2_h256_vs_v7_big.json",
+        h2h_score=0.893,
+        decision="Promoted as recommended model for the v0.22.0 release.",
+        notes=(
+            "Encoder v4 (trick-history features) + Net2Net widening to hidden 256. Chain: warm-start from "
+            "best_a2c_v7 (v4 zero-pad), 5M A2C games vs value-lookahead(v7), widening 128->256, 5M more games. "
+            "Beats best_a2c_v7 head-to-head (+0.89, CI +0.74..+1.05, 100k paired); the lower score vs "
+            "heuristic_v1 relative to v7 (17.61 vs 18.73) reflects style non-transitivity, not regression."
+        ),
+    ),
 ]
 
 
@@ -329,6 +347,31 @@ MILESTONES: list[dict[str, Any]] = [
         ),
         "impact": "Frontend/server/cloud default model moves to best_a2c_v7; value model asset remains unchanged.",
         "source": "data/models/best_a2c_v7.npz + train_a2c fast_numba_determinized value-lookahead screen",
+    },
+    {
+        "order": 12,
+        "date": "2026-07-03",
+        "model_id": "best_a2c_v8",
+        "type": "promoted",
+        "decision": "Promote v8 (encoder v4 + hidden 256) as the recommended .npz policy for v0.22.0.",
+        "why": (
+            "The ExIt iteration-1/2 arms measured every student-side lever with paired controls: the v4 "
+            "trick-history features add +0.27 net (first positive runtime evidence of the encoder program), "
+            "Net2Net capacity adds a marginal +0.18, and the combined chain beats v7 by +0.89."
+        ),
+        "evidence": (
+            "Big holdout 100k paired CIs: vs best_a2c_v7 +0.89 (CI +0.74..+1.05); vs iter1-v4 +0.18 "
+            "(CI +0.03..+0.33); vs heuristic_v1 +17.61. Belief-as-policy-input was killed (-0.56 vs its "
+            "own init): the belief is a deterministic function of the same v4 features, so as policy input "
+            "it is redundant and gradient-chasing it erodes tuned instinct."
+        ),
+        "impact": (
+            "Frontend/server/cloud default model moves to best_a2c_v8 (first v4-encoder, first hidden-256 "
+            "default); value model asset unchanged. Known nuance: inside value-lookahead determinized "
+            "simulations the v4 history block is empty (mild degradation of the advanced opponent's "
+            "response modeling, not a correctness issue)."
+        ),
+        "source": "data/models/best_a2c_v8.npz + ExIt iteration-1/2 (docs/plans/belief-expert-iteration.md)",
     },
 ]
 
@@ -701,6 +744,7 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
         "best_a2c_v5",
         "best_a2c_v6",
         "best_a2c_v7",
+        "best_a2c_v8",
     }
     progress_models = [m for m in models if m["model_id"] in progress_model_ids]
 
@@ -725,8 +769,9 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v7 is the recommended v0.19.0 .npz policy: the 5M value-lookahead-opponent "
-                "A2C run beats best_a2c_v6 head-to-head and improves the v6+solver runtime baseline. "
+                "best_a2c_v8 is the recommended v0.22.0 .npz policy: encoder v4 (trick-history memory) "
+                "plus Net2Net widening to hidden 256, trained via two ExIt sparring generations against "
+                "value-lookahead(v7). It beats best_a2c_v7 head-to-head (+0.89, 100k paired). "
                 "The value-lookahead runtime agent remains the stronger advanced option."
             ],
             [],

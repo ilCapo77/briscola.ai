@@ -312,7 +312,7 @@ Confronti riproducibili senza UI/server:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v7.npz --agent1 heuristic_v1
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v8.npz --agent1 heuristic_v1
 ```
 
 Concetti chiave:
@@ -423,7 +423,7 @@ Esempio minimo:
 ```bash
 # Run lunga consigliata per value_v1 su base v7: dataset compatto, solo finestra lookahead/finale.
 python scripts/generate_value_dataset_numba.py \
-  --model ./data/models/best_a2c_v7.npz \
+  --model ./data/models/best_a2c_v8.npz \
   --epsilon 0.10 \
   --collect-mode window \
   --max-unknown-cards 8 \
@@ -445,7 +445,7 @@ python scripts/train_value.py \
 
 # Percorso decision-aligned: richiede diagnostica PIMC generata con la stessa policy base del candidato.
 python scripts/generate_pimc_teacher_dataset.py \
-  --model ./data/models/best_a2c_v7.npz \
+  --model ./data/models/best_a2c_v8.npz \
   --out ./data/pimc_teacher_v7_d64_u8_20k_seed20260707.jsonl \
   --num-examples 20000 \
   --max-games 5000 \
@@ -456,7 +456,7 @@ python scripts/generate_pimc_teacher_dataset.py \
 
 python scripts/generate_pimc_leaf_value_dataset.py \
   --data ./data/pimc_teacher_v7_d64_u8_20k_seed20260707.jsonl \
-  --policy-model ./data/models/best_a2c_v7.npz \
+  --policy-model ./data/models/best_a2c_v8.npz \
   --out ./data/value/pimc_leaf_value_v7_d64_u8_20k_seed20260707.npz \
   --max-roots 20000 \
   --samples-per-root 1 \
@@ -472,7 +472,7 @@ python scripts/train_value_pairwise.py \
   --pairwise-beta 0.2
 
 python scripts/evaluate_value_lookahead_pair.py \
-  --policy-model ./data/models/best_a2c_v7.npz \
+  --policy-model ./data/models/best_a2c_v8.npz \
   --value-model-a ./data/models/value_leaf_pairwise_ft_v0_v7_d64_u8_20k_seed20260707.npz \
   --value-model-b ./data/models/value_v0_h128_clean50k_seed20260701.npz \
   --label-a value_leaf_pairwise_candidate \
@@ -530,9 +530,9 @@ Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
 - **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
-- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v7. Per allenare contro il best v7 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v7.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
+- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v8. Per allenare contro il best v8 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v8.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
 - **value-lookahead opponent**: nel fast rollout Numba puoi allenare contro `bc_model_value_lookahead_8x8` passando sia
-  `--opponent-model ./data/models/best_a2c_v7.npz` sia
+  `--opponent-model ./data/models/best_a2c_v8.npz` sia
   `--opponent-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz`. Questo path usa lo stato numerico
   già determinizzato del rollout come singola determinizzazione: è un avversario di training forte, non una replica
   bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
@@ -545,7 +545,7 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-Il modello consigliato è **`data/models/best_a2c_v7.npz`** (encoder v3, guard anti‑overkill ON), promosso perché batte `best_a2c_v6` nel confronto head‑to‑head big e migliora anche la baseline runtime `v6 + solver`. In UI, quando disponibile, il default è `bc_model`: v7 puro, senza solver/search aggiunti. Subito vicino nel menu resta selezionabile `bc_model_value_lookahead_8x8`, che usa il modello `.npz` selezionato (default v7) come policy base più solver finale e lookahead guidata da value model; resta più forte di v7 puro, ma costa più CPU. `best_a2c_v6.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v7 è in `PLAN.md`.
+Il modello consigliato è **`data/models/best_a2c_v8.npz`** (encoder v4 con memoria delle prese, hidden 256 via widening Net2Net, guard anti‑overkill ON), promosso perché batte `best_a2c_v7` head‑to‑head sul big holdout appaiato (+0.89, CI95 +0.74..+1.05 su 100k). In UI, quando disponibile, il default è `bc_model`: v8 puro, senza solver/search aggiunti. Subito vicino nel menu resta selezionabile `bc_model_value_lookahead_8x8`, che usa il modello `.npz` selezionato (default v8) come policy base più solver finale e lookahead guidata da value model; costa più CPU (nota: nelle simulazioni determinizzate il blocco memoria v4 della base è vuoto — degradazione lieve). `best_a2c_v7.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v8 è in `PLAN.md` e in `docs/plans/belief-expert-iteration.md`.
 
 Il ramo corrente usa `best_a2c_v7.npz` come modello consigliato e salva `ai_action` in modalità dataset per auditare le mosse IA/search. Per abilitare `bc_model_value_lookahead_8x8` serve anche il value model `value_v0_h128_clean50k_seed20260701.npz` in `BRISCOLA_MODELS_DIR`; il catalogo modelli UI non lo mostra come policy selezionabile perché è un asset interno del lookahead. Il provisioning scarica la policy consigliata e, se configurate le env dedicate, anche il value model.
 
@@ -579,7 +579,7 @@ Esempio di confronto testa‑a‑testa tra due modelli:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v7.npz \
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v8.npz \
   --agent1 bc_model --agent1-model ./data/models/best_a2c_v6.npz
 ```
 

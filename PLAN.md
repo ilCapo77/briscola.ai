@@ -293,7 +293,16 @@ operatore in più); belief come input della policy NEGATIVA (−0.56 vs il propr
 è informazione ridondante — funzione delle stesse feature v4 — e il gradiente che la
 insegue erode l'istinto). **Tutte le leve lato allievo sono esaurite: il vincolo è il
 maestro.** Prossimo passo: expert a tutta partita (value v4 + lookahead dalla prima
-carta, piano §6). Nessuna promozione per ora.
+carta, piano §6).
+
+**Promozione v8 (2026-07-03, release v0.22.0):** `best_a2c_v8.npz` = iter2-h256
+(encoder v4 + Net2Net 256, catena v7→pad v4→5M vs VL(v7)→widening→5M). Gate: vs v7
+`+0.89` (CI coppie `+0.74..+1.05`, big 100k), vs heuristic_v1 `+17.61` (il punteggio
+più basso di v7 su heuristic_v1, 18.73, è non-transitività di stile, non regressione).
+Default UI/server/cloud → v8; value model invariato. Nota: nelle simulazioni
+determinizzate del value-lookahead il blocco memoria v4 della base è vuoto
+(degradazione lieve dell'opponent avanzato, non un errore). Ricetta riproducibile:
+`docs/plans/belief-expert-iteration.md` §6.
 
 Qualunque promozione deve includere:
 

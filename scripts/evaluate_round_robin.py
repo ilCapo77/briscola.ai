@@ -83,7 +83,7 @@ def main() -> int:
         default="",
         help=(
             "Player CSV opzionale. Esempio: "
-            "v6=data/models/best_a2c_v6.npz,v7=data/models/best_a2c_v7.npz,heuristic_v1. "
+            "v7=data/models/best_a2c_v7.npz,v8=data/models/best_a2c_v8.npz,heuristic_v1. "
             "Se omesso usa legacy v2 + storici v3-v7 + heuristic_v1."
         ),
     )

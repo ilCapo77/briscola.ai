@@ -102,7 +102,7 @@ def test_generated_xlsx_chart_reaches_latest_official_best(tmp_path: Path) -> No
     last_progress_row = first_progress_row + len(expected_models) - 1
 
     assert progress_models == expected_models
-    assert progress_models[-1] == "best_a2c_v7"
+    assert progress_models[-1] == "best_a2c_v8"
 
     with zipfile.ZipFile(out_path) as zf:
         chart_root = ET.fromstring(zf.read("xl/charts/chart1.xml"))
