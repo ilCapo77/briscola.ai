@@ -242,6 +242,14 @@ Un nuovo `best_a2c_v8` ha senso solo se c'è un segnale concreto, ad esempio:
 - nuovo value model/value-lookahead con v7 come base e segnale preliminare forte, misurato prima come agente runtime;
 - aumento di volume umano sufficiente e privacy/qualità verificata.
 
+**Ipotesi candidata (2026-07): Belief → Determinizzazioni Pesate → Expert Iteration.**
+L'indagine post-v7 ha identificato tre soffitti che spiegano il ristagno: encoder senza storia
+attribuita (opponent modeling irrappresentabile), MLP 128×1 flat invariata da 5 generazioni, e
+nessuna search nel loop di training (la distillazione one-shot è fallita per non-identificabilità,
+non per capacità). Il piano dettagliato — fasi, gate, criteri di kill, riferimenti — è in
+`docs/plans/belief-expert-iteration.md`. Primo passo: le tre sonde diagnostiche di Fase 0
+(exploitability, tetto oracolo, controllo from-scratch), tutte eseguibili con gli script esistenti.
+
 Qualunque promozione deve includere:
 
 - confronto seat-fair con CI;
