@@ -21,14 +21,12 @@ questa proprieta'.
 
 from __future__ import annotations
 
-from typing import TypeAlias
-
 from ...domain.card_id import card_to_id
 from ...domain.state import GameState
 from ..fast.state_2p import CARD_POINTS, fast_who_wins_trick_2p
 from .solver import EndgameSolution, _validate
 
-_FastEndgameState: TypeAlias = tuple[
+type _FastEndgameState = tuple[
     tuple[int, ...],  # mano P0, ordine identico al dominio
     tuple[int, ...],  # mano P1, ordine identico al dominio
     int,  # punti P0 gia' acquisiti

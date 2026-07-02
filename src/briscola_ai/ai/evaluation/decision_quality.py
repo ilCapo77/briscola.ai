@@ -26,9 +26,9 @@ ma la policy continua a ricevere solo `PlayerObservation`.
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass
-from typing import Optional, Sequence
 
 from ...domain.engine import PlayCardAction, step
 from ...domain.observation import make_player_observation
@@ -115,7 +115,7 @@ def _card_cost_for_conservation(*, card, trump_suit) -> tuple[int, int, int]:
     return (is_trump, *card_conservation_cost(card))
 
 
-def _is_trump_overkill_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> Optional[bool]:
+def _is_trump_overkill_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> bool | None:
     """
     Ritorna True/False se la scelta è un “overkill briscola”, oppure None se non applicabile.
 
@@ -174,7 +174,7 @@ def _is_trump_overkill_second_hand(*, state: GameState, player_index: int, chose
     return bool(chosen_cost > min_cost)
 
 
-def _is_trump_waste_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> Optional[bool]:
+def _is_trump_waste_second_hand(*, state: GameState, player_index: int, chosen_card_index: int) -> bool | None:
     """
     Ritorna True/False se la scelta è uno “spreco briscola”, oppure None se non applicabile.
 
@@ -201,7 +201,7 @@ def _is_trump_waste_second_hand(*, state: GameState, player_index: int, chosen_c
 
     winning_non_trump_exists = False
     winning_any_exists = False
-    for i, card in enumerate(hand):
+    for card in hand:
         trick_cards = ((lead_card, lead_player), (card, player_index))
         winner = who_wins_trick(trick_cards, trump_suit)
         if winner != player_index:
@@ -317,7 +317,7 @@ def evaluate_bc_model_seat_fair_match_2p_with_quality_numba(
     *,
     num_games: int,
     seed: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
     opponent_agent: BCModelAgent | None = None,
 ) -> SeatFairStatsWithQuality:
     """
@@ -572,7 +572,7 @@ def evaluate_seat_fair_match_2p_with_quality(
     *,
     num_games: int,
     seed: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
 ) -> SeatFairStatsWithQuality:
     """
     Valuta A vs B (seat-fair) e colleziona quality metrics per A.
@@ -687,7 +687,7 @@ def evaluate_seat_fair_match_2p_with_quality_parallel(
     num_games: int,
     seed: int,
     workers: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
 ) -> SeatFairStatsWithQuality:
     """
     Valuta A vs B con quality metrics usando piu' processi.

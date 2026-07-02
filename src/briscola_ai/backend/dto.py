@@ -43,7 +43,7 @@ class CardDTO(BaseModel):
     points: int
 
     @classmethod
-    def from_domain(cls, card: Card) -> "CardDTO":
+    def from_domain(cls, card: Card) -> CardDTO:
         """Converte una Card di dominio in CardDTO."""
         return cls(
             suit=card.suit.value,
@@ -64,7 +64,7 @@ class TableCardDTO(BaseModel):
     player_index: int
 
     @classmethod
-    def from_domain(cls, card: Card, player_index: int) -> "TableCardDTO":
+    def from_domain(cls, card: Card, player_index: int) -> TableCardDTO:
         """Converte una tupla (Card, player_index) in TableCardDTO."""
         return cls(card=CardDTO.from_domain(card), player_index=player_index)
 

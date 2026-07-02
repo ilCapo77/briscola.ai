@@ -264,7 +264,8 @@ def evaluate_pairwise(
     mae = float(np.mean(np.abs(pred_final - data.final_delta)))
     root_pred = _root_predictions_scaled(data, pred)
     pairs = _build_pairs(data.root_id, data.action_value, min_margin=min_margin)
-    if pairs.shape[0] > 0:
+    # SIM108 soppresso: il ternario su questa espressione numpy sarebbe meno leggibile.
+    if pairs.shape[0] > 0:  # noqa: SIM108
         pair_acc = float(np.mean(root_pred[pairs[:, 0]] > root_pred[pairs[:, 1]]))
     else:
         pair_acc = 0.0

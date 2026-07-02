@@ -14,11 +14,11 @@ from briscola_ai.backend.event_log_reader import PostgresEventLogReader
 
 
 class _FakeReadCursor:
-    def __init__(self, conn: "_FakeReadConn") -> None:
+    def __init__(self, conn: _FakeReadConn) -> None:
         self._conn = conn
         self._rows: list[tuple[Any, ...]] = []
 
-    def __enter__(self) -> "_FakeReadCursor":
+    def __enter__(self) -> _FakeReadCursor:
         return self
 
     def __exit__(self, *exc: object) -> bool:

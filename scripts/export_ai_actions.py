@@ -26,7 +26,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from briscola_ai.backend.event_log import resolve_database_url
 from briscola_ai.backend.event_log_privacy import sanitize_dataset_payload
@@ -40,12 +40,12 @@ SENSITIVE_EXPORT_KEYS = frozenset({"client_id", "payload_json"})
 class ExportAIActionsConfig:
     """Configurazione read-only dell'export dettagliato `ai_action`."""
 
-    db_path: Optional[Path]
+    db_path: Path | None
     out_path: Path
-    database_url: Optional[str] = None
-    game_id: Optional[str] = None
-    code_version: Optional[str] = None
-    ai_agent: Optional[str] = None
+    database_url: str | None = None
+    game_id: str | None = None
+    code_version: str | None = None
+    ai_agent: str | None = None
     include_observations: bool = True
     schema_version: int = 1
 
@@ -55,16 +55,16 @@ class _GameMeta:
     """Metadati per partita, senza campi identificativi sensibili come `client_id`."""
 
     game_id: str
-    num_players: Optional[int] = None
-    seed: Optional[int] = None
-    code_version: Optional[str] = None
-    rules_version: Optional[str] = None
-    finished_at: Optional[float] = None
-    aborted_at: Optional[float] = None
-    aborted_reason: Optional[str] = None
-    ai_agent: Optional[str] = None
-    ai_model_id: Optional[str] = None
-    consent_to_data_collection: Optional[bool] = None
+    num_players: int | None = None
+    seed: int | None = None
+    code_version: str | None = None
+    rules_version: str | None = None
+    finished_at: float | None = None
+    aborted_at: float | None = None
+    aborted_reason: str | None = None
+    ai_agent: str | None = None
+    ai_model_id: str | None = None
+    consent_to_data_collection: bool | None = None
 
     def as_record(self) -> dict[str, Any]:
         """Serializza i metadati safe da includere in ogni record JSONL."""
@@ -103,12 +103,12 @@ def _strip_sensitive_export_fields(value: Any) -> Any:
     }
 
 
-def _payload_str(payload: dict[str, Any], key: str) -> Optional[str]:
+def _payload_str(payload: dict[str, Any], key: str) -> str | None:
     value = payload.get(key)
     return str(value) if isinstance(value, str) and value.strip() else None
 
 
-def _payload_bool(payload: dict[str, Any], key: str) -> Optional[bool]:
+def _payload_bool(payload: dict[str, Any], key: str) -> bool | None:
     value = payload.get(key)
     return bool(value) if isinstance(value, bool) else None
 
@@ -141,7 +141,8 @@ def _game_matches(meta: _GameMeta, config: ExportAIActionsConfig) -> bool:
         return False
     if config.code_version is not None and meta.code_version != config.code_version:
         return False
-    if config.ai_agent is not None and meta.ai_agent != config.ai_agent:
+    # SIM103 soppresso di proposito: l'ultima guardia resta simmetrica alle precedenti.
+    if config.ai_agent is not None and meta.ai_agent != config.ai_agent:  # noqa: SIM103
         return False
     return True
 

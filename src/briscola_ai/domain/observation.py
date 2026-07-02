@@ -21,7 +21,6 @@ Obiettivo didattico:
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional
 
 from .models import Card, Suit
 from .state import GameState
@@ -78,14 +77,14 @@ class PlayerObservation:
 
     num_players: int
     is_team_game: bool
-    teams: Optional[tuple[tuple[int, int], tuple[int, int]]]
+    teams: tuple[tuple[int, int], tuple[int, int]] | None
 
     player_index: int
     player_name: str
 
     hand: tuple[Card, ...]
 
-    trump_card: Optional[Card]
+    trump_card: Card | None
     deck_size: int
 
     table_cards: tuple[tuple[Card, int], ...]
@@ -93,8 +92,8 @@ class PlayerObservation:
     first_player: int
 
     game_over: bool
-    winner_index: Optional[int]  # 2-player
-    winning_team: Optional[int]  # 4-player
+    winner_index: int | None  # 2-player
+    winning_team: int | None  # 4-player
 
     players_points: tuple[int, ...]
     players_hand_sizes: tuple[int, ...]

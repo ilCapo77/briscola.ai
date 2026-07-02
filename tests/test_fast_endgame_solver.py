@@ -11,6 +11,10 @@ from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.rules import trick_points
 from briscola_ai.domain.state import GameState, PlayerState, new_game_state
 
+# Default condiviso a livello di modulo: `Card` e' frozen, quindi riusarlo e' sicuro
+# (B008 vieta le chiamate nei default perche' non distingue i costruttori immutabili).
+_DEFAULT_TRUMP = Card(Suit.COINS, Rank.SEVEN)
+
 
 def _endgame_state(
     hand0: tuple[Card, ...],
@@ -18,7 +22,7 @@ def _endgame_state(
     *,
     current_turn: int,
     table_cards: tuple[tuple[Card, int], ...] = (),
-    trump_card: Card = Card(Suit.COINS, Rank.SEVEN),
+    trump_card: Card = _DEFAULT_TRUMP,
 ) -> GameState:
     """Costruisce uno stato endgame minimale con punti coerenti."""
     first_player = table_cards[0][1] if table_cards else current_turn

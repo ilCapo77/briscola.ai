@@ -37,7 +37,6 @@ nascosta (a mazzo vuoto la mano avversaria è comunque deducibile dall'informazi
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from ...domain.engine import PlayCardAction, step
 from ...domain.state import GameState
@@ -116,7 +115,7 @@ def _validate(state: GameState) -> None:
             raise ValueError("Mani sbilanciate rispetto alla carta sul tavolo")
 
 
-def _minimax(state: GameState, memo: dict[GameState, tuple[int, Optional[int]]]) -> tuple[int, Optional[int]]:
+def _minimax(state: GameState, memo: dict[GameState, tuple[int, int | None]]) -> tuple[int, int | None]:
     """
     Minimax esatto. Ritorna `(final_delta_p0_p1, best_card_index)` per lo stato dato.
 
@@ -138,8 +137,8 @@ def _minimax(state: GameState, memo: dict[GameState, tuple[int, Optional[int]]])
     mover = state.current_turn
     maximize = mover == 0  # il player 0 massimizza il delta p0-p1, il player 1 lo minimizza
 
-    best_value: Optional[int] = None
-    best_index: Optional[int] = None
+    best_value: int | None = None
+    best_index: int | None = None
 
     # Le carte sono iterate in ordine crescente di indice: usando confronti stretti (>/<),
     # a parità di valore resta selezionato l'indice più basso => tie-break deterministico.
@@ -177,7 +176,7 @@ def solve_endgame(state: GameState) -> EndgameSolution:
     """
     _validate(state)
 
-    memo: dict[GameState, tuple[int, Optional[int]]] = {}
+    memo: dict[GameState, tuple[int, int | None]] = {}
     final_delta, best_index = _minimax(state, memo)
     assert best_index is not None  # garantito da `_validate` (stato non terminale)
 

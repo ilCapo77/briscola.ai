@@ -29,6 +29,9 @@ from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
 _BETA = 1.0
 # `low_lead_points_max`: nel kernel Numba un valore negativo equivale a `None` (soglia disattivata).
 _LOW_LEAD_CASES: tuple[tuple[int | None, int], ...] = ((2, 2), (None, -1))

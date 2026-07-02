@@ -146,9 +146,7 @@ def _onehot_to_id_set(raw: object) -> set[int]:
         raise ValueError(f"one-hot len={len(raw)} (atteso 40)")
     ids: set[int] = set()
     for i, value in enumerate(raw):
-        if isinstance(value, bool):
-            iv = int(value)
-        elif isinstance(value, (int, float)) and value in (0, 1):
+        if isinstance(value, bool) or isinstance(value, (int, float)) and value in (0, 1):
             iv = int(value)
         else:
             raise ValueError("one-hot deve contenere solo 0/1")

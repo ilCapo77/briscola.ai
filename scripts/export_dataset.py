@@ -74,7 +74,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from briscola_ai.backend.event_log import resolve_database_url
 from briscola_ai.backend.event_log_privacy import sanitize_dataset_payload
@@ -87,13 +87,13 @@ DEFAULT_SQLITE_DB = Path("./data/briscola_events.sqlite3")
 class ExportConfig:
     """Configurazione dell'export."""
 
-    db_path: Optional[Path]
+    db_path: Path | None
     out_path: Path
-    player_index: Optional[int]
+    player_index: int | None
     include_ai: bool
     include_next_state: bool
     only_completed_games: bool
-    database_url: Optional[str] = None
+    database_url: str | None = None
     schema_version: int = 1
 
 
@@ -122,7 +122,7 @@ def _compute_trick_points(trick_cards: Any) -> int:
     return total
 
 
-def _find_best_observation(observations: list[dict[str, Any]], *, card_index: int) -> Optional[dict[str, Any]]:
+def _find_best_observation(observations: list[dict[str, Any]], *, card_index: int) -> dict[str, Any] | None:
     """
     Trova la migliore observation “prima dell'azione”.
 
@@ -196,7 +196,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
         "records_missing_next_observation": 0,
     }
 
-    current_game_id: Optional[str] = None
+    current_game_id: str | None = None
     observations_by_player: dict[int, list[dict[str, Any]]] = {}
     pending_by_player: dict[int, dict[str, Any]] = {}
     skip_current_game = False

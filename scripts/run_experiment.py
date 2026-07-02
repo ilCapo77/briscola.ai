@@ -22,6 +22,7 @@ gli artefatti in `data/` e `benchmarks/` sono locali (gitignored).
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import shutil
@@ -519,10 +520,8 @@ def main() -> int:
         # In modalità minimal, rimuoviamo gli stage intermedi (manteniamo solo il finale).
         if bool(args.minimal_data):
             for p in stage_out_paths:
-                try:
+                with contextlib.suppress(FileNotFoundError):
                     p.unlink()
-                except FileNotFoundError:
-                    pass
 
     # Se vogliamo mantenere `data/models/` minimal, copiamo subito una copia del modello
     # dentro la cartella dell'esperimento (così il manifest resta “auto-consistente” anche
@@ -642,10 +641,8 @@ def main() -> int:
         best_present = best_path.exists()
 
         if bool(args.update_best) or best_present:
-            try:
+            with contextlib.suppress(FileNotFoundError):
                 model_path.unlink()
-            except FileNotFoundError:
-                pass
             _prune_models_dir(models_dir=models_dir, algo=algo)
         else:
             # Primo run “minimal” senza best: preserviamo solo il modello run-specific.

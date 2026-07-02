@@ -22,7 +22,7 @@ import json
 import os
 from collections.abc import AsyncGenerator, AsyncIterator
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 from ..domain.serialization import game_state_from_dict, game_state_to_dict
 from ..domain.state import GameState
@@ -40,7 +40,7 @@ class AiSeatConfig:
     """Config IA di un posto: come ricostruire l'agente (no oggetto Agent, non serializzabile)."""
 
     agent_name: str
-    model_id: Optional[str] = None
+    model_id: str | None = None
 
 
 @dataclass
@@ -94,19 +94,19 @@ def session_from_json(raw: str) -> GameSession:
 class GameSessionStore(Protocol):
     """Interfaccia minima dello store sessioni partita."""
 
-    async def get(self, game_id: str) -> Optional[GameSession]: ...
+    async def get(self, game_id: str) -> GameSession | None: ...
 
     async def set(self, session: GameSession, *, ttl_seconds: int = DEFAULT_SESSION_TTL_SECONDS) -> None: ...
 
     async def delete(self, game_id: str) -> None: ...
 
-    def lock(self, game_id: str) -> "contextlib.AbstractAsyncContextManager[None]": ...
+    def lock(self, game_id: str) -> contextlib.AbstractAsyncContextManager[None]: ...
 
     async def publish(self, game_id: str, message: str) -> None:
         """Pubblica un messaggio sul canale eventi della partita (per fan-out WebSocket multi-replica)."""
         ...
 
-    def subscribe(self, game_id: str) -> AsyncGenerator[str, None]:
+    def subscribe(self, game_id: str) -> AsyncGenerator[str]:
         """Async generator che produce i messaggi pubblicati sul canale eventi della partita."""
         ...
 
@@ -120,7 +120,7 @@ class InMemoryGameSessionStore:
         # Pub/sub locale: per ogni partita, l'insieme delle code dei subscriber attivi.
         self._subscribers: dict[str, set[asyncio.Queue[str]]] = {}
 
-    async def get(self, game_id: str) -> Optional[GameSession]:
+    async def get(self, game_id: str) -> GameSession | None:
         raw = self._data.get(game_id)
         return session_from_json(raw) if raw is not None else None
 
@@ -147,7 +147,7 @@ class InMemoryGameSessionStore:
         for queue in list(self._subscribers.get(game_id, ())):
             queue.put_nowait(message)
 
-    async def subscribe(self, game_id: str) -> AsyncGenerator[str, None]:
+    async def subscribe(self, game_id: str) -> AsyncGenerator[str]:
         queue: asyncio.Queue[str] = asyncio.Queue()
         self._subscribers.setdefault(game_id, set()).add(queue)
         try:
@@ -164,7 +164,7 @@ class InMemoryGameSessionStore:
 class RedisGameSessionStore:
     """Store su Redis (prod). `redis` è importato lazy; il client può essere iniettato per i test."""
 
-    def __init__(self, url: Optional[str] = None, *, client: Any = None) -> None:
+    def __init__(self, url: str | None = None, *, client: Any = None) -> None:
         if client is not None:
             self._redis = client
         elif url is not None:
@@ -182,7 +182,7 @@ class RedisGameSessionStore:
     def _channel(game_id: str) -> str:
         return f"game:{game_id}:events"
 
-    async def get(self, game_id: str) -> Optional[GameSession]:
+    async def get(self, game_id: str) -> GameSession | None:
         raw = await self._redis.get(self._key(game_id))
         return session_from_json(raw) if raw is not None else None
 
@@ -217,7 +217,7 @@ class RedisGameSessionStore:
     async def publish(self, game_id: str, message: str) -> None:
         await self._redis.publish(self._channel(game_id), message)
 
-    async def subscribe(self, game_id: str) -> AsyncGenerator[str, None]:
+    async def subscribe(self, game_id: str) -> AsyncGenerator[str]:
         pubsub = self._redis.pubsub()
         await pubsub.subscribe(self._channel(game_id))
         try:
@@ -232,7 +232,7 @@ class RedisGameSessionStore:
                 await pubsub.aclose()
 
 
-def resolve_redis_url() -> Optional[str]:
+def resolve_redis_url() -> str | None:
     """Ritorna l'URL Redis dalle env candidate (override esplicito prima), o None."""
     for name in _REDIS_URL_ENV_CANDIDATES:
         value = os.getenv(name, "").strip()

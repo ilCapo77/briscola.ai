@@ -25,6 +25,9 @@ from briscola_ai.ai.fast.self_play import (
 )
 from briscola_ai.domain.state import GameState
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.slow
+
 
 def _winner_index_domain_2p(state: GameState) -> int | None:
     """Calcola il vincitore 2-player dal dominio canonico."""

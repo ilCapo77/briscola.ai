@@ -161,7 +161,7 @@ def test_redis_lock_raises_if_not_acquired() -> None:
             return None
 
     class _FakeRedis:
-        def lock(self, *args: object, **kwargs: object) -> "_FakeLock":
+        def lock(self, *args: object, **kwargs: object) -> _FakeLock:
             return _FakeLock()
 
     store = RedisGameSessionStore(client=_FakeRedis())

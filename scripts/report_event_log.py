@@ -23,7 +23,7 @@ import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from briscola_ai.backend.event_log import resolve_database_url
 from briscola_ai.backend.event_log_reader import EventLogReader, open_event_log_reader
@@ -37,11 +37,11 @@ WEEK_SECONDS = 7 * DAY_SECONDS
 class ReportConfig:
     """Configurazione del report read-only."""
 
-    db_path: Optional[Path]
-    database_url: Optional[str] = None
+    db_path: Path | None
+    database_url: str | None = None
 
 
-def _is_recent(ts: Optional[float], *, now: float, window_seconds: int) -> bool:
+def _is_recent(ts: float | None, *, now: float, window_seconds: int) -> bool:
     return ts is not None and ts >= now - window_seconds
 
 
@@ -82,7 +82,7 @@ def _empty_report(*, backend: str) -> dict[str, Any]:
     }
 
 
-def build_event_log_report(config: ReportConfig, *, now: Optional[float] = None) -> dict[str, Any]:
+def build_event_log_report(config: ReportConfig, *, now: float | None = None) -> dict[str, Any]:
     """
     Costruisce il report aggregato.
 

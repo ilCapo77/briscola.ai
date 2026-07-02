@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
+import pytest
 
 from briscola_ai.ai.agents import HeuristicAgentV2, PIMCAgent
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
@@ -20,6 +21,9 @@ from briscola_ai.ai.numba.value_dataset import (
     collect_value_dataset_batch_numba,
     warm_up_numba_value_dataset,
 )
+
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
 
 _ROOT = Path(__file__).resolve().parents[1]
 

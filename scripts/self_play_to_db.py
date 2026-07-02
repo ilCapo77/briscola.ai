@@ -29,6 +29,7 @@ nel DB salviamo invece i metadati davvero “operativi” (es. quali agenti hann
 from __future__ import annotations
 
 import argparse
+import contextlib
 import random
 import time
 import uuid
@@ -238,10 +239,8 @@ def simulate_self_play_to_db(config: SelfPlayConfig) -> dict[str, int]:
             # - export “solo complete games” (dataset più pulito);
             # - statistiche offline senza dover inferire la fine partita da altri eventi.
             if state.game_over:
-                try:
+                with contextlib.suppress(Exception):
                     event_log.try_mark_game_finished(game_id)
-                except Exception:
-                    pass
                 event_log.log_event(
                     game_id,
                     "game_finished",

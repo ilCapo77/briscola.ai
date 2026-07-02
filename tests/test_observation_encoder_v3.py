@@ -34,6 +34,9 @@ from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, PlayerState, new_game_state
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
 
 def _endgame_like_state() -> GameState:
     """Stato a mazzo vuoto con prese non banali (per attivare le feature out_of_play)."""

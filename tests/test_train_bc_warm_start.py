@@ -8,11 +8,15 @@ import sys
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
 from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.backend.observation_builder import build_observation_dto
 from briscola_ai.domain.state import new_game_state
+
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.slow
 
 _ROOT = Path(__file__).resolve().parents[1]
 

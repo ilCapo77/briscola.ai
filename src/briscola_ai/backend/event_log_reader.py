@@ -19,7 +19,7 @@ import sqlite3
 from collections.abc import Iterable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Optional, Protocol
+from typing import Any, Protocol
 
 
 @dataclass(frozen=True)
@@ -27,15 +27,15 @@ class EventLogGameRow:
     """Riga normalizzata della tabella `games`."""
 
     game_id: str
-    created_at: Optional[float]
-    num_players: Optional[int]
-    seed: Optional[int]
-    code_version: Optional[str]
-    rules_version: Optional[str]
-    client_id: Optional[str]
-    finished_at: Optional[float]
-    aborted_at: Optional[float]
-    aborted_reason: Optional[str]
+    created_at: float | None
+    num_players: int | None
+    seed: int | None
+    code_version: str | None
+    rules_version: str | None
+    client_id: str | None
+    finished_at: float | None
+    aborted_at: float | None
+    aborted_reason: str | None
 
 
 @dataclass(frozen=True)
@@ -44,8 +44,8 @@ class EventLogEventRow:
 
     id: int
     game_id: str
-    server_version: Optional[int]
-    player_index: Optional[int]
+    server_version: int | None
+    player_index: int | None
     event_type: str
     payload_json: str
 
@@ -65,19 +65,19 @@ class EventLogReader(Protocol):
     def iter_events(self) -> Iterable[EventLogEventRow]: ...
 
 
-def _optional_float(value: Any) -> Optional[float]:
+def _optional_float(value: Any) -> float | None:
     if value is None:
         return None
     return float(value)
 
 
-def _optional_int(value: Any) -> Optional[int]:
+def _optional_int(value: Any) -> int | None:
     if value is None:
         return None
     return int(value)
 
 
-def _optional_str(value: Any) -> Optional[str]:
+def _optional_str(value: Any) -> str | None:
     if value is None:
         return None
     return str(value)
@@ -185,7 +185,7 @@ class PostgresEventLogReader:
 
     backend_name = "postgres"
 
-    def __init__(self, dsn: Optional[str] = None, *, conn: Any = None) -> None:
+    def __init__(self, dsn: str | None = None, *, conn: Any = None) -> None:
         self._owns_connection = conn is None
         if conn is not None:
             self._conn = conn
@@ -272,7 +272,7 @@ class PostgresEventLogReader:
             )
 
 
-def open_event_log_reader(*, sqlite_path: str | Path | None, database_url: Optional[str]) -> EventLogReader:
+def open_event_log_reader(*, sqlite_path: str | Path | None, database_url: str | None) -> EventLogReader:
     """Apre il reader corretto: Postgres se `database_url` è presente, altrimenti SQLite."""
 
     if database_url:

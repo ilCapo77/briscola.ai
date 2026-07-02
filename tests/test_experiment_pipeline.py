@@ -20,6 +20,9 @@ import pytest
 
 from briscola_ai.ai.experiment_pipeline import build_experiment_name, extract_best_metric_from_matrix_json
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.slow
+
 
 def _run_experiment_script() -> Path:
     """Restituisce il path assoluto dello script pipeline usato dai test CLI."""

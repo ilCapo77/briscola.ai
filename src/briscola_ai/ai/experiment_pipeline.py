@@ -17,7 +17,7 @@ from __future__ import annotations
 import json
 import re
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Literal
 
@@ -26,7 +26,7 @@ AlgoName = Literal["a2c", "pg", "bc"]
 
 def utc_now_iso() -> str:
     """Ritorna un timestamp ISO-8601 in UTC (utile per manifest)."""
-    return datetime.now(tz=timezone.utc).isoformat()
+    return datetime.now(tz=UTC).isoformat()
 
 
 def _slugify(text: str) -> str:

@@ -20,8 +20,13 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import pytest
+
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
 from briscola_ai.ai.models import BCModelAgent
+
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.slow
 
 _ROOT = Path(__file__).resolve().parents[1]
 

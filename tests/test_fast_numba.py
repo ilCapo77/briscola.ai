@@ -19,6 +19,9 @@ from briscola_ai.ai.numba.core import (
     warm_up_numba_evaluation,
 )
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
 
 def test_numba_random_game_is_deterministic_and_valid() -> None:
     """Stesso seed -> stesso risultato; i punti totali devono essere 120."""

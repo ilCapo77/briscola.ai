@@ -14,7 +14,7 @@ import argparse
 import json
 from collections import Counter
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from briscola_ai.backend.event_log import resolve_database_url
 from briscola_ai.backend.event_log_reader import EventLogEventRow, EventLogGameRow, open_event_log_reader
@@ -93,7 +93,7 @@ def _event_summary(row: EventLogEventRow) -> dict[str, Any]:
     return summary
 
 
-def inspect_game(*, game_id: str, db_path: Optional[Path], database_url: Optional[str]) -> dict[str, Any]:
+def inspect_game(*, game_id: str, db_path: Path | None, database_url: str | None) -> dict[str, Any]:
     """Legge il DB selezionato e restituisce il riepilogo della partita richiesta."""
     reader = open_event_log_reader(sqlite_path=db_path, database_url=database_url)
     try:

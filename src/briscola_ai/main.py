@@ -134,10 +134,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         cleanup_task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await cleanup_task
-        except asyncio.CancelledError:
-            pass
         if event_log is not None and event_log_created_here:
             event_log.close()
             backend_server.app.state.event_log = None

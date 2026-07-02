@@ -16,8 +16,8 @@ lavora direttamente su `GameState + step()` per essere veloce e deterministica.
 from __future__ import annotations
 
 import random
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Optional, Sequence
 
 from ...domain.engine import PlayCardAction, step
 from ...domain.observation import make_player_observation
@@ -103,7 +103,7 @@ class SeatFairStats:
         return variance**0.5
 
 
-def _winner_index_2p(state: GameState) -> Optional[int]:
+def _winner_index_2p(state: GameState) -> int | None:
     """Ritorna 0/1 se c'è un vincitore, altrimenti None (pareggio)."""
     p0 = state.players[0].points
     p1 = state.players[1].points
@@ -155,7 +155,7 @@ def evaluate_match_2p(
     *,
     num_games: int,
     seed: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
 ) -> MatchStats:
     """
     Valuta `agent0` vs `agent1` in 2-player.
@@ -216,7 +216,7 @@ def evaluate_seat_fair_match_2p(
     *,
     num_games: int,
     seed: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
 ) -> SeatFairStats:
     """
     Valuta `agent_a` vs `agent_b` in 2-player eliminando il bias di posto.

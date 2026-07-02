@@ -11,12 +11,12 @@ Perché esiste:
 
 from __future__ import annotations
 
-from typing import Iterable, Optional, Sequence
+from collections.abc import Iterable, Sequence
 
 from .models import Card, Suit
 
 
-def who_wins_trick(table_cards: Sequence[tuple[Card, int]], trump_suit: Optional[Suit]) -> int:
+def who_wins_trick(table_cards: Sequence[tuple[Card, int]], trump_suit: Suit | None) -> int:
     """
     Determina il vincitore di una mano (round) dato l'insieme di carte sul tavolo.
 

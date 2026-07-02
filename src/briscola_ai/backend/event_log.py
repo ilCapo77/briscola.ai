@@ -29,7 +29,7 @@ import sqlite3
 import threading
 import time
 from dataclasses import dataclass
-from typing import Any, Optional, Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 from urllib.parse import unquote, urlparse
 
 
@@ -61,10 +61,10 @@ class EventLogProtocol(Protocol):
     def backend_name(self) -> str: ...
 
     @property
-    def database_name(self) -> Optional[str]: ...
+    def database_name(self) -> str | None: ...
 
     @property
-    def database_host(self) -> Optional[str]: ...
+    def database_host(self) -> str | None: ...
 
     def health_check(self) -> bool: ...
 
@@ -75,18 +75,16 @@ class EventLogProtocol(Protocol):
         game_id: str,
         *,
         num_players: int,
-        seed: Optional[int] = None,
-        code_version: Optional[str] = None,
-        rules_version: Optional[str] = None,
+        seed: int | None = None,
+        code_version: str | None = None,
+        rules_version: str | None = None,
     ) -> None: ...
 
     def set_client_id(self, game_id: str, *, client_id: str) -> None: ...
 
-    def try_mark_game_finished(self, game_id: str, *, finished_at: Optional[float] = None) -> bool: ...
+    def try_mark_game_finished(self, game_id: str, *, finished_at: float | None = None) -> bool: ...
 
-    def try_mark_game_aborted(
-        self, game_id: str, *, aborted_reason: str, aborted_at: Optional[float] = None
-    ) -> bool: ...
+    def try_mark_game_aborted(self, game_id: str, *, aborted_reason: str, aborted_at: float | None = None) -> bool: ...
 
     def log_event(
         self,
@@ -94,9 +92,9 @@ class EventLogProtocol(Protocol):
         event_type: str,
         payload: dict[str, Any],
         *,
-        server_version: Optional[int] = None,
-        player_index: Optional[int] = None,
-        created_at: Optional[float] = None,
+        server_version: int | None = None,
+        player_index: int | None = None,
+        created_at: float | None = None,
     ) -> None: ...
 
 
@@ -128,14 +126,14 @@ class EventLog:
         return "sqlite"
 
     @property
-    def database_name(self) -> Optional[str]:
+    def database_name(self) -> str | None:
         """Nome file SQLite, senza path completo."""
         if self._config.path == ":memory:":
             return ":memory:"
         return os.path.basename(self._config.path) or None
 
     @property
-    def database_host(self) -> Optional[str]:
+    def database_host(self) -> str | None:
         """SQLite locale non ha un host di rete."""
         return None
 
@@ -230,9 +228,9 @@ class EventLog:
         game_id: str,
         *,
         num_players: int,
-        seed: Optional[int] = None,
-        code_version: Optional[str] = None,
-        rules_version: Optional[str] = None,
+        seed: int | None = None,
+        code_version: str | None = None,
+        rules_version: str | None = None,
     ) -> None:
         """
         Inserisce la riga della partita (idempotente).
@@ -273,7 +271,7 @@ class EventLog:
             )
             self._conn.commit()
 
-    def try_mark_game_finished(self, game_id: str, *, finished_at: Optional[float] = None) -> bool:
+    def try_mark_game_finished(self, game_id: str, *, finished_at: float | None = None) -> bool:
         """
         Marca una partita come conclusa (`game_over=true`) in modo idempotente.
 
@@ -297,7 +295,7 @@ class EventLog:
         game_id: str,
         *,
         aborted_reason: str,
-        aborted_at: Optional[float] = None,
+        aborted_at: float | None = None,
     ) -> bool:
         """
         Marca una partita come abortita (timeout/inactivity) in modo idempotente.
@@ -340,9 +338,9 @@ class EventLog:
         event_type: str,
         payload: dict[str, Any],
         *,
-        server_version: Optional[int] = None,
-        player_index: Optional[int] = None,
-        created_at: Optional[float] = None,
+        server_version: int | None = None,
+        player_index: int | None = None,
+        created_at: float | None = None,
     ) -> None:
         """
         Appende un evento alla tabella `events`.
@@ -368,7 +366,7 @@ class EventLog:
             self._conn.commit()
 
 
-def _postgres_database_name_from_dsn(dsn: Optional[str]) -> Optional[str]:
+def _postgres_database_name_from_dsn(dsn: str | None) -> str | None:
     """Estrae solo il nome database da un DSN Postgres, senza esporre host/utente/segreti."""
     if not dsn:
         return None
@@ -386,7 +384,7 @@ def _postgres_database_name_from_dsn(dsn: Optional[str]) -> Optional[str]:
     return None
 
 
-def _postgres_database_host_from_dsn(dsn: Optional[str]) -> Optional[str]:
+def _postgres_database_host_from_dsn(dsn: str | None) -> str | None:
     """Estrae solo l'host Postgres da un DSN, senza esporre utente/password."""
     if not dsn:
         return None
@@ -421,7 +419,7 @@ class PostgresEventLog:
     - Il client può essere iniettato (`conn=`) per i test senza un Postgres reale.
     """
 
-    def __init__(self, dsn: Optional[str] = None, *, conn: Any = None) -> None:
+    def __init__(self, dsn: str | None = None, *, conn: Any = None) -> None:
         self._lock = threading.Lock()
         self._dsn = dsn
         if conn is not None:
@@ -443,12 +441,12 @@ class PostgresEventLog:
         return "postgres"
 
     @property
-    def database_name(self) -> Optional[str]:
+    def database_name(self) -> str | None:
         """Nome del database Postgres, estratto dal DSN senza rivelare credenziali."""
         return _postgres_database_name_from_dsn(self._dsn)
 
     @property
-    def database_host(self) -> Optional[str]:
+    def database_host(self) -> str | None:
         """Host Postgres, utile per confrontare project/branch Neon senza rivelare segreti."""
         return _postgres_database_host_from_dsn(self._dsn)
 
@@ -549,9 +547,9 @@ class PostgresEventLog:
         game_id: str,
         *,
         num_players: int,
-        seed: Optional[int] = None,
-        code_version: Optional[str] = None,
-        rules_version: Optional[str] = None,
+        seed: int | None = None,
+        code_version: str | None = None,
+        rules_version: str | None = None,
     ) -> None:
         self._execute(
             """
@@ -571,7 +569,7 @@ class PostgresEventLog:
             (cleaned, game_id),
         )
 
-    def try_mark_game_finished(self, game_id: str, *, finished_at: Optional[float] = None) -> bool:
+    def try_mark_game_finished(self, game_id: str, *, finished_at: float | None = None) -> bool:
         ts = time.time() if finished_at is None else float(finished_at)
         rc = self._execute(
             "UPDATE games SET finished_at = %s WHERE game_id = %s AND finished_at IS NULL;",
@@ -579,7 +577,7 @@ class PostgresEventLog:
         )
         return rc == 1
 
-    def try_mark_game_aborted(self, game_id: str, *, aborted_reason: str, aborted_at: Optional[float] = None) -> bool:
+    def try_mark_game_aborted(self, game_id: str, *, aborted_reason: str, aborted_at: float | None = None) -> bool:
         ts = time.time() if aborted_at is None else float(aborted_at)
         reason = (str(aborted_reason).strip() or "unknown")[:200]
         rc = self._execute(
@@ -597,9 +595,9 @@ class PostgresEventLog:
         event_type: str,
         payload: dict[str, Any],
         *,
-        server_version: Optional[int] = None,
-        player_index: Optional[int] = None,
-        created_at: Optional[float] = None,
+        server_version: int | None = None,
+        player_index: int | None = None,
+        created_at: float | None = None,
     ) -> None:
         ts = created_at if created_at is not None else time.time()
         payload_json = json.dumps(payload, ensure_ascii=False, separators=(",", ":"))
@@ -612,7 +610,7 @@ class PostgresEventLog:
         )
 
 
-def resolve_database_url() -> Optional[str]:
+def resolve_database_url() -> str | None:
     """URL Postgres dalle env candidate (override esplicito prima), o None."""
     for name in ("BRISCOLA_DATABASE_URL", "DATABASE_URL"):
         value = os.getenv(name, "").strip()
@@ -621,7 +619,7 @@ def resolve_database_url() -> Optional[str]:
     return None
 
 
-def build_event_log(*, sqlite_path: Optional[str], database_url: Optional[str]) -> Optional[EventLogProtocol]:
+def build_event_log(*, sqlite_path: str | None, database_url: str | None) -> EventLogProtocol | None:
     """
     Crea il backend event log: Postgres se `database_url` è presente, altrimenti SQLite se è dato un
     path, altrimenti `None` (feature disabilitata). In cloud multi-replica usare sempre Postgres:
@@ -634,7 +632,7 @@ def build_event_log(*, sqlite_path: Optional[str], database_url: Optional[str]) 
     return None
 
 
-def parse_event_db_path(raw: Optional[str]) -> Optional[str]:
+def parse_event_db_path(raw: str | None) -> str | None:
     """
     Normalizza un path di configurazione (env/CLI).
 

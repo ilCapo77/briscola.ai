@@ -51,6 +51,9 @@ from briscola_ai.domain.models import Card, Rank
 from briscola_ai.domain.observation import _card_to_id_fast
 from briscola_ai.domain.rules import who_wins_trick
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
 # Tutte le 40 carte canoniche, indicizzate per card_id: la fonte di verità per ogni confronto.
 ALL_CARDS: tuple[Card, ...] = tuple(id_to_card(card_id) for card_id in range(40))
 

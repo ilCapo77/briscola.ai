@@ -16,7 +16,12 @@ import subprocess
 import sys
 from pathlib import Path
 
+import pytest
+
 from briscola_ai.versioning import get_rules_version
+
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.slow
 
 
 def test_self_play_writes_games_metadata(tmp_path: Path) -> None:

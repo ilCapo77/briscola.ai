@@ -14,7 +14,6 @@ Ora vivono in `briscola_ai.domain.models` per rendere il dominio autosufficiente
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Optional
 
 from .models import Card, Rank, Suit
 
@@ -49,20 +48,20 @@ class GameState:
 
     num_players: int
     is_team_game: bool
-    teams: Optional[tuple[tuple[int, int], tuple[int, int]]]
+    teams: tuple[tuple[int, int], tuple[int, int]] | None
 
     players: tuple[PlayerState, ...]
 
     deck: tuple[Card, ...]
-    trump_card: Optional[Card]
+    trump_card: Card | None
 
     table_cards: tuple[tuple[Card, int], ...]
     current_turn: int
     first_player: int
 
     game_over: bool
-    winner_index: Optional[int]  # 2-player
-    winning_team: Optional[int]  # 4-player
+    winner_index: int | None  # 2-player
+    winning_team: int | None  # 4-player
 
 
 def _create_deck() -> list[Card]:
@@ -79,9 +78,7 @@ def _create_deck() -> list[Card]:
     return deck
 
 
-def new_game_state(
-    num_players: int, player_names: Optional[list[str]] = None, *, seed: Optional[int] = None
-) -> GameState:
+def new_game_state(num_players: int, player_names: list[str] | None = None, *, seed: int | None = None) -> GameState:
     """
     Crea uno stato iniziale pronto per giocare (shuffle + deal).
 
@@ -121,7 +118,7 @@ def new_game_state(
     captured: list[list[Card]] = [[] for _ in range(num_players)]
     points = [0 for _ in range(num_players)]
 
-    trump_card: Optional[Card] = None
+    trump_card: Card | None = None
 
     if is_team_game:
         # 4-player: 10 carte a testa, mazzo completo distribuito

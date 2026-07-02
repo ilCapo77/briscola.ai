@@ -23,10 +23,11 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Iterable
 from dataclasses import dataclass
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterable
+from typing import Any
 
 import numpy as np
 
@@ -160,9 +161,7 @@ def _has_supported_weights(npz_keys: Iterable[str]) -> bool:
     keys = set(npz_keys)
     if {"w", "b"}.issubset(keys):
         return True
-    if {"w1", "b1", "w2", "b2"}.issubset(keys):
-        return True
-    return False
+    return {"w1", "b1", "w2", "b2"}.issubset(keys)
 
 
 def _format_short_algorithm(metadata: dict[str, Any]) -> str:
@@ -312,7 +311,7 @@ def list_local_models(models_dir: Path, *, recursive: bool = False) -> list[Loca
             continue
 
         label, description_it = _summarize_model_it(path.name, metadata)
-        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=timezone.utc).isoformat()
+        mtime = datetime.fromtimestamp(path.stat().st_mtime, tz=UTC).isoformat()
         out.append(
             LocalModelSpec(
                 id=rel_id,

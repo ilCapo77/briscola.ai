@@ -5,15 +5,13 @@ Qui testiamo solo la funzione di determinazione del vincitore della mano, isolan
 dal resto del flusso (pesca, fine partita, ecc.).
 """
 
-from typing import Optional
-
 import pytest
 
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.rules import who_wins_trick
 
 
-def _trump_suit(trump: Optional[Card]) -> Optional[Suit]:
+def _trump_suit(trump: Card | None) -> Suit | None:
     """Helper: estrae il seme di briscola (o None se non definito)."""
     return trump.suit if trump else None
 

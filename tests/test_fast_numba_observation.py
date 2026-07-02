@@ -30,6 +30,9 @@ from briscola_ai.ai.numba.observation import (
     warm_up_numba_observation,
 )
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
 
 def _assert_encoders_match(*, seed: int, steps: int, version: EncoderVersion) -> None:
     """Avanza una partita fast e confronta encoder Python vs Numba per entrambi i player."""

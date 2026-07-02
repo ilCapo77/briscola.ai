@@ -304,9 +304,7 @@ def _should_collect_numba(
 ) -> bool:
     """Decide se salvare lo stato corrente nel dataset value."""
     if collect_mode == COLLECT_ALL:
-        if deck_size == 0 and not include_endgame:
-            return False
-        return True
+        return not (deck_size == 0 and not include_endgame)
     if collect_mode == COLLECT_WINDOW:
         if deck_size == 0:
             return bool(include_endgame)

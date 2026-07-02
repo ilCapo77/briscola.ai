@@ -37,9 +37,10 @@ from __future__ import annotations
 import argparse
 import json
 import math
+from collections.abc import Iterable, Iterator
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any, Iterable, Iterator, Literal
+from typing import Any, Literal
 
 WeightMode = Literal["uniform", "margin", "margin_clip", "margin_z", "log_margin"]
 _WEIGHT_MODES: tuple[WeightMode, ...] = ("uniform", "margin", "margin_clip", "margin_z", "log_margin")

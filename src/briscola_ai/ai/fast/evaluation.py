@@ -12,7 +12,7 @@ più complessi. I test devono dimostrare equivalenza aggregata col dominio per g
 from __future__ import annotations
 
 import random
-from typing import Optional, Sequence
+from collections.abc import Sequence
 
 from ..evaluation import MatchStats, SeatFairStats
 from .state_2p import (
@@ -284,7 +284,7 @@ def choose_fast_card_index(
     raise AssertionError("Agente validato ma non implementato nel path fast")
 
 
-def _winner_index_fast_2p(state: Fast2PState) -> Optional[int]:
+def _winner_index_fast_2p(state: Fast2PState) -> int | None:
     """Ritorna 0/1 se c'è un vincitore, altrimenti None (pareggio)."""
     if state.points[0] > state.points[1]:
         return 0
@@ -332,7 +332,7 @@ def evaluate_fast_match_2p(
     *,
     num_games: int,
     seed: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
 ) -> MatchStats:
     """
     Valuta due agenti fast-compatible usando il fast path.
@@ -390,7 +390,7 @@ def evaluate_fast_seat_fair_match_2p(
     *,
     num_games: int,
     seed: int,
-    game_seeds: Optional[Sequence[int]] = None,
+    game_seeds: Sequence[int] | None = None,
 ) -> SeatFairStats:
     """
     Valuta due agenti fast-compatible in modalità seat-fair usando il fast path.

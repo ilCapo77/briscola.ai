@@ -41,7 +41,18 @@ line-length = 120
 extend-exclude = ["src/briscola_ai.egg-info"]
 
 [tool.ruff.lint]
-select = ["E", "F", "I"]
+# E/F/I = base storica; B (bugbear) intercetta bug latenti, UP modernizza la sintassi,
+# SIM segnala semplificazioni. Introdotte dopo aver sistemato il fallout sull'intero repo.
+select = ["E", "F", "I", "B", "UP", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Marker espliciti: `pytest -m "not slow"` permette un ciclo rapido locale saltando
+# i test che compilano kernel Numba o lanciano script in subprocess.
+markers = [
+  "slow: test lenti (subprocess di script interi o run lunghe)",
+  "numba: test che compilano kernel @njit (lenti al primo run, poi cache)",
+]
 
 [tool.mypy]
 python_version = "3.14"
@@ -49,7 +60,10 @@ warn_unused_ignores = true
 warn_redundant_casts = true
 warn_unreachable = true
 no_implicit_optional = true
-check_untyped_defs = false
+# `check_untyped_defs`: mypy controlla anche i corpi delle funzioni senza annotazioni
+# (con false il type-checking mordeva poco). `disallow_untyped_defs` resta off:
+# obbligare le annotazioni ovunque sarebbe troppo invasivo per un progetto didattico.
+check_untyped_defs = true
 disallow_untyped_defs = false
 ignore_missing_imports = true
 exclude = [

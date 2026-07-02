@@ -70,7 +70,7 @@ def _put_state(game_id: str, state: GameState, *, version: int = 0) -> None:
 
 
 @pytest.fixture(autouse=True)
-def _clean_server_state() -> Generator[None, None, None]:
+def _clean_server_state() -> Generator[None]:
     """
     I test d'integrazione usano stato globale in `briscola_ai.backend.server`.
 
@@ -1123,9 +1123,8 @@ def test_server_version_is_monotone_on_actions_when_ai_disabled(monkeypatch: pyt
 def test_websocket_rejects_unknown_game() -> None:
     """WebSocket su partita inesistente: il server chiude subito la connessione."""
     client = TestClient(server.app)
-    with pytest.raises(WebSocketDisconnect) as excinfo:
-        with client.websocket_connect("/ws/not-a-real-game-id/0"):
-            pass
+    with pytest.raises(WebSocketDisconnect) as excinfo, client.websocket_connect("/ws/not-a-real-game-id/0"):
+        pass
     assert excinfo.value.code == 1000
 
 

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import pytest
 
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
 from briscola_ai.ai.endgame.solver import solve_endgame
@@ -24,6 +25,14 @@ from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.rules import trick_points
 from briscola_ai.domain.state import GameState, PlayerState
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
+# Default condivisi a livello di modulo: `Card` e' frozen, quindi riusarli e' sicuro
+# (B008 vieta le chiamate nei default perche' non distingue i costruttori immutabili).
+_DEFAULT_TRUMP_CLUBS = Card(Suit.CLUBS, Rank.SEVEN)
+_DEFAULT_TRUMP_COINS = Card(Suit.COINS, Rank.SEVEN)
+
 
 def _state(
     *,
@@ -32,7 +41,7 @@ def _state(
     deck: tuple[Card, ...],
     table_cards: tuple[tuple[Card, int], ...],
     current_turn: int,
-    trump_card: Card = Card(Suit.CLUBS, Rank.SEVEN),
+    trump_card: Card = _DEFAULT_TRUMP_CLUBS,
     points0: int = 0,
     points1: int = 0,
 ) -> GameState:
@@ -63,7 +72,7 @@ def _endgame_state(
     *,
     current_turn: int,
     table_cards: tuple[tuple[Card, int], ...] = (),
-    trump_card: Card = Card(Suit.COINS, Rank.SEVEN),
+    trump_card: Card = _DEFAULT_TRUMP_COINS,
 ) -> GameState:
     """Costruisce uno stato endgame con punti coerenti."""
     return _state(

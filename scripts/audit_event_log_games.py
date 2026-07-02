@@ -25,7 +25,7 @@ import json
 from collections import Counter
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Optional
+from typing import Any
 
 from briscola_ai.backend.event_log import resolve_database_url
 from briscola_ai.backend.event_log_reader import EventLogReader, open_event_log_reader
@@ -39,10 +39,10 @@ NONE = "<none>"
 class AuditConfig:
     """Configurazione read-only dell'audit partite."""
 
-    db_path: Optional[Path]
-    database_url: Optional[str] = None
-    code_version: Optional[str] = None
-    ai_agent: Optional[str] = None
+    db_path: Path | None
+    database_url: str | None = None
+    code_version: str | None = None
+    ai_agent: str | None = None
     include_games: bool = False
     game_limit: int = 40
 
@@ -52,13 +52,13 @@ class _GameAudit:
     """Accumulator interno per una singola partita."""
 
     game_id: str
-    code_version: Optional[str] = None
-    rules_version: Optional[str] = None
+    code_version: str | None = None
+    rules_version: str | None = None
     finished: bool = False
     aborted: bool = False
-    ai_agent: Optional[str] = None
-    ai_model_id: Optional[str] = None
-    consent: Optional[bool] = None
+    ai_agent: str | None = None
+    ai_model_id: str | None = None
+    consent: bool | None = None
     game_created_seen: bool = False
     malformed_payload_json: int = 0
     events: Counter[str] = field(default_factory=Counter)
@@ -140,7 +140,7 @@ def _counter_to_dict(counter: Counter[str]) -> dict[str, int]:
     return {key: int(counter[key]) for key in sorted(counter)}
 
 
-def _label(value: Optional[str]) -> str:
+def _label(value: str | None) -> str:
     """Normalizza label aggregate, evitando `None` in output tabellari."""
     if value is None:
         return NONE
@@ -160,7 +160,8 @@ def _safe_json_loads(raw: str) -> dict[str, Any] | None:
 def _game_matches_filters(game: _GameAudit, config: AuditConfig) -> bool:
     if config.code_version is not None and _label(game.code_version) != config.code_version:
         return False
-    if config.ai_agent is not None and _label(game.ai_agent) != config.ai_agent:
+    # SIM103 soppresso di proposito: l'ultima guardia resta simmetrica alle precedenti.
+    if config.ai_agent is not None and _label(game.ai_agent) != config.ai_agent:  # noqa: SIM103
         return False
     return True
 

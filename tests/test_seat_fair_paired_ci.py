@@ -33,6 +33,9 @@ from briscola_ai.ai.evaluation.round_robin import (
 from briscola_ai.ai.fast.evaluation import evaluate_fast_seat_fair_match_2p
 from briscola_ai.ai.numba.core import evaluate_numba_seat_fair_match_2p
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.numba
+
 
 class _FirstCardAgent:
     """Agente deterministico minimale: gioca sempre la prima carta in mano."""

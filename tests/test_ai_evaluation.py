@@ -24,6 +24,9 @@ from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_matc
 from briscola_ai.ai.fast.evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
 from briscola_ai.ai.numba.core import evaluate_numba_seat_fair_match_2p, play_policy_game_numba
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = [pytest.mark.slow, pytest.mark.numba]
+
 
 def test_evaluate_match_is_deterministic_for_fixed_seed() -> None:
     """

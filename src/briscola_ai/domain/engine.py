@@ -7,7 +7,6 @@ Questa implementazione codifica le regole della Briscola lavorando su `GameState
 from __future__ import annotations
 
 from dataclasses import dataclass, replace
-from typing import Optional
 
 from .models import Card
 from .rules import who_wins_trick
@@ -36,13 +35,13 @@ class StepResult:
     - `error`: stringa se l'azione è invalida
     """
 
-    played_card: Optional[Card]
-    player: Optional[int]
+    played_card: Card | None
+    player: int | None
     trick_completed: bool
-    trick_winner: Optional[int]
+    trick_winner: int | None
     trick_cards: tuple[tuple[Card, int], ...]
     cards_dealt: bool
-    error: Optional[str] = None
+    error: str | None = None
 
 
 def _valid_actions(state: GameState) -> list[int]:
@@ -159,8 +158,8 @@ def step(state: GameState, action: PlayCardAction) -> tuple[GameState, StepResul
 
     # Fine partita: tutte le mani vuote
     game_over = all(len(p.hand) == 0 for p in players)
-    winner_index: Optional[int] = None
-    winning_team: Optional[int] = None
+    winner_index: int | None = None
+    winning_team: int | None = None
     if game_over:
         if state.is_team_game and state.teams:
             team0 = sum(players[i].points for i in state.teams[0])

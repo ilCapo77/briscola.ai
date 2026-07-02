@@ -237,7 +237,9 @@ def _count_remaining_trumps_public_numba(seen_cards: np.ndarray, trump_suit: int
 @njit(cache=True)
 def _hand_contains_card_numba(hands: np.ndarray, hand_size: int, player_index: int, card_id: int) -> bool:
     """Ritorna True se `card_id` e' nella mano numerica del player."""
-    for i in range(hand_size):
+    # SIM110 suggerirebbe `any(...)`, ma le generator expression non compilano in @njit:
+    # il loop esplicito e' l'unica forma supportata da Numba.
+    for i in range(hand_size):  # noqa: SIM110
         if hands[player_index, i] == card_id:
             return True
     return False

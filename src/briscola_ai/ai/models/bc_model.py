@@ -333,11 +333,8 @@ def _load_bc_model_npz_uncached(path: Path) -> LoadedBCModel:
         if "metadata_json" in data:
             metadata = _parse_metadata_json(data["metadata_json"])
 
-        fmt = metadata.get("format")
-        if isinstance(fmt, str):
-            fmt = fmt.strip()
-        else:
-            fmt = ""
+        raw_fmt = metadata.get("format")
+        fmt = raw_fmt.strip() if isinstance(raw_fmt, str) else ""
 
         # Preferiamo esplicitamente il formato dichiarato nel metadata, ma supportiamo anche inferenza.
         is_mlp = fmt in {"mlp_bc_v1", "mlp_pg_v1"} or {"w1", "b1", "w2", "b2"}.issubset(keys)
@@ -463,10 +460,7 @@ class BCModelAgent:
                 cid = action_id_from_suit_number(suit=card.suit.value, number=card.rank.number)
                 if bool(mask[cid]):
                     valid.append(i)
-            if not valid:
-                card_index = rng.randrange(len(hand))
-            else:
-                card_index = valid[rng.randrange(len(valid))]
+            card_index = valid[rng.randrange(len(valid))] if valid else rng.randrange(len(hand))
 
         # Post-processing opzionale: anti-overkill (secondo di mano).
         if self.overkill_guard_enabled:

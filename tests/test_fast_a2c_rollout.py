@@ -22,6 +22,9 @@ from briscola_ai.ai.training.policy_regularization import (
     grad_ce_wrt_logits_from_probs,
 )
 
+# Marker per cicli rapidi locali: `pytest -m "not slow"` / `-m "not numba"`.
+pytestmark = pytest.mark.slow
+
 # L'opponent mix `best_a2c:...` carica `best_a2c.npz` dalla directory modelli: è un artefatto
 # locale gitignored, assente su CI/cloni puliti, quindi il test che lo usa viene saltato.
 requires_best_a2c_npz = pytest.mark.skipif(

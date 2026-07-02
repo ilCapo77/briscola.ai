@@ -25,8 +25,8 @@ import random
 import time
 import uuid
 from contextlib import aclosing, asynccontextmanager, suppress
-from datetime import datetime, timezone
-from typing import Any, Dict, List, Optional
+from datetime import UTC, datetime
+from typing import Any
 
 from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -78,15 +78,15 @@ class GameConfig(BaseModel):
     """Payload per creare una partita."""
 
     num_players: int = Field(ge=2, le=4)
-    player_names: Optional[List[str]] = Field(default=None, max_length=4)
-    ai_agent: Optional[str] = Field(default=None, max_length=100)
-    ai_model_id: Optional[str] = Field(default=None, max_length=200)
-    client_id: Optional[str] = Field(default=None, max_length=100)
-    consent_to_data_collection: Optional[bool] = None
+    player_names: list[str] | None = Field(default=None, max_length=4)
+    ai_agent: str | None = Field(default=None, max_length=100)
+    ai_model_id: str | None = Field(default=None, max_length=200)
+    client_id: str | None = Field(default=None, max_length=100)
+    consent_to_data_collection: bool | None = None
 
     @field_validator("player_names")
     @classmethod
-    def _limit_player_name_length(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+    def _limit_player_name_length(cls, value: list[str] | None) -> list[str] | None:
         """I nomi sono input libero mostrato in UI e nei log: 40 caratteri bastano."""
         if value is None:
             return None
@@ -104,18 +104,18 @@ class GameAction(BaseModel):
     player_index: int = Field(ge=0, le=3)
     card_index: int = Field(ge=0, le=39)
     # Metadati client-side (opzionali): utili per analisi qualità dati umani.
-    client_observed_server_version: Optional[int] = None
-    client_decision_time_ms: Optional[int] = Field(default=None, ge=0)
+    client_observed_server_version: int | None = None
+    client_decision_time_ms: int | None = Field(default=None, ge=0)
 
 
 class GameState(BaseModel):
     """Payload per richiedere lo stato di una partita (opzionale: vista per giocatore)."""
 
     game_id: str
-    player_index: Optional[int] = None
+    player_index: int | None = None
 
 
-def _get_event_log() -> Optional[EventLogProtocol]:
+def _get_event_log() -> EventLogProtocol | None:
     """
     Helper per accedere al logger dalla app FastAPI.
 
@@ -172,9 +172,9 @@ def _safe_log_event(
     event_type: str,
     payload: dict,
     *,
-    server_version: Optional[int] = None,
-    player_index: Optional[int] = None,
-    state: Optional[DomainGameState] = None,
+    server_version: int | None = None,
+    player_index: int | None = None,
+    state: DomainGameState | None = None,
 ) -> None:
     """
     Wrapper “best-effort” per loggare eventi.
@@ -232,17 +232,15 @@ def _safe_log_event(
         print(f"Event log: errore scrittura evento {event_type!r} (game_id={game_id}, error={exc!r}).")
 
 
-def _safe_set_client_id(game_id: str, client_id: Optional[str]) -> None:
+def _safe_set_client_id(game_id: str, client_id: str | None) -> None:
     """Best-effort: salva `client_id` nella tabella `games` (se event log abilitato)."""
     if not client_id:
         return
     log = _get_event_log()
     if log is None or _get_event_log_mode() == "off":
         return
-    try:
+    with suppress(Exception):
         log.set_client_id(game_id, client_id=str(client_id))
-    except Exception:
-        pass
 
 
 def _maybe_log_game_finished(game_id: str, *, state: DomainGameState, server_version: int) -> None:
@@ -326,7 +324,7 @@ async def lifespan(app: FastAPI):
     desired = database_url or sqlite_path
 
     existing_event_log = getattr(app.state, "event_log", None)
-    event_log: Optional[EventLogProtocol] = existing_event_log
+    event_log: EventLogProtocol | None = existing_event_log
 
     if event_log is not None and (desired is None or event_log.path != desired):
         with suppress(Exception):
@@ -349,10 +347,8 @@ async def lifespan(app: FastAPI):
         yield
     finally:
         cleanup_task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await cleanup_task
-        except asyncio.CancelledError:
-            pass
         if event_log is not None and event_log_created_here:
             event_log.close()
             app.state.event_log = None
@@ -411,8 +407,8 @@ game_store = build_game_session_store()
 # Le connessioni WebSocket NON sono più tracciate qui: ogni connessione si iscrive al pub/sub
 # dello store (`game_store.subscribe`) e inoltra gli eventi al proprio socket. Questo rende la
 # consegna funzionante anche cross-replica (Redis in prod).
-game_timestamps: Dict[str, datetime] = {}
-game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
+game_timestamps: dict[str, datetime] = {}
+game_data: dict[str, list[dict]] = {}  # Memorizza le azioni per il training ML
 
 # Cap sui buffer per-replica: senza limiti, un flusso continuo di partite (o un client abusivo)
 # farebbe crescere la RAM senza vincolo fino al cleanup orario. I valori sono larghi rispetto
@@ -432,10 +428,10 @@ def _utcnow() -> datetime:
     condiviso e vengono confrontati da repliche diverse; con orologi/timezone non allineati
     il confronto naive sbaglierebbe la staleness. UTC aware è privo di ambiguità.
     """
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
-def _remember_game_action(game_id: str, entry: Dict) -> None:
+def _remember_game_action(game_id: str, entry: dict) -> None:
     """
     Accoda un'azione nel buffer ML per-replica applicando i cap anti-crescita.
 
@@ -562,7 +558,7 @@ def _metadata_for_model_catalog_ui(metadata: dict[str, Any]) -> dict[str, Any]:
     return out
 
 
-@app.get("/ai/agents", response_model=Dict)
+@app.get("/ai/agents", response_model=dict)
 async def list_ai_agents():
     """
     Elenca gli agenti IA disponibili (metadati per UI), con un flag `available`.
@@ -604,7 +600,7 @@ async def list_ai_agents():
     return {"common_note_it": AI_AGENTS_COMMON_NOTE_IT, "agents": agents}
 
 
-@app.get("/ai/models", response_model=Dict)
+@app.get("/ai/models", response_model=dict)
 async def list_ai_models():
     """
     Elenca i modelli `.npz` disponibili sul server (per l'agente `bc_model`).
@@ -640,8 +636,8 @@ async def root():
     return {"message": "Benvenuto nelle API di Briscola AI"}
 
 
-@app.get("/meta", response_model=Dict)
-async def meta() -> Dict:
+@app.get("/meta", response_model=dict)
+async def meta() -> dict:
     """
     Metadati “di runtime” per UI/deploy.
 
@@ -664,7 +660,7 @@ async def meta() -> Dict:
 # limite (RAM/Redis/DB unbounded). Sliding window in-process per IP: in multi-replica il
 # limite effettivo è `limite * num_repliche`, accettabile come protezione di primo livello.
 _CREATE_GAME_RATE_WINDOW_SECONDS = 60.0
-_create_game_requests: Dict[str, List[float]] = {}
+_create_game_requests: dict[str, list[float]] = {}
 
 
 def _create_game_rate_limit() -> int:
@@ -703,7 +699,7 @@ def _check_create_game_rate_limit(client_ip: str) -> None:
                 _create_game_requests.pop(ip, None)
 
 
-@app.post("/games", response_model=Dict)
+@app.post("/games", response_model=dict)
 async def create_game(config: GameConfig, request: Request):
     """Crea una nuova partita di Briscola"""
     client_ip = request.client.host if request.client is not None else "unknown"
@@ -805,9 +801,9 @@ async def create_game(config: GameConfig, request: Request):
             else None,
         }
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except FileNotFoundError:
-        raise HTTPException(status_code=400, detail="Modello .npz non trovato (ai_model_id)")
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail="Modello .npz non trovato (ai_model_id)") from e
 
 
 def _debug_state_endpoint_enabled() -> bool:
@@ -825,8 +821,8 @@ def _debug_state_endpoint_enabled() -> bool:
     return raw in {"1", "true", "yes", "on"}
 
 
-@app.get("/games/{game_id}", response_model=Dict)
-async def get_game_state(game_id: str, player_index: Optional[int] = None):
+@app.get("/games/{game_id}", response_model=dict)
+async def get_game_state(game_id: str, player_index: int | None = None):
     """Ottiene lo stato corrente di una partita"""
     session = await game_store.get(game_id)
     if session is None:
@@ -843,7 +839,7 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
             observation_dto = build_observation_dto(game, player_index, session.version)
             return observation_dto.model_dump()
         except ValueError as e:
-            raise HTTPException(status_code=400, detail=str(e))
+            raise HTTPException(status_code=400, detail=str(e)) from e
     else:
         # Vista completa (mani di tutti + `next_deck_card`) per spettatori o debugging.
         # Anti-cheat: disabilitata di default, l'operatore deve abilitarla esplicitamente.
@@ -1425,10 +1421,8 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
     finally:
         # Ferma il task subscriber: la connessione non esiste più.
         sub_task.cancel()
-        try:
+        with suppress(asyncio.CancelledError):
             await sub_task
-        except asyncio.CancelledError:
-            pass
 
 
 async def notify_clients(game_id: str, state: DomainGameState, server_version: int) -> None:
@@ -1504,7 +1498,7 @@ async def cleanup_inactive_games():
                         # Sessioni legacy con timestamp naive (pre-UTC): le trattiamo come UTC.
                         # Nel transitorio la staleness può sbagliare di qualche ora, in favore
                         # del non-cancellare (il TTL dello store resta la rete di sicurezza).
-                        updated = updated.replace(tzinfo=timezone.utc)
+                        updated = updated.replace(tzinfo=UTC)
                     truly_stale = (now - updated).total_seconds() > 3600
                 except Exception:
                     truly_stale = False
@@ -1531,10 +1525,10 @@ async def cleanup_inactive_games():
                             code_version=get_code_version(),
                             rules_version=get_rules_version(),
                         )
-                    updated = log.try_mark_game_aborted(game_id, aborted_reason="inactive_timeout")
+                    aborted_marked = log.try_mark_game_aborted(game_id, aborted_reason="inactive_timeout")
                 except Exception:
-                    updated = False
-                if updated:
+                    aborted_marked = False
+                if aborted_marked:
                     _safe_log_event(
                         game_id,
                         "game_aborted",
