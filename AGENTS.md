@@ -59,6 +59,7 @@ Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-
 - `BRISCOLA_VALUE_MODEL_URL` + `BRISCOLA_VALUE_MODEL_SHA256`: provisioning del value model richiesto da `bc_model_value_lookahead_8x8`.
 - `BRISCOLA_MODELS_DIR` (default `./data/models/`); `BRISCOLA_CORS_ALLOW_ORIGINS` (default `*`, restringere in prod).
 - `BRISCOLA_REALTIME_MODE` (`ws`|`polling`, override; default `ws`); `BRISCOLA_ASSET_VERSION` (override del cache-busting, che di default deriva da versione + mtime degli static).
+- `BRISCOLA_DEBUG_STATE_ENDPOINT`: abilita la vista full-state di `GET /api/games/{id}` senza `player_index` (mani di tutti + `next_deck_card`, per debug/spectator). Default **disabilitata** (403) per l'anti-cheat: non attivarla in produzione pubblica.
 
 ### Pipeline AI (script in `scripts/`)
 
@@ -85,6 +86,8 @@ Se le modifiche toccano Python (codice/test), esegui e correggi:
   - singolo file: `pytest tests/test_trick_rules.py`
   - singolo test: `pytest tests/test_trick_rules.py::test_name` (o `pytest -k "pattern"`)
   - coverage: `pytest --cov=briscola_ai`
+
+La CI GitHub Actions (`.github/workflows/ci.yml`) replica lo stesso gate (ruff format/check, mypy, pytest+coverage) su ogni push/PR: deve restare allineata a questa sezione.
 
 Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Aggiorna il badge coverage Shields.io in `README.md` quando la copertura cambia in modo materiale. Tieni aggiornato questo file quando cambiano tooling/convenzioni.
 

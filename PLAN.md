@@ -20,9 +20,15 @@ nei commit, nei test e nei report.
 - Diagnostica cloud: `/version` e `/api/meta` espongono `event_log_available`, `event_log_healthy`,
   `event_log_backend`, `event_log_database_name` ed `event_log_database_host` per verificare che il processo live
   abbia un event log Postgres raggiungibile e collegato al Neon atteso.
-- Debug UI: `GET /api/games/{id}` resta endpoint completo per debug/spectator e include anche `next_deck_card`;
-  la vista fair (`player_index`) e gli agenti continuano a ricevere solo `ObservationDTO`.
+- Debug UI: la vista full-state di `GET /api/games/{id}` (senza `player_index`, include `next_deck_card`) è ora
+  **opt-in** via `BRISCOLA_DEBUG_STATE_ENDPOINT=1`; di default risponde 403 (anti-cheat in produzione). La vista
+  fair (`player_index`) e gli agenti continuano a ricevere solo `ObservationDTO`.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
+- CI: GitHub Actions (`.github/workflows/ci.yml`) esegue ruff format/check, mypy e pytest+coverage su ogni push/PR.
+- Test-àncora anti-divergenza: `tests/test_card_tables_parity.py` (tabelle punti/forza e `who_wins_trick` di fast,
+  numba core, numba solver ed encoding contro `domain.models.Rank`; parità `_card_to_id_fast`↔`card_to_id`) e
+  `tests/test_reward_shaping_numba_parity.py` (overkill penalty JIT ↔ reward shaping canonico); il test del solver
+  endgame Numba verifica anche `final_delta_p0_p1` (valore di foglia del value-lookahead).
 - Artefatti locali (`data/`, `benchmarks/`) restano gitignored.
 
 ## Decisioni Chiuse
