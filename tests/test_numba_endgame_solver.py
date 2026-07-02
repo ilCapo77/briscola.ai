@@ -47,10 +47,18 @@ def _endgame_state(
 
 
 def _assert_same_best_card(state: GameState) -> None:
-    """Il kernel Numba choose-only deve mantenere lo stesso tie-break del solver completo."""
-    expected = solve_endgame(state).best_card_index
-    assert choose_endgame_card_numba(state) == expected
-    assert choose_endgame_card_numba_arrays(*_arrays_from_state(state))[0] == expected
+    """
+    Il kernel Numba choose-only deve mantenere lo stesso tie-break del solver completo.
+
+    Verifichiamo anche `final_delta_p0_p1`: è il valore di foglia usato dal value-lookahead,
+    quindi un errore sul delta che non cambia la carta ottima corromperebbe comunque il
+    ranking delle foglie senza far fallire il confronto sulla sola mossa.
+    """
+    expected = solve_endgame(state)
+    assert choose_endgame_card_numba(state) == expected.best_card_index
+    best_card_index, final_delta = choose_endgame_card_numba_arrays(*_arrays_from_state(state))
+    assert int(best_card_index) == expected.best_card_index
+    assert int(final_delta) == expected.final_delta_p0_p1
 
 
 def test_warm_up_numba_endgame_solver_compiles_kernel() -> None:
