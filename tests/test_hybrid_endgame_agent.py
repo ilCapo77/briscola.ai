@@ -14,6 +14,7 @@ from dataclasses import replace
 from pathlib import Path
 
 import numpy as np
+import pytest
 
 from briscola_ai.ai.agents import (
     HeuristicAgentV2,
@@ -25,7 +26,7 @@ from briscola_ai.ai.agents import (
 )
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.endgame.solver import solve_endgame
-from briscola_ai.ai.models import BCModelAgent
+from briscola_ai.ai.models import BCModelAgent, get_models_dir_from_env
 from briscola_ai.domain.card_id import card_to_id
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.models import Card, Rank, Suit
@@ -34,6 +35,14 @@ from briscola_ai.domain.rules import trick_points
 from briscola_ai.domain.state import GameState, PlayerState, new_game_state
 
 TRUMP_CARD = Card(Suit.COINS, Rank.SEVEN)
+
+# `best_a2c.npz` è un artefatto locale gitignored (data/models/): su CI e cloni puliti
+# gli agenti `*_best_a2c` non sono costruibili, quindi i test che li usano vengono saltati.
+_BEST_A2C_MODEL_PATH = get_models_dir_from_env() / "best_a2c.npz"
+requires_best_a2c_npz = pytest.mark.skipif(
+    not _BEST_A2C_MODEL_PATH.exists(),
+    reason="richiede l'artefatto locale best_a2c.npz (gitignored, assente in CI)",
+)
 
 
 class FixedFallbackAgent:
@@ -280,6 +289,7 @@ def test_default_hybrid_endgame_keeps_heuristic_v2_fallback() -> None:
     assert isinstance(agent.fallback, HeuristicAgentV2)
 
 
+@requires_best_a2c_npz
 def test_hybrid_endgame_best_a2c_variant_uses_model_fallback() -> None:
     """La variante esplicita usa best_a2c come policy mid-game ed è catalogata a parte."""
     assert "hybrid_endgame_best_a2c" in {spec.name for spec in list_agent_specs()}
@@ -304,6 +314,7 @@ def test_bc_model_hybrid_endgame_variant_uses_selected_model_fallback(tmp_path: 
     assert agent.fallback.model_path == model_path
 
 
+@requires_best_a2c_npz
 def test_hybrid_endgame_best_a2c_falls_back_to_model_before_endgame() -> None:
     """A mazzo non vuoto la variante deve delegare al modello best_a2c (non al solver)."""
     state = new_game_state(2, seed=42)

@@ -13,6 +13,8 @@ import xml.etree.ElementTree as ET
 import zipfile
 from pathlib import Path
 
+import pytest
+
 
 def _load_build_model_report_module():
     """Load the report script as a module without making `scripts/` a package."""
@@ -27,6 +29,32 @@ def _load_build_model_report_module():
 
 
 build_model_report = _load_build_model_report_module()
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+
+
+def _report_sources_missing() -> bool:
+    """
+    True se manca almeno un input locale del report curato.
+
+    `build_workbook_data()` legge modelli `.npz` (data/models/) e risultati di valutazione
+    (benchmarks/experiments/, data/): sono artefatti locali gitignored, assenti su CI e cloni
+    puliti. I test che leggono i dati reali vengono saltati in quel caso; quelli su dati
+    sintetici (`dashboard_rows` costruite a mano) restano sempre eseguiti.
+    """
+    for spec in build_model_report.MODEL_SPECS:
+        if not spec.path.exists():
+            return True
+        for source in (spec.progress_source, spec.h2h_source):
+            if source.endswith(".json") and not (_REPO_ROOT / source).exists():
+                return True
+    return False
+
+
+requires_local_report_sources = pytest.mark.skipif(
+    _report_sources_missing(),
+    reason="richiede gli artefatti locali di data/ e benchmarks/experiments/ (gitignored, assenti in CI)",
+)
 
 
 def test_dashboard_chart_range_tracks_all_progression_rows() -> None:
@@ -55,6 +83,7 @@ def test_dashboard_chart_range_tracks_all_progression_rows() -> None:
     assert "Dashboard!$B$6:$B$11" in chart
 
 
+@requires_local_report_sources
 def test_generated_xlsx_chart_reaches_latest_official_best(tmp_path: Path) -> None:
     """The committed report workflow must keep the Dashboard chart aligned with the latest best model."""
     out_path = tmp_path / "model_progress.xlsx"

@@ -16,9 +16,17 @@ from pathlib import Path
 import numpy as np
 import pytest
 
+from briscola_ai.ai.models import get_models_dir_from_env
 from briscola_ai.ai.training.policy_regularization import (
     cross_entropy_from_probs,
     grad_ce_wrt_logits_from_probs,
+)
+
+# L'opponent mix `best_a2c:...` carica `best_a2c.npz` dalla directory modelli: è un artefatto
+# locale gitignored, assente su CI/cloni puliti, quindi il test che lo usa viene saltato.
+requires_best_a2c_npz = pytest.mark.skipif(
+    not (get_models_dir_from_env() / "best_a2c.npz").exists(),
+    reason="richiede l'artefatto locale best_a2c.npz (gitignored, assente in CI)",
 )
 
 _SCRIPT_PATH = Path(__file__).resolve().parent.parent / "scripts" / "train_a2c.py"
@@ -234,6 +242,7 @@ def test_train_a2c_fast_numba_rollout_supports_opponent_mix(tmp_path: Path) -> N
     ]
 
 
+@requires_best_a2c_npz
 def test_train_a2c_fast_numba_rollout_supports_best_a2c_in_opponent_mix(tmp_path: Path) -> None:
     """Il rollout Numba batch deve poter mischiare baseline rule-based e best A2C congelato."""
     out_path = tmp_path / "a2c_fast_numba_best_mix_smoke.npz"
