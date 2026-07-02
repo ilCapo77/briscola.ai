@@ -13,7 +13,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
+from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
 from .core import ACTION_DIM, numba_agent_code
 from .observation import (
     _collect_mlp_policy_batch_numba,
@@ -82,10 +82,16 @@ def _prepare_a2c_numba_inputs(
 
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+    if feature_dim not in (
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+    ):
         raise ValueError(
             f"w1 feature_dim={feature_dim}; "
-            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
         )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
@@ -108,10 +114,16 @@ def _prepare_a2c_numba_inputs(
         opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
         opp_feature_dim = int(opponent_w1_arr.shape[0])
         opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        if opp_feature_dim not in (
+            int(FEATURE_DIM_2P_V1),
+            int(FEATURE_DIM_2P_V2),
+            int(FEATURE_DIM_2P_V3),
+            int(FEATURE_DIM_2P_V4),
+        ):
             raise ValueError(
                 f"opponent_w1 feature_dim={opp_feature_dim}; "
-                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+                f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
             )
         if opponent_b1_arr.shape != (opp_hidden_dim,):
             raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
@@ -200,10 +212,16 @@ def evaluate_mlp_policy_numba_2p(
     b2_arr = _as_float32_vector("b2", b2)
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+    if feature_dim not in (
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+    ):
         raise ValueError(
             f"w1 feature_dim={feature_dim}; "
-            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
         )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
@@ -224,10 +242,16 @@ def evaluate_mlp_policy_numba_2p(
         opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
         opp_feature_dim = int(opponent_w1_arr.shape[0])
         opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        if opp_feature_dim not in (
+            int(FEATURE_DIM_2P_V1),
+            int(FEATURE_DIM_2P_V2),
+            int(FEATURE_DIM_2P_V3),
+            int(FEATURE_DIM_2P_V4),
+        ):
             raise ValueError(
                 f"opponent_w1 feature_dim={opp_feature_dim}; "
-                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+                f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
             )
         if opponent_b1_arr.shape != (opp_hidden_dim,):
             raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")
@@ -379,10 +403,16 @@ def evaluate_mlp_policy_quality_numba_2p(
     b2_arr = _as_float32_vector("b2", b2)
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+    if feature_dim not in (
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+    ):
         raise ValueError(
             f"w1 feature_dim={feature_dim}; "
-            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
         )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
@@ -403,10 +433,16 @@ def evaluate_mlp_policy_quality_numba_2p(
         opponent_b2_arr = _as_float32_vector("opponent_b2", opponent_b2)
         opp_feature_dim = int(opponent_w1_arr.shape[0])
         opp_hidden_dim = int(opponent_w1_arr.shape[1])
-        if opp_feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+        if opp_feature_dim not in (
+            int(FEATURE_DIM_2P_V1),
+            int(FEATURE_DIM_2P_V2),
+            int(FEATURE_DIM_2P_V3),
+            int(FEATURE_DIM_2P_V4),
+        ):
             raise ValueError(
                 f"opponent_w1 feature_dim={opp_feature_dim}; "
-                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+                f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+                f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
             )
         if opponent_b1_arr.shape != (opp_hidden_dim,):
             raise ValueError(f"opponent_b1 shape={opponent_b1_arr.shape}; atteso {(opp_hidden_dim,)}")

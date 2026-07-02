@@ -54,6 +54,9 @@ class Fast2PState:
     first_player: int
     game_over: bool
     winner_index: int | None
+    # Storia delle prese completate, come nel dominio (`TrickRecord`) ma numerica:
+    # (lead_card, lead_player, resp_card, winner, points). Alimenta l'encoder v4.
+    trick_history: list[tuple[int, int, int, int, int]]
 
 
 @dataclass(frozen=True, slots=True)
@@ -96,6 +99,7 @@ def new_fast_2p_state(*, seed: int = 0) -> Fast2PState:
         first_player=0,
         game_over=False,
         winner_index=None,
+        trick_history=[],
     )
 
 
@@ -165,7 +169,9 @@ def step_fast_2p(state: Fast2PState, *, player_index: int, card_index: int) -> F
         second_player=second_player,
         trump_card=state.trump_card,
     )
-    state.points[winner] += CARD_POINTS[first_card] + CARD_POINTS[second_card]
+    trick_points = CARD_POINTS[first_card] + CARD_POINTS[second_card]
+    state.points[winner] += trick_points
+    state.trick_history.append((first_card, first_player, second_card, winner, trick_points))
 
     state.table_cards.clear()
     state.table_players.clear()

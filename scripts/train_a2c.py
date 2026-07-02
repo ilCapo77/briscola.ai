@@ -52,6 +52,7 @@ from briscola_ai.ai.encoding.observation_encoder import (
     FEATURE_DIM_2P_V1,
     FEATURE_DIM_2P_V2,
     FEATURE_DIM_2P_V3,
+    FEATURE_DIM_2P_V4,
     EncoderVersion,
     encode_player_observation_2p,
     feature_dim_for_encoder_version,
@@ -417,11 +418,16 @@ def _load_fast_numba_model_opponent(*, opponent_name: str, opponent_model_path: 
         raise ValueError(f"Opponent {opponent_name!r} non ha prodotto un BCModelAgent.")
     if not isinstance(agent.model, MLPBCModel):
         raise ValueError("Il fast rollout Numba supporta per ora solo opponent `.npz` MLP (w1/b1/w2/b2).")
-    if int(agent.model.feature_dim) not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+    if int(agent.model.feature_dim) not in (
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+    ):
         raise ValueError(
             "Opponent MLP non compatibile: "
             f"feature_dim={int(agent.model.feature_dim)} atteso "
-            f"{int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}."
+            f"{int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, {int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}."
         )
     return FastNumbaModelOpponent(agent=agent, model=agent.model)
 
@@ -850,7 +856,7 @@ def main() -> int:
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC/RL).")
     parser.add_argument(
         "--encoder-version",
-        choices=["v1", "v2", "v3"],
+        choices=["v1", "v2", "v3", "v4"],
         default="v1",
         help=(
             "Versione encoder per observation 2-player. "

@@ -13,6 +13,7 @@ from ..encoding.observation_encoder import (
     EncodedObservation,
     EncoderVersion,
     _compute_v3_extra_features,
+    _compute_v4_extra_features,
     _onehot_to_id_set,
 )
 from .state_2p import CARD_POINTS, CARD_STRENGTH, CARD_SUIT, Fast2PState
@@ -101,9 +102,9 @@ def encode_fast_observation_2p(
     seen_floats = _seen_cards_onehot_to_floats(seen_cards_onehot)
     if version == "v2":
         return EncodedObservation(features=features + seen_floats, action_mask=mask)
-    if version == "v3":
+    if version in ("v3", "v4"):
         if out_of_play_cards_onehot is None:
-            raise ValueError("Encoder v3 (fast) richiede `out_of_play_cards_onehot`.")
+            raise ValueError("Encoder v3/v4 (fast) richiede `out_of_play_cards_onehot`.")
         # Riusiamo l'helper del path domain per garantire parità per costruzione del blocco v3.
         # La definizione "ignota" usa `seen` (esclude la briscola scoperta); le feature
         # `*_out_of_play` usano `out_of_play`.
@@ -116,5 +117,19 @@ def encode_fast_observation_2p(
             deck_size=len(state.deck),
             my_hand_size=len(state.hands[player_index]),
         )
-        return EncodedObservation(features=features + seen_floats + extra, action_mask=mask)
+        if version == "v3":
+            return EncodedObservation(features=features + seen_floats + extra, action_mask=mask)
+
+        # v4: la storia numerica di Fast2PState ((lead, lead_player, resp, winner, points))
+        # è già nel formato normalizzato dell'helper di dominio: parità per costruzione.
+        tricks = [
+            ([(lead, lead_player), (resp, 1 - lead_player)], winner, points)
+            for lead, lead_player, resp, winner, points in state.trick_history
+        ]
+        extra_v4 = _compute_v4_extra_features(
+            tricks=tricks,
+            my_index=player_index,
+            trump_suit_index=int(CARD_SUIT[state.trump_card]),
+        )
+        return EncodedObservation(features=features + seen_floats + extra + extra_v4, action_mask=mask)
     raise ValueError(f"Encoder version non supportata: {version!r}")

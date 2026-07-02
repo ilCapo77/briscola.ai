@@ -17,6 +17,7 @@ from ..encoding.observation_encoder import (
     FEATURE_DIM_2P_V1,
     FEATURE_DIM_2P_V2,
     FEATURE_DIM_2P_V3,
+    FEATURE_DIM_2P_V4,
     EncodedObservation,
     EncoderVersion,
 )
@@ -85,12 +86,16 @@ def encode_fast_observation_arrays_numba(
     features[scalar_offset + 6] = float(points[opp_index]) / 120.0
     features[scalar_offset + 7] = is_second_in_trick
 
-    if feature_dim == int(FEATURE_DIM_2P_V2) or feature_dim == int(FEATURE_DIM_2P_V3):
+    if (
+        feature_dim == int(FEATURE_DIM_2P_V2)
+        or feature_dim == int(FEATURE_DIM_2P_V3)
+        or feature_dim == int(FEATURE_DIM_2P_V4)
+    ):
         seen_offset = int(FEATURE_DIM_2P_V1)
         for card_id in range(ACTION_DIM):
             features[seen_offset + card_id] = float(seen_cards[card_id])
 
-    if feature_dim == int(FEATURE_DIM_2P_V3):
+    if feature_dim == int(FEATURE_DIM_2P_V3) or feature_dim == int(FEATURE_DIM_2P_V4):
         # Blocco v3 (22 feature) — stesso layout/normalizzazioni di `_compute_v3_extra_features`.
         # "ignota" = non vista e non in mano (action_mask True = carta in mano).
         v3 = int(FEATURE_DIM_2P_V2)
@@ -133,6 +138,146 @@ def encode_fast_observation_arrays_numba(
             features[v3 + 20] = float(CARD_STRENGTH_NUMBA[lead_card]) / 10.0
             features[v3 + 21] = 1.0 if CARD_SUIT_NUMBA[lead_card] == trump_suit else 0.0
 
+    return features, action_mask
+
+
+@njit(cache=True)
+def _v4_block_numba(
+    features: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
+    player_index: int,
+    trump_suit: int,
+) -> None:
+    """
+    Scrive il blocco v4 (59 feature) in `features` a partire da offset FEATURE_DIM_2P_V3.
+
+    `trick_hist` è la storia numerica delle prese, una riga per presa completata:
+    `[lead_card, lead_player, resp_card, winner, points]`. Replica ESATTAMENTE
+    `_compute_v4_extra_features` del path domain (parità protetta dai test):
+    blocco A = 11 aggregati sul comportamento avversario; blocco B = ultime 4 prese x 12.
+    """
+    base = int(FEATURE_DIM_2P_V3)
+    opp_index = 1 - player_index
+
+    opp_suit0 = 0
+    opp_suit1 = 0
+    opp_suit2 = 0
+    opp_suit3 = 0
+    opp_lead = 0
+    opp_trump_resp = 0
+    opp_follow = 0
+    opp_discard = 0
+    opp_lead_trump = 0
+    opp_lead_load = 0
+
+    for t_idx in range(num_tricks):
+        lead_card = trick_hist[t_idx, 0]
+        lead_player = trick_hist[t_idx, 1]
+        resp_card = trick_hist[t_idx, 2]
+        lead_suit = lead_card // 10
+        resp_suit = resp_card // 10
+
+        # Conteggio per seme delle carte giocate dall'avversario (lead o risposta).
+        opp_card_suit = lead_suit if lead_player == opp_index else resp_suit
+        if opp_card_suit == 0:
+            opp_suit0 += 1
+        elif opp_card_suit == 1:
+            opp_suit1 += 1
+        elif opp_card_suit == 2:
+            opp_suit2 += 1
+        else:
+            opp_suit3 += 1
+
+        if lead_player == opp_index:
+            opp_lead += 1
+            if lead_suit == trump_suit:
+                opp_lead_trump += 1
+            if CARD_POINTS_NUMBA[lead_card] >= 10:  # asso (11) o tre (10)
+                opp_lead_load += 1
+        else:
+            lead_is_trump = lead_suit == trump_suit
+            resp_is_trump = resp_suit == trump_suit
+            if resp_suit == lead_suit:
+                opp_follow += 1
+            elif resp_is_trump and not lead_is_trump:
+                opp_trump_resp += 1
+            else:
+                opp_discard += 1
+
+    features[base + 0] = opp_suit0 / 10.0
+    features[base + 1] = opp_suit1 / 10.0
+    features[base + 2] = opp_suit2 / 10.0
+    features[base + 3] = opp_suit3 / 10.0
+    features[base + 4] = opp_lead / 10.0
+    features[base + 5] = opp_trump_resp / 10.0
+    features[base + 6] = opp_follow / 10.0
+    features[base + 7] = opp_discard / 10.0
+    features[base + 8] = opp_lead_trump / 10.0
+    features[base + 9] = opp_lead_load / 10.0
+    features[base + 10] = num_tricks / 20.0
+
+    for slot in range(4):
+        t_idx = num_tricks - 1 - slot
+        offset = base + 11 + slot * 12
+        if t_idx < 0:
+            continue  # gli slot mancanti restano a zero (padding)
+        lead_card = trick_hist[t_idx, 0]
+        lead_player = trick_hist[t_idx, 1]
+        resp_card = trick_hist[t_idx, 2]
+        winner = trick_hist[t_idx, 3]
+        trick_points = trick_hist[t_idx, 4]
+        lead_suit = lead_card // 10
+        resp_suit = resp_card // 10
+
+        features[offset + 0] = 1.0
+        features[offset + 1] = 1.0 if lead_player == player_index else 0.0
+        features[offset + 2 + lead_suit] = 1.0
+        features[offset + 6] = float(CARD_STRENGTH_NUMBA[lead_card]) / 10.0
+        features[offset + 7] = float(CARD_POINTS_NUMBA[lead_card]) / 11.0
+        features[offset + 8] = 1.0 if resp_suit == lead_suit else 0.0
+        features[offset + 9] = 1.0 if resp_suit == trump_suit else 0.0
+        features[offset + 10] = 1.0 if winner == player_index else 0.0
+        features[offset + 11] = float(trick_points) / 21.0
+
+
+@njit(cache=True)
+def encode_fast_observation_arrays_v4_numba(
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    points: np.ndarray,
+    table_cards: np.ndarray,
+    table_size: int,
+    deck_size: int,
+    current_turn: int,
+    trump_card: int,
+    player_index: int,
+    seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Encoder v4: base (v1+v2+v3) + blocco storia prese (59 feature).
+
+    Funzione SEPARATA dal base per non toccare i chiamanti che restano <= v3
+    (value_lookahead/value_dataset lavorano su stati determinizzati senza storia).
+    """
+    features, action_mask = encode_fast_observation_arrays_numba(
+        hands,
+        hand_sizes,
+        points,
+        table_cards,
+        table_size,
+        deck_size,
+        current_turn,
+        trump_card,
+        player_index,
+        seen_cards,
+        out_of_play_cards,
+        int(FEATURE_DIM_2P_V4),
+    )
+    _v4_block_numba(features, trick_hist, num_tricks, player_index, CARD_SUIT_NUMBA[trump_card])
     return features, action_mask
 
 
@@ -233,24 +378,43 @@ def _sample_mlp_policy_action_numba(
     policy_seat: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
 ) -> int:
     """Esegue encoder + forward MLP + sampling mascherato dentro Numba."""
     feature_dim = w1.shape[0]
     hidden_dim = w1.shape[1]
-    features, action_mask = encode_fast_observation_arrays_numba(
-        hands,
-        hand_sizes,
-        points,
-        table_cards,
-        table_size,
-        deck_size,
-        current_turn,
-        trump_card,
-        policy_seat,
-        seen_cards,
-        out_of_play_cards,
-        feature_dim,
-    )
+    if feature_dim == int(FEATURE_DIM_2P_V4):
+        features, action_mask = encode_fast_observation_arrays_v4_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            policy_seat,
+            seen_cards,
+            out_of_play_cards,
+            trick_hist,
+            num_tricks,
+        )
+    else:
+        features, action_mask = encode_fast_observation_arrays_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            policy_seat,
+            seen_cards,
+            out_of_play_cards,
+            feature_dim,
+        )
 
     hidden = np.empty(hidden_dim, dtype=np.float32)
     for h_idx in range(hidden_dim):
@@ -309,6 +473,8 @@ def _record_mlp_policy_decision_numba(
     policy_seat: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
     xs: np.ndarray,
     z1s: np.ndarray,
     hs: np.ndarray,
@@ -323,20 +489,37 @@ def _record_mlp_policy_decision_numba(
     """
     feature_dim = w1.shape[0]
     hidden_dim = w1.shape[1]
-    features, action_mask = encode_fast_observation_arrays_numba(
-        hands,
-        hand_sizes,
-        points,
-        table_cards,
-        table_size,
-        deck_size,
-        current_turn,
-        trump_card,
-        policy_seat,
-        seen_cards,
-        out_of_play_cards,
-        feature_dim,
-    )
+    if feature_dim == int(FEATURE_DIM_2P_V4):
+        features, action_mask = encode_fast_observation_arrays_v4_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            policy_seat,
+            seen_cards,
+            out_of_play_cards,
+            trick_hist,
+            num_tricks,
+        )
+    else:
+        features, action_mask = encode_fast_observation_arrays_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            policy_seat,
+            seen_cards,
+            out_of_play_cards,
+            feature_dim,
+        )
 
     for f_idx in range(feature_dim):
         xs[step_index, f_idx] = features[f_idx]
@@ -412,24 +595,43 @@ def _argmax_mlp_policy_action_numba(
     player_index: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
 ) -> int:
     """Forward MLP deterministico: ritorna l'action_id valido con logit massimo."""
     feature_dim = w1.shape[0]
     hidden_dim = w1.shape[1]
-    features, action_mask = encode_fast_observation_arrays_numba(
-        hands,
-        hand_sizes,
-        points,
-        table_cards,
-        table_size,
-        deck_size,
-        current_turn,
-        trump_card,
-        player_index,
-        seen_cards,
-        out_of_play_cards,
-        feature_dim,
-    )
+    if feature_dim == int(FEATURE_DIM_2P_V4):
+        features, action_mask = encode_fast_observation_arrays_v4_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            player_index,
+            seen_cards,
+            out_of_play_cards,
+            trick_hist,
+            num_tricks,
+        )
+    else:
+        features, action_mask = encode_fast_observation_arrays_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            player_index,
+            seen_cards,
+            out_of_play_cards,
+            feature_dim,
+        )
 
     hidden = np.empty(hidden_dim, dtype=np.float32)
     for h_idx in range(hidden_dim):
@@ -610,6 +812,8 @@ def _choose_opponent_card_index_numba(
     trump_card: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
 ) -> int:
     """Sceglie l'indice carta per opponent rule-based o MLP `.npz`."""
     if opponent_model_enabled:
@@ -629,6 +833,8 @@ def _choose_opponent_card_index_numba(
             current_turn,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            num_tricks,
         )
         action_id = _apply_overkill_guard_numba(
             action_id,
@@ -709,6 +915,9 @@ def _play_mlp_policy_game_numba(
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
     out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    # Storia delle prese per l'encoder v4: [lead, lead_player, resp, winner, points] per riga.
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    trick_count = np.zeros(1, dtype=np.int64)
 
     safety = 5000
     while safety > 0:
@@ -734,6 +943,8 @@ def _play_mlp_policy_game_numba(
                     policy_seat,
                     seen_cards,
                     out_of_play_cards,
+                    trick_hist,
+                    trick_count[0],
                 )
             else:
                 action_id = _sample_mlp_policy_action_numba(
@@ -752,6 +963,8 @@ def _play_mlp_policy_game_numba(
                     policy_seat,
                     seen_cards,
                     out_of_play_cards,
+                    trick_hist,
+                    trick_count[0],
                 )
             action_id = _apply_overkill_guard_numba(
                 action_id,
@@ -785,6 +998,8 @@ def _play_mlp_policy_game_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
 
         played_card = hands[current_turn, card_index]
@@ -808,7 +1023,14 @@ def _play_mlp_policy_game_numba(
         first_player = table_players[0]
         second_player = table_players[1]
         winner = _who_wins_trick_numba(first_card, first_player, second_card, second_player, trump_card)
-        points[winner] += CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+        gained = CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+        points[winner] += gained
+        trick_hist[trick_count[0], 0] = first_card
+        trick_hist[trick_count[0], 1] = first_player
+        trick_hist[trick_count[0], 2] = second_card
+        trick_hist[trick_count[0], 3] = winner
+        trick_hist[trick_count[0], 4] = gained
+        trick_count[0] += 1
         table_size = 0
 
         if deck_size > 0:
@@ -1076,6 +1298,9 @@ def _play_mlp_policy_quality_game_numba(
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
     out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    # Storia delle prese per l'encoder v4: [lead, lead_player, resp, winner, points] per riga.
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    trick_count = np.zeros(1, dtype=np.int64)
 
     q_second = 0
     q_second_with_win = 0
@@ -1108,6 +1333,8 @@ def _play_mlp_policy_quality_game_numba(
                 policy_seat,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
             action_id = _apply_overkill_guard_numba(
                 action_id,
@@ -1179,6 +1406,8 @@ def _play_mlp_policy_quality_game_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
 
         played_card = hands[current_turn, card_index]
@@ -1202,7 +1431,14 @@ def _play_mlp_policy_quality_game_numba(
         first_player = table_players[0]
         second_player = table_players[1]
         winner = _who_wins_trick_numba(first_card, first_player, second_card, second_player, trump_card)
-        points[winner] += CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+        gained = CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+        points[winner] += gained
+        trick_hist[trick_count[0], 0] = first_card
+        trick_hist[trick_count[0], 1] = first_player
+        trick_hist[trick_count[0], 2] = second_card
+        trick_hist[trick_count[0], 3] = winner
+        trick_hist[trick_count[0], 4] = gained
+        trick_count[0] += 1
         table_size = 0
 
         if deck_size > 0:
@@ -1446,8 +1682,15 @@ def _apply_numba_card_index(
     card_index: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    trick_count: np.ndarray,
 ) -> tuple[int, int, int]:
-    """Applica una giocata mutando gli array e ritorna `(deck_size, table_size, current_turn)`."""
+    """
+    Applica una giocata mutando gli array e ritorna `(deck_size, table_size, current_turn)`.
+
+    `trick_hist` (20,5) e `trick_count` (1,) registrano la storia delle prese per
+    l'encoder v4: una riga `[lead, lead_player, resp, winner, points]` per presa completata.
+    """
     played_card = hands[current_turn, card_index]
     hand_size = hand_sizes[current_turn]
     for i in range(card_index, hand_size - 1):
@@ -1468,7 +1711,14 @@ def _apply_numba_card_index(
     first_player = table_players[0]
     second_player = table_players[1]
     winner = _who_wins_trick_numba(first_card, first_player, second_card, second_player, trump_card)
-    points[winner] += CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+    gained = CARD_POINTS_NUMBA[first_card] + CARD_POINTS_NUMBA[second_card]
+    points[winner] += gained
+    trick_hist[trick_count[0], 0] = first_card
+    trick_hist[trick_count[0], 1] = first_player
+    trick_hist[trick_count[0], 2] = second_card
+    trick_hist[trick_count[0], 3] = winner
+    trick_hist[trick_count[0], 4] = gained
+    trick_count[0] += 1
     table_size = 0
 
     if deck_size > 0:
@@ -1545,6 +1795,9 @@ def _collect_mlp_policy_game_into_numba(
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
     out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    # Storia delle prese per l'encoder v4: [lead, lead_player, resp, winner, points] per riga.
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    trick_count = np.zeros(1, dtype=np.int64)
 
     step_count = 0
     entropy_sum = 0.0
@@ -1572,6 +1825,8 @@ def _collect_mlp_policy_game_into_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
             deck_size, table_size, current_turn = _apply_numba_card_index(
                 hands,
@@ -1587,6 +1842,8 @@ def _collect_mlp_policy_game_into_numba(
                 opp_card_index,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count,
             )
 
         if hand_sizes[0] == 0 and hand_sizes[1] == 0:
@@ -1611,6 +1868,8 @@ def _collect_mlp_policy_game_into_numba(
             policy_seat,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count[0],
             xs,
             z1s,
             hs,
@@ -1650,6 +1909,8 @@ def _collect_mlp_policy_game_into_numba(
             policy_card_index,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count,
         )
 
         while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
@@ -1672,6 +1933,8 @@ def _collect_mlp_policy_game_into_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
             deck_size, table_size, current_turn = _apply_numba_card_index(
                 hands,
@@ -1687,6 +1950,8 @@ def _collect_mlp_policy_game_into_numba(
                 opp_card_index,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count,
             )
 
         diff_after = points[policy_seat] - points[1 - policy_seat]
@@ -1954,10 +2219,10 @@ def encode_fast_observation_numba_2p(
         feature_dim = int(FEATURE_DIM_2P_V1)
     elif version == "v2":
         feature_dim = int(FEATURE_DIM_2P_V2)
-    elif version == "v3":
-        feature_dim = int(FEATURE_DIM_2P_V3)
+    elif version in ("v3", "v4"):
+        feature_dim = int(FEATURE_DIM_2P_V3) if version == "v3" else int(FEATURE_DIM_2P_V4)
         if out_of_play_cards_onehot is None:
-            raise ValueError("Encoder v3 (numba) richiede `out_of_play_cards_onehot`.")
+            raise ValueError("Encoder v3/v4 (numba) richiede `out_of_play_cards_onehot`.")
         if len(out_of_play_cards_onehot) != ACTION_DIM:
             raise ValueError(f"out_of_play_cards_onehot len={len(out_of_play_cards_onehot)} (atteso {ACTION_DIM})")
     else:
@@ -1975,20 +2240,45 @@ def encode_fast_observation_numba_2p(
             raise ValueError("out_of_play_cards_onehot deve contenere solo 0/1")
 
     hands, hand_sizes, points, table_cards = _state_to_numba_arrays(state)
-    features, action_mask = encode_fast_observation_arrays_numba(
-        hands,
-        hand_sizes,
-        points,
-        table_cards,
-        len(state.table_cards),
-        len(state.deck),
-        int(state.current_turn),
-        int(state.trump_card),
-        int(player_index),
-        seen_cards,
-        out_of_play_cards,
-        feature_dim,
-    )
+    if version == "v4":
+        # Storia numerica dal Fast2PState -> array (20,5) per il kernel.
+        trick_hist = np.zeros((20, 5), dtype=np.int64)
+        for i, (lead, lead_player, resp, winner, trick_points) in enumerate(state.trick_history):
+            trick_hist[i, 0] = lead
+            trick_hist[i, 1] = lead_player
+            trick_hist[i, 2] = resp
+            trick_hist[i, 3] = winner
+            trick_hist[i, 4] = trick_points
+        features, action_mask = encode_fast_observation_arrays_v4_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            len(state.table_cards),
+            len(state.deck),
+            int(state.current_turn),
+            int(state.trump_card),
+            int(player_index),
+            seen_cards,
+            out_of_play_cards,
+            trick_hist,
+            len(state.trick_history),
+        )
+    else:
+        features, action_mask = encode_fast_observation_arrays_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            len(state.table_cards),
+            len(state.deck),
+            int(state.current_turn),
+            int(state.trump_card),
+            int(player_index),
+            seen_cards,
+            out_of_play_cards,
+            feature_dim,
+        )
     return EncodedObservation(features=features.astype(float).tolist(), action_mask=action_mask.astype(bool).tolist())
 
 
@@ -2016,4 +2306,20 @@ def warm_up_numba_observation() -> None:
         seen_cards,
         out_of_play_cards,
         int(FEATURE_DIM_2P_V3),
+    )
+    # Warm-up v4 (storia prese).
+    encode_fast_observation_arrays_v4_numba(
+        hands,
+        hand_sizes,
+        points,
+        table_cards,
+        0,
+        34,
+        0,
+        20,
+        0,
+        seen_cards,
+        out_of_play_cards,
+        np.zeros((20, 5), dtype=np.int64),
+        0,
     )

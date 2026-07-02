@@ -24,7 +24,7 @@ from numba import njit, prange
 
 from ...domain.card_id import card_to_id
 from ...domain.state import GameState
-from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
+from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
 from ..endgame.numba_solver import choose_endgame_card_numba_arrays
 from .core import ACTION_DIM, _choose_policy_card_index_numba, _shuffle_deck_numba
 from .observation import (
@@ -328,6 +328,11 @@ def choose_value_lookahead_card_numba_arrays(
         ) = _copy_state_arrays(
             hands, hand_sizes, points, deck, table_cards, table_players, seen_cards, out_of_play_cards
         )
+        # Storia dummy per la simulazione determinizzata: i modelli qui dentro sono <= v3
+        # (la storia non entra nelle loro feature); serve solo a soddisfare il contratto
+        # di _apply/_argmax. Allocata per-candidato: il contatore riparte sempre da 0.
+        sim_trick_hist = np.zeros((20, 5), dtype=np.int64)
+        sim_trick_count = np.zeros(1, dtype=np.int64)
 
         candidate_deck_size, candidate_table_size, candidate_turn = _apply_numba_card_index(
             candidate_hands,
@@ -343,6 +348,8 @@ def choose_value_lookahead_card_numba_arrays(
             candidate_index,
             candidate_seen,
             candidate_out_of_play,
+            sim_trick_hist,
+            sim_trick_count,
         )
 
         if candidate_table_size == 1:
@@ -374,6 +381,8 @@ def choose_value_lookahead_card_numba_arrays(
                     candidate_turn,
                     candidate_seen,
                     candidate_out_of_play,
+                    sim_trick_hist,
+                    sim_trick_count[0],
                 )
                 response_action = _apply_overkill_guard_numba(
                     response_action,
@@ -404,6 +413,8 @@ def choose_value_lookahead_card_numba_arrays(
                 response_index,
                 candidate_seen,
                 candidate_out_of_play,
+                sim_trick_hist,
+                sim_trick_count,
             )
 
         if candidate_deck_size == 0:
@@ -608,10 +619,16 @@ def _validate_a2c_value_lookahead_inputs(
 
     feature_dim = int(w1_arr.shape[0])
     hidden_dim = int(w1_arr.shape[1])
-    if feature_dim not in (int(FEATURE_DIM_2P_V1), int(FEATURE_DIM_2P_V2), int(FEATURE_DIM_2P_V3)):
+    if feature_dim not in (
+        int(FEATURE_DIM_2P_V1),
+        int(FEATURE_DIM_2P_V2),
+        int(FEATURE_DIM_2P_V3),
+        int(FEATURE_DIM_2P_V4),
+    ):
         raise ValueError(
             f"w1 feature_dim={feature_dim}; "
-            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)} o {int(FEATURE_DIM_2P_V3)}"
+            f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
+            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
         )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
@@ -691,6 +708,8 @@ def _choose_training_opponent_card_index_numba(
     trump_card: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
 ) -> int:
     """Dispatch dell'avversario nel collector A2C con supporto V-lookahead determinized."""
     if opponent_mode == OPPONENT_MODE_VALUE_LOOKAHEAD:
@@ -744,6 +763,8 @@ def _choose_training_opponent_card_index_numba(
             current_turn,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            num_tricks,
         )
         action_id = _apply_overkill_guard_numba(
             action_id,
@@ -843,6 +864,9 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
     out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    # Storia REALE delle prese: alimenta l'encoder v4 della policy in training.
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    trick_count = np.zeros(1, dtype=np.int64)
 
     step_count = 0
     entropy_sum = 0.0
@@ -878,6 +902,8 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
             deck_size, table_size, current_turn = _apply_numba_card_index(
                 hands,
@@ -893,6 +919,8 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
                 opp_card_index,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count,
             )
 
         if hand_sizes[0] == 0 and hand_sizes[1] == 0:
@@ -917,6 +945,8 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
             policy_seat,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count[0],
             xs,
             z1s,
             hs,
@@ -956,6 +986,8 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
             policy_card_index,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count,
         )
 
         while not (hand_sizes[0] == 0 and hand_sizes[1] == 0) and current_turn != policy_seat:
@@ -986,6 +1018,8 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
             deck_size, table_size, current_turn = _apply_numba_card_index(
                 hands,
@@ -1001,6 +1035,8 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
                 opp_card_index,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count,
             )
 
         diff_after = points[policy_seat] - points[1 - policy_seat]
