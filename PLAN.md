@@ -280,9 +280,15 @@ training A2C su v4.
 **Fase 3, iterazione-0 completata (2026-07-02) — negativa, con diagnosi** (dettagli nel piano §6):
 quattro varianti di improvement via BC (hard/soft/anchored/hidden-512) perdono tutte da v7
 (da −1.52 a −9.19): la CE su argmax è un operatore lossy su una policy raffinata da RL.
-Kill del ramo BC. L'operatore che ha già funzionato è **A2C con l'expert come avversario**
-(è come è nato v7): l'iterazione-1 è A2C(v4+belief) vs expert(v7), che richiede il
-**kernel Numba v4** — ora percorso critico della Fase 3.
+Kill del ramo BC. L'operatore che ha già funzionato è **A2C con l'expert come avversario**.
+
+**Fase 3, iterazione-1 completata (2026-07-02) — positiva ma modesta, attribuzione pulita**
+(kernel Numba v4 completato; dettagli e tabella nel piano §6): iter1-v4 batte v7 di `+0.72`
+(CI coppie `+0.56..+0.87`, big 100k); il controllo v3 a ricetta identica fa `+0.44`; il
+testa a testa appaiato dà **+0.27 netto alle feature v4** (CI `+0.12..+0.42`) — prima
+evidenza runtime positiva del programma encoder. L'operatore sparring mostra rendimenti
+decrescenti (+2.46 → +0.44 per generazione). Prossime leve: belief come input della policy
+(1b), net2net widening (iter-2), expert a tutta partita. Nessuna promozione per ora.
 
 Qualunque promozione deve includere:
 

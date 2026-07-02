@@ -384,6 +384,39 @@ parità di tutto il resto?" — cambiare informazione e capacità insieme render
 non interpretabile (una variabile alla volta). Prerequisito: kernel Numba v4
 (encoder + tracking incrementale storia nei rollout; belief forward opzionale).
 
+**Risultati iterazione 1 (2026-07-02).** Run: A2C 5M partite, seed 20260713, opponent
+`value_lookahead(v7)` congelato; braccio v4 (init v7-padded) e braccio di controllo v3
+(init v7), identici in tutto tranne l'encoder. Gate big holdout 100k, CI su coppie:
+
+| Confronto | Esito |
+|---|---|
+| iter1-v4 vs v7 | **+0.72** (CI +0.56..+0.87) |
+| controllo-v3 vs v7 | **+0.44** (CI +0.28..+0.59) |
+| iter1-v4 vs controllo-v3 (testa a testa) | **+0.27** (CI +0.12..+0.42) |
+
+Letture:
+1. **Le feature v4 hanno valore misurabile nella policy: +0.27 netto a parità di tutto.**
+   È la prima evidenza runtime positiva dell'intero programma encoder (la belief nel PIMC
+   era neutra nel deploy; qui la storia delle prese paga direttamente). L'investimento
+   Fase 1 è validato.
+2. **L'operatore sparring mostra rendimenti fortemente decrescenti**: la stessa ricetta
+   che diede +2.46 (v7 vs expert-su-v6) ora rende +0.44 (vs expert-su-v7). Atteso: più la
+   policy si avvicina al livello dell'expert (~+2-3), più il segnale di sparring si
+   assottiglia. L'expert deve migliorare perché il loop continui a rendere (→ expert a
+   tutta partita, §6 nota; e/o belief-weighted dove serve).
+3. iter1 (+0.72 su v7) NON supera il campione runtime `value_lookahead(v7)`: obiettivo
+   primario non raggiunto in una iterazione, come previsto dal design iterativo.
+
+Prossime leve, in ordine di rapporto valore/costo:
+- **iterazione 1b — belief come input della policy** (40 feature in più): richiede il
+  forward della belief nei kernel di rollout; è l'informazione mancante più promettente
+  (l'inferenza vale nelle prime 15 prese, dove la policy gioca da sola);
+- **iterazione 2 — net2net widening** (128→256/512): banale nei kernel (hidden è un
+  parametro), serve solo lo script di widening; testa se il +0.27 è strozzato dalla capacità;
+- **expert migliore**: value model a tutta partita su v4 per alzare il teacher (§6 nota).
+
+Artefatti: `data/models/exit_iter1_*`, `benchmarks/experiments/fase3/*.json` (locali).
+
 **Iterazione 2 — capacità, con warm start preservato.** Se l'iterazione 1 è positiva ma
 modesta, si allarga l'hidden (256/512) SENZA ripartire da zero (la Fase 0.c mostra che
 from-scratch costa −5.4): widening **net2net** (clonazione dei neuroni esistenti + rumore
