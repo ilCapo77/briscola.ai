@@ -319,6 +319,18 @@ Correzioni specifiche ai fallimenti documentati:
 4. **Non-identificabilità** → mitigata da encoder v4 + belief input (Fasi 1-2): il target
    diventa molto più funzione dell'input osservabile.
 
+**Design dell'expert — estendere il ragionamento a TUTTA la partita (nota 2026-07-02).**
+L'expert PIMC attuale giudica ogni ipotesi giocando la partita fino in fondo ("rollout"):
+affidabile solo nel finale (simulazioni corte, poco rumore), inutilizzabile a inizio partita
+(35 mosse e 17 pescate di rumore sommergono il segnale — confermato: allargare la finestra
+peggiora, −0.23 anche con belief). La via per un expert a tutta partita è sostituire il
+rollout con **lookahead corta + value network di foglia** (lo schema motori-di-scacchi /
+AlphaZero, e la generalizzazione del value-lookahead esistente):
+- la belief (Fase 2) fornisce determinizzazioni verosimili proprio dove le ignote sono tante;
+- serve però un **value model allenato su tutte le fasi di partita** su encoder v4(+belief):
+  `value_v0` è tarato sulla finestra finale. È il primo upgrade da fare dentro il loop ExIt
+  (il value si riallena comunque a ogni iterazione).
+
 - **Gate per iterazione**: entrambe le curve (policy e expert) devono salire; 2 iterazioni
   consecutive piatte = stop e analisi.
 - **Criterio di successo del piano**: `policy_K` (reattiva) ≥ `bc_model_value_lookahead_8x8`
