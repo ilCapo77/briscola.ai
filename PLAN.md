@@ -120,9 +120,9 @@ kill criterion esplicito, se nasce un motivo nuovo.
 
 ## Prossime Azioni
 
-### 1. Value Model Decision-Aligned
+### 1. Value Model Decision-Aligned Chiuso
 
-Stato: il riaddestramento value generico su base `v7 + solver` è stato misurato e non basta.
+Stato: due varianti di riaddestramento del value model sono state misurate e non battono `value_v0`.
 
 - `value_v1_h128_v7_window500k_seed20260701.npz` migliora molto MAE/sign sul proprio holdout, ma non migliora
   materialmente il value-lookahead runtime;
@@ -130,10 +130,10 @@ Stato: il riaddestramento value generico su base `v7 + solver` è stato misurato
 - A/B runtime diretto `value_v1` vs `value_v0`, 4k seat-fair: `+0.24`, CI95 `-0.55..+1.04`;
 - decisione: non promuovere `value_v1`; tenere `value_v0` come value model deployato.
 
-Nuova ipotesi: `V` deve imparare a ordinare le foglie come la search PIMC, non solo predire l'esito della
-continuazione base. Questo evita di addestrare una value su target troppo diverso dalla decisione che deve prendere.
+Ipotesi successiva testata: `V` deve imparare a ordinare le foglie come la search PIMC, non solo predire l'esito della
+continuazione base.
 
-Implementazione pronta/in corso:
+Implementazione pronta:
 
 - `scripts/generate_value_dataset_numba.py` genera dataset `.npz` compatti da self-play numerico JIT;
 - `scripts/generate_pimc_leaf_value_dataset.py` converte diagnostica PIMC root-level in foglie value decision-aligned;
@@ -142,25 +142,39 @@ Implementazione pronta/in corso:
   `value_v0`;
 - `scripts/evaluate_value_lookahead_pair.py` confronta due value model nello stesso harness value-lookahead.
 
-Primo probe tecnico:
+Probe tecnico con teacher PIMC v6:
 
 - usando diagnostica PIMC v6 esistente e policy base v7, dataset 5k root / 15k leaf;
 - training da zero perde nettamente contro `value_v0` (`-2.05`, CI95 `-3.62..-0.47`, 1k);
 - fine-tune da `value_v0` è sano offline ma non supera `value_v0` (`-0.55`, CI95 `-2.14..+1.03`, 1k);
 - lettura: il plumbing è valido, ma il teacher v6 è disallineato. Non usare questo artefatto per promozione.
 
-Fare:
+Probe definitivo con teacher PIMC v7:
 
-- rigenerare un teacher PIMC con `best_a2c_v7.npz` (almeno 20k esempi search, `d=64`, `u=8`);
-- generare leaf dataset decision-aligned dallo stesso teacher v7;
-- fare prima fine-tune da `value_v0`, non training da zero;
-- gate: `value-lookahead(candidate)` vs `value-lookahead(value_v0)` con seed held-out.
+- teacher `best_a2c_v7.npz`, `d=64`, `u=8`, 40k record:
+  - `records_written_search=18184`, `records_written_endgame_solver=21816`;
+  - `records_written_search_disagree_reference=8176`;
+  - `records_written_search_strong_reliable_disagree=2935`;
+  - `teacher_seconds_per_search_decision=0.0718`;
+- leaf dataset decision-aligned:
+  - `roots_used=5022`, `leaf_records_written=15066`;
+  - `leaf_records_skipped_terminal_or_endgame=12684`;
+  - `leaf_records_skipped_error=0`;
+- fine-tune da `value_v0`:
+  - best epoch 15;
+  - validation pairwise `0.809`, top1 `0.735`;
+- A/B runtime diretto, 4k seat-fair, seed `20260710`:
+  - `value_leaf_pairwise_v7_40k` vs `value_v0`;
+  - score rate `0.4888`, CI95 `0.4733..0.5042`;
+  - avg diff `-0.69`, CI95 `-1.48..+0.11`.
 
-Kill criterion:
+Decisione:
 
-- se il fine-tune su teacher v7 non supera `value_v0` con CI positiva o lower bound materiale, chiudere il ramo
-  decision-aligned e lasciare il miglioramento nella search runtime;
-- se migliora, confermare con quality medium vs `heuristic_v1` prima di deploy.
+- non promuovere `value_leaf_pairwise_v7_40k`;
+- mantenere `value_v0_h128_clean50k_seed20260701.npz` come value model dell'agente `bc_model_value_lookahead_8x8`;
+- non rilanciare altri fine-tune value piccoli senza una nuova ipotesi strutturale;
+- se si riprende questo asse, servono o una diversa architettura/capacità per `V`, o un test mirato su errori reali
+  raccolti da audit, non un altro dataset simile.
 
 ### 2. Monitoraggio Produzione E Audit Value-Lookahead/PIMC
 
