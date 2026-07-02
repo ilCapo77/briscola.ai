@@ -25,6 +25,7 @@ from .observation import (
     _evaluate_mlp_policy_quality_numba_parallel,
 )
 from .types import NumbaA2CBatch, NumbaA2CTrajectory, NumbaDecisionQualitySummary, NumbaMLPRolloutSummary
+from .value_lookahead import _prepare_policy_belief_arrays
 
 
 def _as_float32_matrix(name: str, value: np.ndarray) -> np.ndarray:
@@ -87,11 +88,12 @@ def _prepare_a2c_numba_inputs(
         int(FEATURE_DIM_2P_V2),
         int(FEATURE_DIM_2P_V3),
         int(FEATURE_DIM_2P_V4),
+        int(FEATURE_DIM_2P_V4) + 40,  # iterazione 1b: input v4 + 40 probabilita' belief
     ):
         raise ValueError(
             f"w1 feature_dim={feature_dim}; "
             f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
-            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
+            f"{int(FEATURE_DIM_2P_V3)}, {int(FEATURE_DIM_2P_V4)} o {int(FEATURE_DIM_2P_V4) + 40}"
         )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
@@ -556,6 +558,10 @@ def collect_a2c_trajectory_numba_2p(
     opponent_name: str,
     game_seed: int,
     policy_seat: int,
+    policy_belief_w1: np.ndarray | None = None,
+    policy_belief_b1: np.ndarray | None = None,
+    policy_belief_w2: np.ndarray | None = None,
+    policy_belief_b2: np.ndarray | None = None,
     opponent_w1: np.ndarray | None = None,
     opponent_b1: np.ndarray | None = None,
     opponent_w2: np.ndarray | None = None,
@@ -577,6 +583,15 @@ def collect_a2c_trajectory_numba_2p(
     if int(overkill_low_lead_points_max) < 0:
         raise ValueError("overkill_low_lead_points_max deve essere >= 0")
     mode_code = _overkill_penalty_mode_code(overkill_penalty_mode)
+    (
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
+    ) = _prepare_policy_belief_arrays(
+        _as_float32_matrix("w1", w1), policy_belief_w1, policy_belief_b1, policy_belief_w2, policy_belief_b2
+    )
     prepared = _prepare_a2c_numba_inputs(
         w1=w1,
         b1=b1,
@@ -618,6 +633,11 @@ def collect_a2c_trajectory_numba_2p(
         prepared.opponent_w2,
         prepared.opponent_b2,
         bool(opponent_overkill_guard),
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
         float(overkill_penalty_beta),
         int(overkill_low_lead_points_max),
         int(mode_code),
@@ -652,6 +672,10 @@ def collect_a2c_batch_numba_2p(
     opponent_name: str,
     game_seeds: np.ndarray,
     policy_seats: np.ndarray,
+    policy_belief_w1: np.ndarray | None = None,
+    policy_belief_b1: np.ndarray | None = None,
+    policy_belief_w2: np.ndarray | None = None,
+    policy_belief_b2: np.ndarray | None = None,
     opponent_w1: np.ndarray | None = None,
     opponent_b1: np.ndarray | None = None,
     opponent_w2: np.ndarray | None = None,
@@ -685,6 +709,15 @@ def collect_a2c_batch_numba_2p(
     if int(overkill_low_lead_points_max) < 0:
         raise ValueError("overkill_low_lead_points_max deve essere >= 0")
     mode_code = _overkill_penalty_mode_code(overkill_penalty_mode)
+    (
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
+    ) = _prepare_policy_belief_arrays(
+        _as_float32_matrix("w1", w1), policy_belief_w1, policy_belief_b1, policy_belief_w2, policy_belief_b2
+    )
 
     prepared = _prepare_a2c_numba_inputs(
         w1=w1,
@@ -749,6 +782,11 @@ def collect_a2c_batch_numba_2p(
         prepared.opponent_w2,
         prepared.opponent_b2,
         bool(opponent_overkill_guard),
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
         float(overkill_penalty_beta),
         int(overkill_low_lead_points_max),
         int(mode_code),
@@ -864,6 +902,11 @@ def warm_up_numba_mlp_rollout() -> None:
         False,
     )
     wv = np.zeros((4,), dtype=np.float32)
+    # Belief dummy (disabilitata): compila la firma estesa dell'iterazione 1b.
+    belief_dummy_w1 = np.zeros((1, 1), dtype=np.float32)
+    belief_dummy_b1 = np.zeros(1, dtype=np.float32)
+    belief_dummy_w2 = np.zeros((1, ACTION_DIM), dtype=np.float32)
+    belief_dummy_b2 = np.zeros(ACTION_DIM, dtype=np.float32)
     _collect_mlp_policy_game_numba(
         w1,
         b1,
@@ -878,6 +921,11 @@ def warm_up_numba_mlp_rollout() -> None:
         opponent_w2,
         opponent_b2,
         False,
+        False,
+        belief_dummy_w1,
+        belief_dummy_b1,
+        belief_dummy_w2,
+        belief_dummy_b2,
         0.0,
         2,
         0,
@@ -898,6 +946,11 @@ def warm_up_numba_mlp_rollout() -> None:
         opponent_w2,
         opponent_b2,
         False,
+        False,
+        belief_dummy_w1,
+        belief_dummy_b1,
+        belief_dummy_w2,
+        belief_dummy_b2,
         0.0,
         2,
         0,

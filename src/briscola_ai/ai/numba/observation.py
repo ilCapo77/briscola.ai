@@ -282,6 +282,71 @@ def encode_fast_observation_arrays_v4_numba(
 
 
 @njit(cache=True)
+def _policy_input_v4_belief_numba(
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    points: np.ndarray,
+    table_cards: np.ndarray,
+    table_size: int,
+    deck_size: int,
+    current_turn: int,
+    trump_card: int,
+    player_index: int,
+    seen_cards: np.ndarray,
+    out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Input policy iterazione-1b: encoder v4 (369) + 40 probabilità della belief CONGELATA.
+
+    La belief legge le stesse feature v4 e produce P(carta in mano avversaria) via sigmoid:
+    l'inferenza comportamentale diventa parte dell'osservazione della policy. Anti-cheat
+    invariato: la belief è a sua volta funzione della sola osservazione lecita.
+    """
+    v4_features, action_mask = encode_fast_observation_arrays_v4_numba(
+        hands,
+        hand_sizes,
+        points,
+        table_cards,
+        table_size,
+        deck_size,
+        current_turn,
+        trump_card,
+        player_index,
+        seen_cards,
+        out_of_play_cards,
+        trick_hist,
+        num_tricks,
+    )
+    encoder_dim = int(FEATURE_DIM_2P_V4)
+    belief_hidden = belief_w1.shape[1]
+
+    features = np.zeros(encoder_dim + ACTION_DIM, dtype=np.float32)
+    for f_idx in range(encoder_dim):
+        features[f_idx] = v4_features[f_idx]
+
+    hidden = np.empty(belief_hidden, dtype=np.float32)
+    for h_idx in range(belief_hidden):
+        value = belief_b1[h_idx]
+        for f_idx in range(encoder_dim):
+            value += v4_features[f_idx] * belief_w1[f_idx, h_idx]
+        hidden[h_idx] = value if value > 0.0 else 0.0
+
+    for card_id in range(ACTION_DIM):
+        logit = belief_b2[card_id]
+        for h_idx in range(belief_hidden):
+            logit += hidden[h_idx] * belief_w2[h_idx, card_id]
+        features[encoder_dim + card_id] = 1.0 / (1.0 + np.exp(-logit))
+
+    return features, action_mask
+
+
+@njit(cache=True)
 def _action_id_to_hand_index_numba(hands: np.ndarray, hand_sizes: np.ndarray, player_index: int, action_id: int) -> int:
     """Converte action_id/card_id in indice nella mano numerica."""
     for i in range(hand_sizes[player_index]):
@@ -475,6 +540,11 @@ def _record_mlp_policy_decision_numba(
     out_of_play_cards: np.ndarray,
     trick_hist: np.ndarray,
     num_tricks: int,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     xs: np.ndarray,
     z1s: np.ndarray,
     hs: np.ndarray,
@@ -489,7 +559,27 @@ def _record_mlp_policy_decision_numba(
     """
     feature_dim = w1.shape[0]
     hidden_dim = w1.shape[1]
-    if feature_dim == int(FEATURE_DIM_2P_V4):
+    if belief_enabled:
+        features, action_mask = _policy_input_v4_belief_numba(
+            hands,
+            hand_sizes,
+            points,
+            table_cards,
+            table_size,
+            deck_size,
+            current_turn,
+            trump_card,
+            policy_seat,
+            seen_cards,
+            out_of_play_cards,
+            trick_hist,
+            num_tricks,
+            belief_w1,
+            belief_b1,
+            belief_w2,
+            belief_b2,
+        )
+    elif feature_dim == int(FEATURE_DIM_2P_V4):
         features, action_mask = encode_fast_observation_arrays_v4_numba(
             hands,
             hand_sizes,
@@ -1748,6 +1838,11 @@ def _collect_mlp_policy_game_into_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
@@ -1870,6 +1965,11 @@ def _collect_mlp_policy_game_into_numba(
             out_of_play_cards,
             trick_hist,
             trick_count[0],
+            belief_enabled,
+            belief_w1,
+            belief_b1,
+            belief_w2,
+            belief_b2,
             xs,
             z1s,
             hs,
@@ -1991,6 +2091,11 @@ def _collect_mlp_policy_game_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
@@ -2038,6 +2143,11 @@ def _collect_mlp_policy_game_numba(
         opponent_w2,
         opponent_b2,
         opponent_overkill_guard,
+        belief_enabled,
+        belief_w1,
+        belief_b1,
+        belief_w2,
+        belief_b2,
         overkill_penalty_beta,
         overkill_low_lead_points_max,
         overkill_penalty_mode_code,
@@ -2084,6 +2194,11 @@ def _collect_mlp_policy_batch_numba(
     opponent_w2: np.ndarray,
     opponent_b2: np.ndarray,
     opponent_overkill_guard: bool,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
@@ -2141,6 +2256,11 @@ def _collect_mlp_policy_batch_numba(
             opponent_w2,
             opponent_b2,
             opponent_overkill_guard,
+            belief_enabled,
+            belief_w1,
+            belief_b1,
+            belief_w2,
+            belief_b2,
             overkill_penalty_beta,
             overkill_low_lead_points_max,
             overkill_penalty_mode_code,

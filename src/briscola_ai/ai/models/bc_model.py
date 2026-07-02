@@ -99,14 +99,39 @@ class MLPBCModel:
     w2: np.ndarray
     b2: np.ndarray
     metadata: dict[str, Any]
+    # Iterazione 1b (piano belief/ExIt): belief network CONGELATA embedded nell'artefatto.
+    # Se presenti, l'input della policy è `encoder v4 (369) + 40 probabilità belief` = 409:
+    # l'inferenza sulla mano avversaria diventa parte dell'osservazione della policy.
+    belief_w1: np.ndarray | None = None
+    belief_b1: np.ndarray | None = None
+    belief_w2: np.ndarray | None = None
+    belief_b2: np.ndarray | None = None
 
     @property
     def feature_dim(self) -> int:
-        """Dimensione feature attesa dall'encoder."""
+        """Dimensione dell'INPUT della policy (409 se la belief è embedded, altrimenti l'encoder)."""
         return int(self.w1.shape[0])
 
+    @property
+    def has_belief_input(self) -> bool:
+        """True se l'artefatto include la belief network come input aggiuntivo."""
+        return self.belief_w1 is not None
+
+    def belief_probs(self, encoder_features: np.ndarray) -> np.ndarray:
+        """Probabilità belief (40,) dalle feature encoder (sigmoid, rete congelata)."""
+        assert self.belief_w1 is not None and self.belief_b1 is not None
+        assert self.belief_w2 is not None and self.belief_b2 is not None
+        h = np.maximum(encoder_features @ self.belief_w1 + self.belief_b1, 0.0)
+        return 1.0 / (1.0 + np.exp(-(h @ self.belief_w2 + self.belief_b2)))
+
+    def policy_input(self, encoder_features: np.ndarray) -> np.ndarray:
+        """Input completo della policy: feature encoder, più le probabilità belief se presenti."""
+        if not self.has_belief_input:
+            return encoder_features
+        return np.concatenate([encoder_features, self.belief_probs(encoder_features)]).astype(np.float32)
+
     def logits(self, x: np.ndarray) -> np.ndarray:
-        """Forward MLP: relu(xW1 + b1)W2 + b2."""
+        """Forward MLP: relu(xW1 + b1)W2 + b2. `x` deve essere già l'input completo della policy."""
         z1 = x @ self.w1 + self.b1
         h = np.maximum(z1, 0.0)
         return h @ self.w2 + self.b2
@@ -169,6 +194,11 @@ def _infer_encoder_version_for_model(*, metadata: dict[str, Any], feature_dim: i
     declared = _infer_encoder_version_from_metadata(metadata)
     if declared is not None:
         expected = feature_dim_for_encoder_version(declared)
+        # Policy con belief embedded (iterazione 1b): encoder v4 dichiarato, ma input
+        # della policy = 369 + 40 probabilita' belief. Le shape della belief sono gia'
+        # validate dal loader; qui accettiamo la coerenza "v4 + 40".
+        if declared == "v4" and int(feature_dim) == expected + 40:
+            return declared
         if int(feature_dim) != expected:
             raise ValueError(
                 "Modello incoerente: "
@@ -183,6 +213,10 @@ def _infer_encoder_version_for_model(*, metadata: dict[str, Any], feature_dim: i
     if int(feature_dim) == int(FEATURE_DIM_2P_V3):
         return "v3"
     if int(feature_dim) == int(FEATURE_DIM_2P_V4):
+        return "v4"
+    if int(feature_dim) == int(FEATURE_DIM_2P_V4) + 40:
+        # Policy con belief embedded (iterazione 1b): l'ENCODER resta v4 (369);
+        # le 40 feature extra sono le probabilità belief calcolate a inference.
         return "v4"
 
     raise ValueError(
@@ -363,7 +397,30 @@ def _load_bc_model_npz_uncached(path: Path) -> LoadedBCModel:
                 raise ValueError(f"Hidden dim mismatch: w2={w2.shape} b1={b1.shape}")
 
             _validate_declared_feature_dim(metadata, int(w1.shape[0]))
-            return MLPBCModel(w1=w1, b1=b1, w2=w2, b2=b2, metadata=metadata)
+
+            belief_arrays: dict[str, np.ndarray | None] = {
+                "belief_w1": None,
+                "belief_b1": None,
+                "belief_w2": None,
+                "belief_b2": None,
+            }
+            if "belief_w1" in keys:
+                missing_belief = {"belief_w1", "belief_b1", "belief_w2", "belief_b2"} - keys
+                if missing_belief:
+                    raise ValueError(f"Belief embedded incompleta: mancano {sorted(missing_belief)}")
+                bw1 = np.asarray(data["belief_w1"], dtype=np.float32)
+                bb1 = np.asarray(data["belief_b1"], dtype=np.float32)
+                bw2 = np.asarray(data["belief_w2"], dtype=np.float32)
+                bb2 = np.asarray(data["belief_b2"], dtype=np.float32)
+                if bw2.shape[1] != 40 or bb2.shape != (40,):
+                    raise ValueError(f"Belief embedded: shape uscita invalida {bw2.shape}/{bb2.shape}")
+                if int(w1.shape[0]) != int(bw1.shape[0]) + 40:
+                    raise ValueError(
+                        "Policy con belief embedded: attesa feature_dim = encoder + 40 "
+                        f"(policy={int(w1.shape[0])}, encoder belief={int(bw1.shape[0])})"
+                    )
+                belief_arrays = {"belief_w1": bw1, "belief_b1": bb1, "belief_w2": bw2, "belief_b2": bb2}
+            return MLPBCModel(w1=w1, b1=b1, w2=w2, b2=b2, metadata=metadata, **belief_arrays)
 
         if "w" not in data or "b" not in data:
             raise ValueError(f"File modello invalido: chiavi attese w/b, trovate: {sorted(keys)}")
@@ -425,13 +482,17 @@ class BCModelAgent:
             raise ValueError("Mano vuota: nessuna azione possibile")
 
         encoded = encode_player_observation_2p(observation, version=self.encoder_version)
-        if len(encoded.features) != self.model.feature_dim:
+        has_belief = bool(getattr(self.model, "has_belief_input", False))
+        expected_encoder_dim = self.model.feature_dim - 40 if has_belief else self.model.feature_dim
+        if len(encoded.features) != expected_encoder_dim:
             raise ValueError(
                 "Feature dim mismatch: "
                 f"encoder={len(encoded.features)} model={self.model.feature_dim} ({self.model_path})"
             )
 
-        x = np.asarray(encoded.features, dtype=np.float32)
+        encoder_x = np.asarray(encoded.features, dtype=np.float32)
+        # Narrowing esplicito per mypy: la belief esiste solo sul modello MLP.
+        x = self.model.policy_input(encoder_x) if has_belief and isinstance(self.model, MLPBCModel) else encoder_x
         logits = self.model.logits(x)  # (40,)
 
         mask = np.asarray(encoded.action_mask, dtype=bool)

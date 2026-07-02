@@ -61,6 +61,7 @@ from briscola_ai.ai.fast.evaluation import FAST_EVALUATION_AGENT_NAMES, choose_f
 from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.fast.state_2p import Fast2PState, new_fast_2p_state, step_fast_2p
 from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.models.belief_model import load_belief_model_npz
 from briscola_ai.ai.models.provisioning import VALUE_LOOKAHEAD_MODEL_ID
 from briscola_ai.ai.models.value_model import MLPValueModel, load_value_model_npz
 from briscola_ai.ai.numba.core import numba_agent_code
@@ -899,6 +900,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--policy-belief-model",
+        default="",
+        help=(
+            "Belief model .npz (belief_mlp_v1, encoder v4) come INPUT della policy "
+            "(iterazione 1b): input = v4 (369) + 40 probabilita' belief = 409. La belief "
+            "resta CONGELATA (non allenata) e viene salvata dentro l'artefatto finale."
+        ),
+    )
+    parser.add_argument(
         "--opponent-value-model",
         default=str(Path("data/models") / VALUE_LOOKAHEAD_MODEL_ID),
         help=("Path al value model `.npz` quando l'opponent è `bc_model_value_lookahead_8x8` nel fast rollout Numba."),
@@ -1227,7 +1237,17 @@ def main() -> int:
             opponent = build_agent(opponent_name)
 
     # Inizializzazione policy/critic.
+    policy_belief = None
+    policy_belief_path = str(args.policy_belief_model).strip()
+    if policy_belief_path:
+        if encoder_version != "v4":
+            raise ValueError("--policy-belief-model richiede --encoder-version v4 (la belief legge feature v4).")
+        policy_belief = load_belief_model_npz(policy_belief_path)
+
     target_feature_dim = int(feature_dim_for_encoder_version(encoder_version))
+    if policy_belief is not None:
+        # Iterazione 1b: l'input della policy e' encoder v4 + 40 probabilita' belief.
+        target_feature_dim += 40
     if args.init.strip():
         loaded = load_bc_model_npz(Path(args.init))
         if not isinstance(loaded, MLPBCModel):
@@ -1243,6 +1263,12 @@ def main() -> int:
                 bool(args.upgrade_init_v1_to_v2)
                 and init_dim == int(FEATURE_DIM_2P_V1)
                 and target_feature_dim == int(FEATURE_DIM_2P_V2)
+            ) or (
+                # Pad automatico v4 -> v4+belief: le 40 feature belief partono a peso zero,
+                # quindi la policy inizializzata e' ESATTAMENTE il modello di init.
+                policy_belief is not None
+                and init_dim == int(FEATURE_DIM_2P_V4)
+                and target_feature_dim == int(FEATURE_DIM_2P_V4) + 40
             ):
                 pad = np.zeros((target_feature_dim - init_dim, hdim), dtype=np.float32)
                 w1 = np.vstack([w1, pad])
@@ -1384,6 +1410,8 @@ def main() -> int:
             "init": args.init.strip() or None,
             "encoder": f"encode_observation_2p:{encoder_version}",
             "encoder_version": encoder_version,
+            "policy_belief_model": policy_belief_path or None,
+            "policy_input": "v4+belief" if policy_belief is not None else encoder_version,
             "reward_shaping": "turn_based_trick_delta_points",
             "reward_shaping_overkill_penalty_mode": str(args.overkill_penalty_mode),
             "reward_shaping_overkill_penalty_beta": float(args.overkill_penalty_beta),
@@ -1418,6 +1446,16 @@ def main() -> int:
         path.parent.mkdir(parents=True, exist_ok=True)
         payload = _build_metadata(trained_games=trained_games, is_checkpoint=is_checkpoint)
         # Nota compatibilità: `w1/b1/w2/b2` (actor) rende il file caricabile da `bc_model`.
+        extra_arrays = {}
+        if policy_belief is not None:
+            # Artefatto SELF-CONTAINED: la belief congelata viaggia col modello, cosi'
+            # bc_model puo' ricostruire l'input 409 a inference senza file esterni.
+            extra_arrays = {
+                "belief_w1": policy_belief.w1,
+                "belief_b1": policy_belief.b1,
+                "belief_w2": policy_belief.w2,
+                "belief_b2": policy_belief.b2,
+            }
         np.savez(
             path,
             w1=policy.w1,
@@ -1427,6 +1465,7 @@ def main() -> int:
             wv=policy.wv,
             bv=np.asarray([policy.bv], dtype=np.float32),
             metadata_json=json.dumps(payload, ensure_ascii=False, indent=2),
+            **extra_arrays,
         )
         kind = "checkpoint" if is_checkpoint else "model"
         print(f"Saved {kind}: {path}")
@@ -1517,6 +1556,10 @@ def main() -> int:
                                 )
                                 opponent_codes = np.full(batch_size, code, dtype=np.int64)
                             numba_batch = collect_a2c_batch_numba_value_lookahead_2p(
+                                policy_belief_w1=policy_belief.w1 if policy_belief is not None else None,
+                                policy_belief_b1=policy_belief.b1 if policy_belief is not None else None,
+                                policy_belief_w2=policy_belief.w2 if policy_belief is not None else None,
+                                policy_belief_b2=policy_belief.b2 if policy_belief is not None else None,
                                 w1=policy.w1,
                                 b1=policy.b1,
                                 w2=policy.w2,
@@ -1547,6 +1590,10 @@ def main() -> int:
                             )
                         else:
                             numba_batch = collect_a2c_batch_numba_2p(
+                                policy_belief_w1=policy_belief.w1 if policy_belief is not None else None,
+                                policy_belief_b1=policy_belief.b1 if policy_belief is not None else None,
+                                policy_belief_w2=policy_belief.w2 if policy_belief is not None else None,
+                                policy_belief_b2=policy_belief.b2 if policy_belief is not None else None,
                                 w1=policy.w1,
                                 b1=policy.b1,
                                 w2=policy.w2,
@@ -1622,6 +1669,10 @@ def main() -> int:
                         )
                         code = numba_agent_code(current_opponent.name) if mode == OPPONENT_MODE_RULE else 0
                         numba_traj = collect_a2c_trajectory_numba_value_lookahead_2p(
+                            policy_belief_w1=policy_belief.w1 if policy_belief is not None else None,
+                            policy_belief_b1=policy_belief.b1 if policy_belief is not None else None,
+                            policy_belief_w2=policy_belief.w2 if policy_belief is not None else None,
+                            policy_belief_b2=policy_belief.b2 if policy_belief is not None else None,
                             w1=policy.w1,
                             b1=policy.b1,
                             w2=policy.w2,
@@ -1652,6 +1703,10 @@ def main() -> int:
                         )
                     else:
                         numba_traj = collect_a2c_trajectory_numba_2p(
+                            policy_belief_w1=policy_belief.w1 if policy_belief is not None else None,
+                            policy_belief_b1=policy_belief.b1 if policy_belief is not None else None,
+                            policy_belief_w2=policy_belief.w2 if policy_belief is not None else None,
+                            policy_belief_b2=policy_belief.b2 if policy_belief is not None else None,
                             w1=policy.w1,
                             b1=policy.b1,
                             w2=policy.w2,

@@ -624,11 +624,12 @@ def _validate_a2c_value_lookahead_inputs(
         int(FEATURE_DIM_2P_V2),
         int(FEATURE_DIM_2P_V3),
         int(FEATURE_DIM_2P_V4),
+        int(FEATURE_DIM_2P_V4) + 40,  # iterazione 1b: input v4 + belief
     ):
         raise ValueError(
             f"w1 feature_dim={feature_dim}; "
             f"atteso {int(FEATURE_DIM_2P_V1)}, {int(FEATURE_DIM_2P_V2)}, "
-            f"{int(FEATURE_DIM_2P_V3)} o {int(FEATURE_DIM_2P_V4)}"
+            f"{int(FEATURE_DIM_2P_V3)}, {int(FEATURE_DIM_2P_V4)} o {int(FEATURE_DIM_2P_V4) + 40}"
         )
     if b1_arr.shape != (hidden_dim,):
         raise ValueError(f"b1 shape={b1_arr.shape}; atteso {(hidden_dim,)}")
@@ -815,6 +816,11 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
@@ -947,6 +953,11 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
             out_of_play_cards,
             trick_hist,
             trick_count[0],
+            belief_enabled,
+            belief_w1,
+            belief_b1,
+            belief_w2,
+            belief_b2,
             xs,
             z1s,
             hs,
@@ -1083,6 +1094,11 @@ def _collect_mlp_policy_value_lookahead_game_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
@@ -1138,6 +1154,11 @@ def _collect_mlp_policy_value_lookahead_game_numba(
             value_target_scale,
             value_target_is_residual,
             value_max_unknown_cards,
+            belief_enabled,
+            belief_w1,
+            belief_b1,
+            belief_w2,
+            belief_b2,
             overkill_penalty_beta,
             overkill_low_lead_points_max,
             overkill_penalty_mode_code,
@@ -1192,6 +1213,11 @@ def _collect_mlp_policy_value_lookahead_batch_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    belief_enabled: bool,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
     overkill_penalty_beta: float,
     overkill_low_lead_points_max: int,
     overkill_penalty_mode_code: int,
@@ -1254,6 +1280,11 @@ def _collect_mlp_policy_value_lookahead_batch_numba(
             value_target_scale,
             value_target_is_residual,
             value_max_unknown_cards,
+            belief_enabled,
+            belief_w1,
+            belief_b1,
+            belief_w2,
+            belief_b2,
             overkill_penalty_beta,
             overkill_low_lead_points_max,
             overkill_penalty_mode_code,
@@ -1291,6 +1322,40 @@ def _collect_mlp_policy_value_lookahead_batch_numba(
     )
 
 
+def _prepare_policy_belief_arrays(
+    w1: np.ndarray,
+    belief_w1: np.ndarray | None,
+    belief_b1: np.ndarray | None,
+    belief_w2: np.ndarray | None,
+    belief_b2: np.ndarray | None,
+) -> tuple[bool, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """
+    Normalizza i pesi della belief per i kernel (iterazione 1b).
+
+    Se la belief è data, la policy DEVE avere input 409 (= encoder v4 369 + 40 probabilità);
+    senza belief passiamo dummy minimi (i kernel non li leggono con belief_enabled=False).
+    """
+    given = [belief_w1, belief_b1, belief_w2, belief_b2]
+    if all(v is None for v in given):
+        dummy1 = np.zeros((1, 1), dtype=np.float32)
+        dummy_v = np.zeros(1, dtype=np.float32)
+        dummy2 = np.zeros((1, ACTION_DIM), dtype=np.float32)
+        dummy_b = np.zeros(ACTION_DIM, dtype=np.float32)
+        return False, dummy1, dummy_v, dummy2, dummy_b
+    if any(v is None for v in given):
+        raise ValueError("Belief policy incompleta: servono belief_w1/b1/w2/b2.")
+    bw1 = np.ascontiguousarray(np.asarray(belief_w1, dtype=np.float32))
+    bb1 = np.ascontiguousarray(np.asarray(belief_b1, dtype=np.float32))
+    bw2 = np.ascontiguousarray(np.asarray(belief_w2, dtype=np.float32))
+    bb2 = np.ascontiguousarray(np.asarray(belief_b2, dtype=np.float32))
+    if int(w1.shape[0]) != int(bw1.shape[0]) + ACTION_DIM:
+        raise ValueError(
+            "Policy con belief input: attesa feature_dim = encoder_belief + 40 "
+            f"(policy={int(w1.shape[0])}, belief={int(bw1.shape[0])})"
+        )
+    return True, bw1, bb1, bw2, bb2
+
+
 def collect_a2c_trajectory_numba_value_lookahead_2p(
     *,
     w1: np.ndarray,
@@ -1315,6 +1380,10 @@ def collect_a2c_trajectory_numba_value_lookahead_2p(
     value_max_unknown_cards: int,
     game_seed: int,
     policy_seat: int,
+    policy_belief_w1: np.ndarray | None = None,
+    policy_belief_b1: np.ndarray | None = None,
+    policy_belief_w2: np.ndarray | None = None,
+    policy_belief_b2: np.ndarray | None = None,
     overkill_penalty_beta: float = 0.0,
     overkill_low_lead_points_max: int = 2,
     overkill_penalty_mode: str = "flat",
@@ -1324,6 +1393,13 @@ def collect_a2c_trajectory_numba_value_lookahead_2p(
         raise ValueError(f"policy_seat fuori range: {policy_seat}")
     if int(value_max_unknown_cards) < 0:
         raise ValueError("value_max_unknown_cards deve essere >= 0")
+    (
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
+    ) = _prepare_policy_belief_arrays(w1, policy_belief_w1, policy_belief_b1, policy_belief_w2, policy_belief_b2)
     if float(overkill_penalty_beta) < 0.0:
         raise ValueError("overkill_penalty_beta deve essere >= 0")
     if int(overkill_low_lead_points_max) < 0:
@@ -1394,6 +1470,11 @@ def collect_a2c_trajectory_numba_value_lookahead_2p(
         float(value_target_scale),
         bool(value_target_is_residual),
         int(value_max_unknown_cards),
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
         float(overkill_penalty_beta),
         int(overkill_low_lead_points_max),
         int(mode_code),
@@ -1441,6 +1522,10 @@ def collect_a2c_batch_numba_value_lookahead_2p(
     value_max_unknown_cards: int,
     game_seeds: np.ndarray,
     policy_seats: np.ndarray,
+    policy_belief_w1: np.ndarray | None = None,
+    policy_belief_b1: np.ndarray | None = None,
+    policy_belief_w2: np.ndarray | None = None,
+    policy_belief_b2: np.ndarray | None = None,
     overkill_penalty_beta: float = 0.0,
     overkill_low_lead_points_max: int = 2,
     overkill_penalty_mode: str = "flat",
@@ -1468,6 +1553,13 @@ def collect_a2c_batch_numba_value_lookahead_2p(
         raise ValueError("opponent_modes contiene modalità non supportate")
     if int(value_max_unknown_cards) < 0:
         raise ValueError("value_max_unknown_cards deve essere >= 0")
+    (
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
+    ) = _prepare_policy_belief_arrays(w1, policy_belief_w1, policy_belief_b1, policy_belief_w2, policy_belief_b2)
     if float(overkill_penalty_beta) < 0.0:
         raise ValueError("overkill_penalty_beta deve essere >= 0")
     if int(overkill_low_lead_points_max) < 0:
@@ -1536,6 +1628,11 @@ def collect_a2c_batch_numba_value_lookahead_2p(
         float(value_target_scale),
         bool(value_target_is_residual),
         int(value_max_unknown_cards),
+        belief_enabled,
+        belief_w1_arr,
+        belief_b1_arr,
+        belief_w2_arr,
+        belief_b2_arr,
         float(overkill_penalty_beta),
         int(overkill_low_lead_points_max),
         int(mode_code),
