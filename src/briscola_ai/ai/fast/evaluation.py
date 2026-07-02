@@ -417,6 +417,8 @@ def evaluate_fast_seat_fair_match_2p(
     sum_b = 0
     sum_diff = 0
     sum_sq_diff = 0
+    sum_sq_pair_diff = 0
+    sum_sq_pair_score = 0.0
 
     for i in range(num_pairs):
         game_seed = seeds[i]
@@ -425,31 +427,43 @@ def evaluate_fast_seat_fair_match_2p(
         p0, p1 = s1.points[0], s1.points[1]
         sum_a += p0
         sum_b += p1
-        diff = p0 - p1
-        sum_diff += diff
-        sum_sq_diff += diff * diff
+        diff1 = p0 - p1
+        sum_diff += diff1
+        sum_sq_diff += diff1 * diff1
         w = _winner_index_fast_2p(s1)
         if w is None:
             draws += 1
+            score1 = 0.5
         elif w == 0:
             wins_a += 1
+            score1 = 1.0
         else:
             wins_b += 1
+            score1 = 0.0
 
         s2 = play_one_fast_game_2p(agent_b_name, agent_a_name, rng=rng_action, game_seed=game_seed)
         p0, p1 = s2.points[0], s2.points[1]
         sum_a += p1
         sum_b += p0
-        diff = p1 - p0
-        sum_diff += diff
-        sum_sq_diff += diff * diff
+        diff2 = p1 - p0
+        sum_diff += diff2
+        sum_sq_diff += diff2 * diff2
         w = _winner_index_fast_2p(s2)
         if w is None:
             draws += 1
+            score2 = 0.5
         elif w == 0:
             wins_b += 1
+            score2 = 0.0
         else:
             wins_a += 1
+            score2 = 1.0
+
+        # Accumulo per COPPIA (unità statistica indipendente), come nel path canonico.
+        pair_diff = diff1 + diff2
+        sum_sq_pair_diff += pair_diff * pair_diff
+        pair_score = (score1 + score2) / 2.0
+        sum_sq_pair_score += pair_score * pair_score
 
     return SeatFairStats(
         num_games=num_games,
@@ -462,4 +476,6 @@ def evaluate_fast_seat_fair_match_2p(
         avg_points_agent_b=sum_b / num_games if num_games else 0.0,
         avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
         sum_sq_point_diff_agent_a_minus_agent_b=float(sum_sq_diff),
+        sum_sq_pair_point_diff_agent_a_minus_agent_b=float(sum_sq_pair_diff),
+        sum_sq_pair_score_agent_a=float(sum_sq_pair_score),
     )

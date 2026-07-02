@@ -17,7 +17,7 @@ from pathlib import Path
 
 from briscola_ai.ai.agents import HybridEndgameAgent, ValueLookaheadAgent
 from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
-from briscola_ai.ai.evaluation.round_robin import mean_point_diff_interval, wilson_score_interval
+from briscola_ai.ai.evaluation.round_robin import seat_fair_avg_point_diff_ci, seat_fair_score_rate_ci
 from briscola_ai.ai.models import BCModelAgent, load_value_model_npz
 
 
@@ -97,18 +97,10 @@ def main() -> int:
     )
     elapsed = time.perf_counter() - started
     score_rate = _score_rate(stats)
-    score_ci = wilson_score_interval(
-        wins=stats.wins_agent_a,
-        losses=stats.wins_agent_b,
-        draws=stats.draws,
-        confidence=0.95,
-    )
-    avg_diff_ci = mean_point_diff_interval(
-        mean=stats.avg_point_diff_agent_a_minus_agent_b,
-        num_games=stats.num_games,
-        sum_sq=stats.sum_sq_point_diff_agent_a_minus_agent_b,
-        confidence=0.95,
-    )
+    # CI calcolate sull'unità COPPIA seat-fair (stesso mazzo, seat scambiati): le due
+    # partite di una coppia sono correlate, trattarle come indipendenti darebbe CI troppo strette.
+    score_ci = seat_fair_score_rate_ci(stats, confidence=0.95)
+    avg_diff_ci = seat_fair_avg_point_diff_ci(stats, confidence=0.95)
     avg_diff_ci_text = "n/a" if avg_diff_ci is None else f"{avg_diff_ci.low:+.2f}..{avg_diff_ci.high:+.2f}"
 
     print(

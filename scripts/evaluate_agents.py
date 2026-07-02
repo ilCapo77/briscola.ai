@@ -26,6 +26,7 @@ from pathlib import Path
 
 from briscola_ai.ai.agents import Agent, build_agent, list_agent_specs
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
+from briscola_ai.ai.evaluation.round_robin import seat_fair_avg_point_diff_ci, seat_fair_score_rate_ci
 from briscola_ai.ai.fast.evaluation import (
     FAST_EVALUATION_AGENT_NAMES,
     evaluate_fast_match_2p,
@@ -88,6 +89,23 @@ def _make_range_seed_suite(*, start: int, step: int, count: int) -> list[int]:
     if step <= 0:
         raise ValueError(f"step deve essere > 0, ottenuto {step}")
     return [((start + i * step) & 0xFFFFFFFF) for i in range(count)]
+
+
+def _print_seat_fair_cis(stats) -> None:
+    """
+    Stampa le CI95 seat-fair calcolate sull'unità COPPIA (mazzo condiviso, seat scambiati).
+
+    Se il produttore non ha tracciato le somme per coppia, gli helper ripiegano sulle CI
+    per-partita (anti-conservative) e lo segnaliamo nell'etichetta.
+    """
+    paired_available = stats.sum_sq_pair_point_diff_agent_a_minus_agent_b is not None
+    label = "CI95 (coppie)" if paired_available else "CI95 (per-partita, anti-conservativa)"
+    diff_ci = seat_fair_avg_point_diff_ci(stats, confidence=0.95)
+    score_ci = seat_fair_score_rate_ci(stats, confidence=0.95)
+    score_rate = (stats.wins_agent_a + 0.5 * stats.draws) / max(1, stats.num_games)
+    if diff_ci is not None:
+        print(f"- avg point diff {label}: {diff_ci.low:+.2f}..{diff_ci.high:+.2f}")
+    print(f"- score rate A: {score_rate:.4f} | {label}: {score_ci.low:.4f}..{score_ci.high:.4f}")
 
 
 def main() -> int:
@@ -289,6 +307,7 @@ def main() -> int:
             print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
             print(f"- avg points A: {stats.avg_points_agent_a:.2f} | avg points B: {stats.avg_points_agent_b:.2f}")
             print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
+            _print_seat_fair_cis(stats)
             if args.out_json.strip():
                 payload = {
                     "mode": "seat_fair",
@@ -358,6 +377,7 @@ def main() -> int:
             print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
             print(f"- avg points A: {stats.avg_points_agent_a:.2f} | avg points B: {stats.avg_points_agent_b:.2f}")
             print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
+            _print_seat_fair_cis(stats)
             if args.out_json.strip():
                 payload = {
                     "mode": "seat_fair",
@@ -422,6 +442,7 @@ def main() -> int:
         print(f"- wins A: {stats.wins_agent_a} | wins B: {stats.wins_agent_b} | draws: {stats.draws}")
         print(f"- avg points A: {stats.avg_points_agent_a:.2f} | avg points B: {stats.avg_points_agent_b:.2f}")
         print(f"- avg point diff (A-B): {stats.avg_point_diff_agent_a_minus_agent_b:.2f}")
+        _print_seat_fair_cis(stats)
         if args.out_json.strip():
             payload = {
                 "mode": "seat_fair",

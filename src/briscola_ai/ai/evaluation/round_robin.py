@@ -100,22 +100,12 @@ class RoundRobinMatchup:
         )
 
     def score_rate_a_ci(self, *, confidence: float) -> ConfidenceInterval:
-        """CI Wilson approssimata sullo score rate di A."""
-        return wilson_score_interval(
-            wins=self.stats.wins_agent_a,
-            losses=self.stats.wins_agent_b,
-            draws=self.stats.draws,
-            confidence=confidence,
-        )
+        """CI sullo score rate di A (unità coppia quando disponibile, altrimenti Wilson per-partita)."""
+        return seat_fair_score_rate_ci(self.stats, confidence=confidence)
 
     def avg_point_diff_ci(self, *, confidence: float) -> ConfidenceInterval | None:
-        """CI analitica sul margine medio A-B, se lo stat include la varianza per partita."""
-        return mean_point_diff_interval(
-            mean=self.stats.avg_point_diff_agent_a_minus_agent_b,
-            num_games=self.stats.num_games,
-            sum_sq=self.stats.sum_sq_point_diff_agent_a_minus_agent_b,
-            confidence=confidence,
-        )
+        """CI sul margine medio A-B (unità coppia quando disponibile, altrimenti per-partita)."""
+        return seat_fair_avg_point_diff_ci(self.stats, confidence=confidence)
 
     def to_json_dict(self, *, confidence: float = 0.95) -> dict:
         """Ritorna una rappresentazione JSON-serializzabile."""
@@ -273,7 +263,14 @@ def mean_point_diff_interval(
     sum_sq: float | None,
     confidence: float = 0.95,
 ) -> ConfidenceInterval | None:
-    """CI normale sul margine medio punti A-B, se e' disponibile la somma dei quadrati per partita."""
+    """
+    CI normale sul margine medio punti A-B trattando le PARTITE come indipendenti.
+
+    Attenzione: nelle valutazioni seat-fair le due partite di una coppia condividono il
+    mazzo e sono correlate, quindi questa CI è anti-conservativa (troppo stretta).
+    Usare `mean_point_diff_interval_paired` quando i dati per coppia sono disponibili;
+    questa resta come fallback per i path che producono solo aggregati per partita.
+    """
     if sum_sq is None or num_games <= 1:
         return None
     z = _z_for_confidence(confidence)
@@ -283,6 +280,116 @@ def mean_point_diff_interval(
     variance = max(0.0, numerator / (n - 1))
     half_width = z * math.sqrt(variance / n)
     return ConfidenceInterval(low=float(mean) - half_width, high=float(mean) + half_width, confidence=float(confidence))
+
+
+def mean_point_diff_interval_paired(
+    *,
+    mean: float,
+    num_games: int,
+    sum_sq_pair: float | None,
+    confidence: float = 0.95,
+) -> ConfidenceInterval | None:
+    """
+    CI sul margine medio punti A-B PER PARTITA, con la coppia seat-fair come unità indipendente.
+
+    Derivazione:
+    - `d_pair = d_game1 + d_game2` (stesso mazzo, seat scambiati) è l'osservazione indipendente;
+    - la media dei `d_pair` è `2 * mean` (perché `num_games = 2 * num_pairs`);
+    - la CI viene calcolata su `mean(d_pair)` con `n = num_pairs` e poi divisa per 2 per
+      riportarla alla scala per-partita usata in tutti i report.
+
+    Rispetto alla versione per-partita, questa CI è più larga quando le due partite della
+    coppia sono correlate positivamente (il caso tipico con agenti deterministici): è la
+    larghezza corretta, l'altra sovrastima il campione effettivo.
+    """
+    if sum_sq_pair is None or num_games < 4 or num_games % 2 != 0:
+        return None
+    num_pairs = int(num_games) // 2
+    z = _z_for_confidence(confidence)
+    sum_pair_diff = float(mean) * num_games  # la somma dei diff per partita coincide con quella per coppia
+    numerator = float(sum_sq_pair) - (sum_pair_diff * sum_pair_diff / num_pairs)
+    variance_pair = max(0.0, numerator / (num_pairs - 1))
+    half_width = z * math.sqrt(variance_pair / num_pairs) / 2.0
+    return ConfidenceInterval(low=float(mean) - half_width, high=float(mean) + half_width, confidence=float(confidence))
+
+
+def score_rate_interval_paired(
+    *,
+    wins: int,
+    losses: int,
+    draws: int,
+    sum_sq_pair_score: float | None,
+    confidence: float = 0.95,
+) -> ConfidenceInterval | None:
+    """
+    CI normale sullo score rate con la coppia seat-fair come unità indipendente.
+
+    Lo score per coppia è `s = (score_g1 + score_g2) / 2` con score 1/0.5/0: la sua media
+    coincide con lo score rate per partita, quindi il centro non cambia; cambia (correttamente)
+    la larghezza, calcolata su `n = num_pairs` osservazioni indipendenti.
+    """
+    total_games = int(wins) + int(losses) + int(draws)
+    if sum_sq_pair_score is None or total_games < 4 or total_games % 2 != 0:
+        return None
+    num_pairs = total_games // 2
+    z = _z_for_confidence(confidence)
+    sum_pair_scores = (float(wins) + 0.5 * float(draws)) / 2.0
+    mean = sum_pair_scores / num_pairs
+    numerator = float(sum_sq_pair_score) - (sum_pair_scores * sum_pair_scores / num_pairs)
+    variance_pair = max(0.0, numerator / (num_pairs - 1))
+    half_width = z * math.sqrt(variance_pair / num_pairs)
+    return ConfidenceInterval(
+        low=max(0.0, mean - half_width),
+        high=min(1.0, mean + half_width),
+        confidence=float(confidence),
+    )
+
+
+def seat_fair_avg_point_diff_ci(stats: SeatFairStats, *, confidence: float = 0.95) -> ConfidenceInterval | None:
+    """
+    CI sul margine medio A-B a partire da uno `SeatFairStats`, preferendo l'unità coppia.
+
+    È l'entry point consigliato per script e report: usa la CI corretta (per coppia) quando
+    il produttore ha tracciato `sum_sq_pair_*`, altrimenti ripiega sulla CI per-partita
+    (anti-conservativa, documentata come tale).
+    """
+    paired = mean_point_diff_interval_paired(
+        mean=stats.avg_point_diff_agent_a_minus_agent_b,
+        num_games=stats.num_games,
+        sum_sq_pair=stats.sum_sq_pair_point_diff_agent_a_minus_agent_b,
+        confidence=confidence,
+    )
+    if paired is not None:
+        return paired
+    return mean_point_diff_interval(
+        mean=stats.avg_point_diff_agent_a_minus_agent_b,
+        num_games=stats.num_games,
+        sum_sq=stats.sum_sq_point_diff_agent_a_minus_agent_b,
+        confidence=confidence,
+    )
+
+
+def seat_fair_score_rate_ci(stats: SeatFairStats, *, confidence: float = 0.95) -> ConfidenceInterval:
+    """
+    CI sullo score rate di A a partire da uno `SeatFairStats`, preferendo l'unità coppia.
+
+    Fallback: Wilson per-partita (approssimazione anti-conservativa nelle valutazioni seat-fair).
+    """
+    paired = score_rate_interval_paired(
+        wins=stats.wins_agent_a,
+        losses=stats.wins_agent_b,
+        draws=stats.draws,
+        sum_sq_pair_score=stats.sum_sq_pair_score_agent_a,
+        confidence=confidence,
+    )
+    if paired is not None:
+        return paired
+    return wilson_score_interval(
+        wins=stats.wins_agent_a,
+        losses=stats.wins_agent_b,
+        draws=stats.draws,
+        confidence=confidence,
+    )
 
 
 def relabel_seat_fair_stats(stats: SeatFairStats, *, agent_a_name: str, agent_b_name: str) -> SeatFairStats:
@@ -298,7 +405,23 @@ def relabel_seat_fair_stats(stats: SeatFairStats, *, agent_a_name: str, agent_b_
         avg_points_agent_b=stats.avg_points_agent_b,
         avg_point_diff_agent_a_minus_agent_b=stats.avg_point_diff_agent_a_minus_agent_b,
         sum_sq_point_diff_agent_a_minus_agent_b=stats.sum_sq_point_diff_agent_a_minus_agent_b,
+        sum_sq_pair_point_diff_agent_a_minus_agent_b=stats.sum_sq_pair_point_diff_agent_a_minus_agent_b,
+        sum_sq_pair_score_agent_a=stats.sum_sq_pair_score_agent_a,
     )
+
+
+def _inverted_sum_sq_pair_score(stats: SeatFairStats) -> float | None:
+    """
+    Somma dei quadrati degli score per coppia dal punto di vista dell'agente B.
+
+    Lo score per coppia di B è `1 - s` (dove `s` è quello di A), quindi:
+    `sum((1-s)^2) = num_pairs - 2*sum(s) + sum(s^2)`, con `sum(s)` derivabile dagli aggregati.
+    """
+    if stats.sum_sq_pair_score_agent_a is None or stats.num_games % 2 != 0:
+        return None
+    num_pairs = stats.num_games // 2
+    sum_scores_a = (float(stats.wins_agent_a) + 0.5 * float(stats.draws)) / 2.0
+    return float(num_pairs) - 2.0 * sum_scores_a + float(stats.sum_sq_pair_score_agent_a)
 
 
 def invert_seat_fair_stats(stats: SeatFairStats, *, agent_a_name: str, agent_b_name: str) -> SeatFairStats:
@@ -319,7 +442,10 @@ def invert_seat_fair_stats(stats: SeatFairStats, *, agent_a_name: str, agent_b_n
         avg_points_agent_a=stats.avg_points_agent_b,
         avg_points_agent_b=stats.avg_points_agent_a,
         avg_point_diff_agent_a_minus_agent_b=-stats.avg_point_diff_agent_a_minus_agent_b,
+        # I quadrati dei diff (per partita e per coppia) sono invarianti al cambio di segno.
         sum_sq_point_diff_agent_a_minus_agent_b=stats.sum_sq_point_diff_agent_a_minus_agent_b,
+        sum_sq_pair_point_diff_agent_a_minus_agent_b=stats.sum_sq_pair_point_diff_agent_a_minus_agent_b,
+        sum_sq_pair_score_agent_a=_inverted_sum_sq_pair_score(stats),
     )
 
 

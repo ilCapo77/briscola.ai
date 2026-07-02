@@ -27,6 +27,10 @@ class NumbaMLPRolloutSummary:
     sum_policy: int
     sum_opponent: int
     sum_sq_point_diff_policy_minus_opponent: float | None = field(default=None, compare=False)
+    # Somme per COPPIA seat-fair (unità statistica indipendente): disponibili solo quando il
+    # rollout produce risultati per-partita accoppiabili (path parallelo seat-fair).
+    sum_sq_pair_point_diff_policy_minus_opponent: float | None = field(default=None, compare=False)
+    sum_sq_pair_score_policy: float | None = field(default=None, compare=False)
 
     def to_match_stats(self) -> MatchStats:
         """Converte il summary nel DTO statistico standard."""
@@ -64,6 +68,8 @@ class NumbaMLPRolloutSummary:
                 (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
             ),
             sum_sq_point_diff_agent_a_minus_agent_b=self.sum_sq_point_diff_policy_minus_opponent,
+            sum_sq_pair_point_diff_agent_a_minus_agent_b=self.sum_sq_pair_point_diff_policy_minus_opponent,
+            sum_sq_pair_score_agent_a=self.sum_sq_pair_score_policy,
         )
 
 
@@ -87,6 +93,8 @@ class NumbaDecisionQualitySummary:
     num_second_hand_trump_wins_low_lead_points: int
     num_trump_overkill_low_lead_points: int
     sum_sq_point_diff_policy_minus_opponent: float | None = field(default=None, compare=False)
+    sum_sq_pair_point_diff_policy_minus_opponent: float | None = field(default=None, compare=False)
+    sum_sq_pair_score_policy: float | None = field(default=None, compare=False)
 
     def to_seat_fair_stats(self) -> SeatFairStats:
         """Converte match aggregato nel DTO seat-fair standard."""
@@ -103,6 +111,8 @@ class NumbaDecisionQualitySummary:
                 (self.sum_policy - self.sum_opponent) / self.num_games if self.num_games else 0.0
             ),
             sum_sq_point_diff_agent_a_minus_agent_b=self.sum_sq_point_diff_policy_minus_opponent,
+            sum_sq_pair_point_diff_agent_a_minus_agent_b=self.sum_sq_pair_point_diff_policy_minus_opponent,
+            sum_sq_pair_score_agent_a=self.sum_sq_pair_score_policy,
         )
 
 

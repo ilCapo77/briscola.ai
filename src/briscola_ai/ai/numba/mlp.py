@@ -285,6 +285,18 @@ def evaluate_mlp_policy_numba_2p(
         sum_opponent = int(np.sum(opponent_points))
         point_diffs = policy_points.astype(np.int64) - opponent_points.astype(np.int64)
         sum_sq_diff: float | None = float(np.sum(point_diffs * point_diffs))
+        if bool(seat_fair):
+            # Il kernel seat-fair produce le partite in coppie adiacenti (2i, 2i+1) con lo
+            # stesso seed e seat scambiati, già dal punto di vista della policy: possiamo
+            # quindi aggregare per COPPIA (l'unità statistica indipendente per le CI).
+            pair_diffs = point_diffs.reshape(-1, 2).sum(axis=1)
+            sum_sq_pair_diff: float | None = float(np.sum(pair_diffs * pair_diffs))
+            game_scores = np.where(winners == 0, 1.0, np.where(winners == 1, 0.0, 0.5))
+            pair_scores = game_scores.reshape(-1, 2).mean(axis=1)
+            sum_sq_pair_score: float | None = float(np.sum(pair_scores * pair_scores))
+        else:
+            sum_sq_pair_diff = None
+            sum_sq_pair_score = None
     else:
         wins_policy, wins_opponent, draws, sum_policy, sum_opponent = _evaluate_mlp_policy_numba(
             w1_arr,
@@ -304,6 +316,8 @@ def evaluate_mlp_policy_numba_2p(
             bool(policy_overkill_guard),
         )
         sum_sq_diff = None
+        sum_sq_pair_diff = None
+        sum_sq_pair_score = None
     return NumbaMLPRolloutSummary(
         num_games=num_games,
         policy_name=policy_name,
@@ -314,6 +328,8 @@ def evaluate_mlp_policy_numba_2p(
         sum_policy=int(sum_policy),
         sum_opponent=int(sum_opponent),
         sum_sq_point_diff_policy_minus_opponent=sum_sq_diff,
+        sum_sq_pair_point_diff_policy_minus_opponent=sum_sq_pair_diff,
+        sum_sq_pair_score_policy=sum_sq_pair_score,
     )
 
 

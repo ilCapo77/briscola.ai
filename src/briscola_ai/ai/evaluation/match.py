@@ -56,6 +56,14 @@ class SeatFairStats:
     2) B = player 0, A = player 1
 
     Questo riduce drasticamente il bias dovuto a “chi inizia” (player 0 nel dominio).
+
+    Nota statistica (importante per le CI):
+    le due partite di una coppia condividono lo stesso mazzo, quindi NON sono campioni
+    indipendenti — con agenti deterministici sono anzi fortemente correlate. L'unità
+    statistica indipendente è la COPPIA, non la partita. I campi `sum_sq_pair_*` servono
+    a calcolare CI corrette sull'unità coppia; le CI per-partita basate su
+    `sum_sq_point_diff_*` sovrastimano il campione effettivo e risultano troppo strette
+    (anti-conservative). Restano come fallback per i path che non tracciano le coppie.
     """
 
     num_games: int
@@ -68,14 +76,24 @@ class SeatFairStats:
     avg_points_agent_b: float
     avg_point_diff_agent_a_minus_agent_b: float
     sum_sq_point_diff_agent_a_minus_agent_b: float | None = None
+    # Somma su ogni coppia di (d1 + d2)^2, dove d = punti_A - punti_B in ciascun game.
+    sum_sq_pair_point_diff_agent_a_minus_agent_b: float | None = None
+    # Somma su ogni coppia di s^2, dove s = (score_g1 + score_g2) / 2 e score = 1/0.5/0 (win/draw/loss di A).
+    sum_sq_pair_score_agent_a: float | None = None
+
+    @property
+    def num_pairs(self) -> int:
+        """Numero di coppie seat-fair (2 partite per coppia)."""
+        return self.num_games // 2
 
     @property
     def sample_std_point_diff_agent_a_minus_agent_b(self) -> float | None:
         """
-        Deviazione standard campionaria del diff punti per partita, se disponibile.
+        Deviazione standard campionaria del diff punti PER PARTITA, se disponibile.
 
-        Il campo e' opzionale per mantenere compatibili i path che oggi producono solo aggregati.
-        Quando disponibile, abilita una CI analitica sul margine medio A-B.
+        Attenzione: tratta le partite come indipendenti, ma le due partite di una coppia
+        seat-fair non lo sono. Per le CI usare l'unità coppia (`sum_sq_pair_*`) quando
+        disponibile; questa property resta per compatibilità e diagnostica.
         """
         if self.sum_sq_point_diff_agent_a_minus_agent_b is None or self.num_games <= 1:
             return None
@@ -225,6 +243,8 @@ def evaluate_seat_fair_match_2p(
     sum_b = 0
     sum_diff = 0
     sum_sq_diff = 0
+    sum_sq_pair_diff = 0
+    sum_sq_pair_score = 0.0
 
     for i in range(num_pairs):
         game_seed = seeds[i]
@@ -234,16 +254,19 @@ def evaluate_seat_fair_match_2p(
         p0, p1 = s1.players[0].points, s1.players[1].points
         sum_a += p0
         sum_b += p1
-        diff = p0 - p1
-        sum_diff += diff
-        sum_sq_diff += diff * diff
+        diff1 = p0 - p1
+        sum_diff += diff1
+        sum_sq_diff += diff1 * diff1
         w = _winner_index_2p(s1)
         if w is None:
             draws += 1
+            score1 = 0.5
         elif w == 0:
             wins_a += 1
+            score1 = 1.0
         else:
             wins_b += 1
+            score1 = 0.0
 
         # Game 2: B=P0, A=P1 (swap)
         s2 = play_one_game_2p(agent_b, agent_a, rng=rng_action, game_seed=game_seed)
@@ -251,17 +274,26 @@ def evaluate_seat_fair_match_2p(
         # Qui A è player 1.
         sum_a += p1
         sum_b += p0
-        diff = p1 - p0
-        sum_diff += diff
-        sum_sq_diff += diff * diff
+        diff2 = p1 - p0
+        sum_diff += diff2
+        sum_sq_diff += diff2 * diff2
         w = _winner_index_2p(s2)
         if w is None:
             draws += 1
+            score2 = 0.5
         elif w == 0:
             # winner = player 0 = agent B
             wins_b += 1
+            score2 = 0.0
         else:
             wins_a += 1
+            score2 = 1.0
+
+        # Accumulo per COPPIA (l'unità statistica indipendente: stesso mazzo, seat scambiati).
+        pair_diff = diff1 + diff2
+        sum_sq_pair_diff += pair_diff * pair_diff
+        pair_score = (score1 + score2) / 2.0
+        sum_sq_pair_score += pair_score * pair_score
 
     return SeatFairStats(
         num_games=num_games,
@@ -274,4 +306,6 @@ def evaluate_seat_fair_match_2p(
         avg_points_agent_b=sum_b / num_games if num_games else 0.0,
         avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
         sum_sq_point_diff_agent_a_minus_agent_b=float(sum_sq_diff),
+        sum_sq_pair_point_diff_agent_a_minus_agent_b=float(sum_sq_pair_diff),
+        sum_sq_pair_score_agent_a=float(sum_sq_pair_score),
     )
