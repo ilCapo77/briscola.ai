@@ -252,6 +252,40 @@ esattamente con questo meccanismo.
   la calibrazione della belief prima di buttare l'idea (il campionamento è sensibile alle code).
 - Stima effort: 2-3 sessioni (dataset+training belief, sampling pesato, eval).
 
+### Risultati 5.1-5.2 (eseguiti 2026-07-02)
+
+**Gate offline: SUPERATO nettamente.** `belief_v0` (h128, dataset 50k partite self-play v7
+ε=0.05, 350k record in finestra u≤10, encoder v4): `val_bce 0.492` vs `0.612` uniforme;
+`top-k recall 0.593` vs `0.399` uniforme. La rete legge davvero il comportamento avversario
+dalle feature v4. Latenza a runtime: invariata (0.0136 vs 0.0135 s/mossa search).
+
+**Gate runtime (uso 1, determinizzazioni pesate): NEGATIVO per il deploy, con spiegazione.**
+Head-to-head 4000 partite seat-fair (CI su coppie), base v7:
+
+- belief 16×8 vs uniforme 16×8 (config campione): `+0.15` (CI `−0.08..+0.39`) — nullo;
+- belief 16×12 vs uniforme 16×12: `+0.56` (CI `+0.15..+0.97`) — POSITIVO: la belief migliora
+  davvero il campionamento dove il pool di carte ignote è grande (non è un problema di
+  calibrazione);
+- belief 16×12 vs uniforme 16×8: `−0.23` (CI `−0.62..+0.17`) — allargare la finestra resta
+  un netto svantaggio (rumore dei rollout più lunghi) che la belief compensa solo in parte.
+
+Diagnosi strutturale: nella finestra di deploy (u≤8) la mano avversaria sono 3 carte da un
+pool ≤8 (≤56 combinazioni): 16 determinizzazioni uniformi coprono già lo spazio, e il valore
+marginale dell'inferenza è piccolo. L'inferenza varrebbe di più a inizio partita (pool 15-25),
+ma lì la search non opera affatto (fallback alla policy): è il limite architetturale già noto
+("il vantaggio della search vive tutto nel finale").
+
+**Decisione**:
+- NON promuovere un agente `pimc_belief`: nessun guadagno nella config di deploy;
+- TENERE `belief_v0` e l'infrastruttura (determinizzazioni pesate restano disponibili via
+  `card_weights`): il gate offline è superato con margine e l'effetto a u=12 dimostra che
+  l'inferenza è reale;
+- il valore della belief si sposta sull'**uso 2** (input/auxiliary per la policy, §5.3) e
+  sulla **Fase 3**: è lì che l'inferenza può agire su TUTTA la partita, non solo nella
+  finestra di search. Questo è coerente con la diagnosi originale: il soffitto della policy
+  è informativo, e la belief è il condensato dell'informazione mancante.
+- Artefatti: `benchmarks/experiments/fase2/*.json` (locali), `data/models/belief_v0_h128_50k_seed20260702.npz`.
+
 ### 5.3 Uso 2 — Input/auxiliary per la policy
 
 - Concatenare l'output della belief (40 valori) alle feature della policy, oppure

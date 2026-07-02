@@ -263,7 +263,21 @@ dominio (serializzazione schema 2, migrazione da schema 1), `trick_history` in
 `PlayerObservation`/`ObservationDTO`, encoder **v4** (369 = v3 + 59: comportamento avversario +
 ultime 4 prese) con parità dict/oggetto testata. Gli agenti runtime possono già usare modelli
 v4 (path dominio completo); il kernel Numba v4 è rinviato a quando la Fase 3 richiederà il
-training A2C su v4. Prossimo passo: Fase 2 (belief network + determinizzazioni pesate).
+training A2C su v4.
+
+**Fase 2 completata (2026-07-02)** — esito misto, con spiegazione (dettagli nel piano §5):
+
+- gate offline SUPERATO: `belief_v0` legge la mano avversaria dalle feature v4
+  (top-k recall `0.593` vs `0.399` uniforme; BCE `0.492` vs `0.612`);
+- gate runtime NEGATIVO per il deploy: nella config campione (16×8) il pool di ignote è
+  troppo piccolo perché l'inferenza conti (`+0.15`, CI `−0.08..+0.39`); a finestra larga
+  la belief funziona davvero (`+0.56` a 16×12 vs uniforme 16×12, CI `+0.15..+0.97`) ma la
+  finestra larga resta un netto svantaggio; NESSUN agente `pimc_belief` promosso;
+- decisione: belief e determinizzazioni pesate restano come infrastruttura; il valore
+  dell'inferenza si sposta sulla policy (input/auxiliary) e sulla Fase 3 (ExIt), dove agisce
+  su tutta la partita e non solo nella finestra di search.
+
+Prossimo passo: Fase 3 (Expert Iteration), che ora richiede il kernel Numba v4 per il training.
 
 Qualunque promozione deve includere:
 
