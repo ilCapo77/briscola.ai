@@ -333,6 +333,38 @@ AlphaZero, e la generalizzazione del value-lookahead esistente):
 
 - **Gate per iterazione**: entrambe le curve (policy e expert) devono salire; 2 iterazioni
   consecutive piatte = stop e analisi.
+
+### Risultati iterazione-0 (2026-07-02): BC NON è l'operatore di improvement giusto
+
+Setup: dataset expert 200k record (PIMC(v7, d=64, u=8)+solver, partite AVANZATE dal teacher,
+25k decisioni search di cui 11.276 correzioni a v7 e 4.411 strong/reliable; 145k coverage v7;
+30k solver), osservazioni v4 (trick_history nel DTO). `train_bc` esteso con encoder v4 e
+upgrade warm-start v3→v4 (padding a zero: init ≡ v7). Gate: 10k seat-fair vs v7 (CI coppie).
+
+| Variante | vs v7 |
+|---|---|
+| hard, warm-start v7, lr 3e-4 | **−2.33** (CI −2.73..−1.94) |
+| soft T=2, warm-start v7 | **−9.19** (i target sfumati distruggono la policy) |
+| hard + anchor ai logit v7 (β=0.1, lr 1e-4) | **−1.52** (meglio, ma perde) |
+| hard, hidden=512 from scratch | **−3.71** (train 94% / val 81%: memorizza) |
+
+Diagnosi (coerente con §1.4 e col fallimento storico su v3, che ora si spiega meglio):
+la cross-entropy su label argmax è un operatore LOSSY su una policy raffinata da RL.
+La forza di v7 non è nel suo argmax ma nella struttura fine dei logit tarata da 5M partite
+a reward; ri-fittarla da 200k campioni argmax perde più fedeltà sulla copertura (val acc
+satura a ~85% col warm-start: underfitting alla capacità 45k; memorizzazione a 512) di
+quanto le ~11k correzioni aggiungano. L'anchor ai logit mitiga ma non inverte il segno.
+
+Decisione:
+- **kill del ramo "improvement via BC"** (in tutte le forme provate: hard/soft/anchored/capacità);
+- l'operatore di improvement che HA già funzionato in questo progetto è **A2C con l'expert
+  come avversario** (è esattamente come è nato v7: +2.3 su v6 allenando contro
+  value-lookahead(v6)). L'iterazione-1 naturale è quindi: A2C(policy v4+belief) contro
+  expert(v7) congelato — che richiede il **kernel Numba v4** (encoder + tracking storia nei
+  rollout JIT). Il pezzo di infrastruttura rinviato in Fase 1 è ora il percorso critico;
+- il dataset expert e il padding v3→v4 restano asset riusabili (l'expert-as-opponent li
+  riutilizzerà per eval e per eventuali auxiliary loss a peso basso).
+- Artefatti: `data/exit/iter0_teacher_v7_d64u8_200k.jsonl`, `data/exit/iter0_models/*` (locali).
 - **Criterio di successo del piano**: `policy_K` (reattiva) ≥ `bc_model_value_lookahead_8x8`
   attuale, oppure `expert_K` > campione attuale di un margine ≥ sonda oracolo/2.
 - Stima effort: 3-4 sessioni per l'harness del loop (molti pezzi esistono già:

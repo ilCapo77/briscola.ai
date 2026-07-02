@@ -277,7 +277,12 @@ training A2C su v4.
   dell'inferenza si sposta sulla policy (input/auxiliary) e sulla Fase 3 (ExIt), dove agisce
   su tutta la partita e non solo nella finestra di search.
 
-Prossimo passo: Fase 3 (Expert Iteration), che ora richiede il kernel Numba v4 per il training.
+**Fase 3, iterazione-0 completata (2026-07-02) — negativa, con diagnosi** (dettagli nel piano §6):
+quattro varianti di improvement via BC (hard/soft/anchored/hidden-512) perdono tutte da v7
+(da −1.52 a −9.19): la CE su argmax è un operatore lossy su una policy raffinata da RL.
+Kill del ramo BC. L'operatore che ha già funzionato è **A2C con l'expert come avversario**
+(è come è nato v7): l'iterazione-1 è A2C(v4+belief) vs expert(v7), che richiede il
+**kernel Numba v4** — ora percorso critico della Fase 3.
 
 Qualunque promozione deve includere:
 
