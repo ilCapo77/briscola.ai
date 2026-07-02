@@ -1,0 +1,49 @@
+# CI del progetto: replica il quality gate documentato in AGENTS.md
+# (ruff format/check, mypy, pytest) su ogni push/PR, così nessun commit
+# può arrivare su GitHub senza essere stato eseguito e testato.
+name: CI
+
+on:
+  push:
+    branches: [master, main]
+  pull_request:
+
+jobs:
+  quality:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Installa uv (con cache)
+        uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.14"
+          enable-cache: true
+
+      - name: Installa dipendenze (lockfile + extra dev)
+        run: uv sync --extra dev
+
+      - name: Ruff (formato)
+        run: uv run ruff format --check src tests scripts
+
+      - name: Ruff (lint)
+        run: uv run ruff check src tests scripts
+
+      - name: Mypy
+        run: uv run mypy src
+
+      - name: Pytest (con coverage)
+        run: uv run pytest --cov=briscola_ai --cov-report=term-missing:skip-covered
+
+      # La percentuale di coverage resta visibile nel log del job; il badge nel README
+      # va aggiornato a mano quando cambia in modo materiale (vedi AGENTS.md).
+      - name: Riassunto coverage nel job summary
+        if: always()
+        run: |
+          if [ -f .coverage ]; then
+            echo '## Coverage' >> "$GITHUB_STEP_SUMMARY"
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+            uv run coverage report --format=total >> "$GITHUB_STEP_SUMMARY" || true
+            echo '```' >> "$GITHUB_STEP_SUMMARY"
+          fi
