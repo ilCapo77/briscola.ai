@@ -5,7 +5,7 @@ nei commit, nei test e nei report.
 
 ## Stato Corrente
 
-- Versione progetto: `0.19.0`.
+- Versione progetto: `0.20.0`.
 - Produzione: <https://briscolaai.fastapicloud.dev>.
 - Modello consigliato: `best_a2c_v7.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
 - Default UI: `bc_model` + modello consigliato, cioè v7 puro. È la nuova policy `.npz` veloce promossa in v0.19.0.
