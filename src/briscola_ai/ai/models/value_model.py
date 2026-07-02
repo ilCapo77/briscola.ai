@@ -159,7 +159,7 @@ def _load_value_model_npz_uncached(path: Path) -> MLPValueModel:
             raise ValueError(f"Feature dim mismatch: metadata={declared_dim} actual={int(w1.shape[0])}")
 
         encoder_version = metadata.get("encoder_version")
-        if isinstance(encoder_version, str) and encoder_version in {"v1", "v2", "v3"}:
+        if isinstance(encoder_version, str) and encoder_version in {"v1", "v2", "v3", "v4"}:
             expected = feature_dim_for_encoder_version(cast(EncoderVersion, encoder_version))
             if int(expected) != int(w1.shape[0]):
                 raise ValueError(
@@ -172,6 +172,6 @@ def _load_value_model_npz_uncached(path: Path) -> MLPValueModel:
 def infer_value_encoder_version(model: MLPValueModel) -> EncoderVersion:
     """Ricava la versione encoder dai metadati del value model."""
     raw = model.metadata.get("encoder_version")
-    if isinstance(raw, str) and raw in {"v1", "v2", "v3"}:
+    if isinstance(raw, str) and raw in {"v1", "v2", "v3", "v4"}:
         return cast(EncoderVersion, raw)
     raise ValueError("Value model senza metadata.encoder_version valido")

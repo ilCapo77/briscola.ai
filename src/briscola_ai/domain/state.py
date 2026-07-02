@@ -35,6 +35,30 @@ class PlayerState:
 
 
 @dataclass(frozen=True, slots=True)
+class TrickRecord:
+    """
+    Una presa completata, con l'informazione PUBBLICA che la partita ha mostrato.
+
+    Perché esiste (encoder v4 / opponent modeling):
+    storicamente lo stato conservava le carte catturate solo come insieme per giocatore
+    (`PlayerState.captured_cards`), perdendo ordine di gioco e attribuzione intra-presa.
+    Quella perdita rendeva irrappresentabile l'inferenza comportamentale sulla mano
+    avversaria ("ha tagliato a coppe", "non risponde a denari"). Qui registriamo la presa
+    così come TUTTI i giocatori l'hanno vista al tavolo: è informazione pubblica per
+    costruzione, quindi può entrare nell'osservazione senza violare l'anti-cheat.
+
+    Campi:
+        cards: carte nell'ordine di gioco, come coppie (Card, player_index).
+        winner_index: chi ha preso.
+        points: punti raccolti con questa presa.
+    """
+
+    cards: tuple[tuple[Card, int], ...]
+    winner_index: int
+    points: int
+
+
+@dataclass(frozen=True, slots=True)
 class GameState:
     """
     Stato completo della partita (debug/replay/ML).
@@ -44,6 +68,8 @@ class GameState:
       In 2-player la briscola scoperta viene inserita in testa al mazzo (indice 0)
       per essere pescata per ultima, replicando l'implementazione attuale.
     - `table_cards` conserva l'ordine di gioco: (Card, player_index).
+    - `trick_history` conserva le prese completate in ordine cronologico (vedi
+      `TrickRecord`); ha default vuoto per compatibilità con i costruttori esistenti.
     """
 
     num_players: int
@@ -62,6 +88,8 @@ class GameState:
     game_over: bool
     winner_index: int | None  # 2-player
     winning_team: int | None  # 4-player
+
+    trick_history: tuple[TrickRecord, ...] = ()
 
 
 def _create_deck() -> list[Card]:

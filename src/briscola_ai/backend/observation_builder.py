@@ -15,7 +15,7 @@ from __future__ import annotations
 
 from ..domain.card_id import card_to_id
 from ..domain.state import GameState as DomainGameState
-from .dto import CardDTO, GameStateDTO, ObservationDTO, PlayerInfoDTO, PlayerStateDTO, TableCardDTO
+from .dto import CardDTO, GameStateDTO, ObservationDTO, PlayerInfoDTO, PlayerStateDTO, TableCardDTO, TrickRecordDTO
 
 
 def build_observation_dto(state: DomainGameState, player_index: int, server_version: int) -> ObservationDTO:
@@ -96,6 +96,9 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
             sum(state.players[i].points for i in state.teams[1 - my_team]) if my_team is not None else 0
         )
 
+    # Storia ordinata/attribuita delle prese (pubblica): base dell'encoder v4.
+    trick_history = [TrickRecordDTO.from_domain(record) for record in state.trick_history]
+
     return ObservationDTO(
         server_version=server_version,
         my_index=player_index,
@@ -113,6 +116,7 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
         players=players,
         seen_cards_onehot=seen,
         out_of_play_cards_onehot=out_of_play,
+        trick_history=trick_history,
         my_team=my_team,
         teammate_index=teammate_index,
         teammate_points=teammate_points,

@@ -258,7 +258,12 @@ non per capacità). Il piano dettagliato — fasi, gate, criteri di kill, riferi
 - from-scratch a ricetta/budget v7: `−5.42` vs v7 → la catena warm-start è un asset;
   ExIt partirà da `policy_0 = v7`.
 
-Prossimo passo dell'ipotesi: Fase 1 (encoder v4 con storia attribuita delle prese).
+**Fase 1 (stadio dominio+encoder) completata (2026-07-02)**: `TrickRecord`/`trick_history` nel
+dominio (serializzazione schema 2, migrazione da schema 1), `trick_history` in
+`PlayerObservation`/`ObservationDTO`, encoder **v4** (369 = v3 + 59: comportamento avversario +
+ultime 4 prese) con parità dict/oggetto testata. Gli agenti runtime possono già usare modelli
+v4 (path dominio completo); il kernel Numba v4 è rinviato a quando la Fase 3 richiederà il
+training A2C su v4. Prossimo passo: Fase 2 (belief network + determinizzazioni pesate).
 
 Qualunque promozione deve includere:
 

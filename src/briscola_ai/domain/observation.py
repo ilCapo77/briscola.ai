@@ -23,7 +23,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from .models import Card, Suit
-from .state import GameState
+from .state import GameState, TrickRecord
 
 
 def _empty_seen_cards_onehot() -> tuple[int, ...]:
@@ -120,6 +120,15 @@ class PlayerObservation:
     # compatibility con dataset/osservazioni vecchie.
     out_of_play_cards_onehot: tuple[int, ...] = field(default_factory=_empty_out_of_play_cards_onehot)
 
+    # Storia ORDINATA e ATTRIBUITA delle prese completate (vedi `TrickRecord`).
+    #
+    # È anti-cheat per costruzione: ogni carta di ogni presa è stata giocata a tavolo scoperto
+    # davanti a tutti; qui conserviamo solo ciò che un giocatore con memoria perfetta ricorda.
+    # È la base dell'encoder v4 (opponent modeling comportamentale): senza ordine e attribuzione,
+    # inferenze come "l'avversario ha tagliato a coppe" erano irrappresentabili.
+    # Default vuoto per backward compatibility con osservazioni/dataset precedenti.
+    trick_history: tuple[TrickRecord, ...] = ()
+
 
 def make_player_observation(state: GameState, player_index: int) -> PlayerObservation:
     """
@@ -177,4 +186,5 @@ def make_player_observation(state: GameState, player_index: int) -> PlayerObserv
         players_hand_sizes=tuple(len(p.hand) for p in state.players),
         seen_cards_onehot=tuple(seen),
         out_of_play_cards_onehot=tuple(out_of_play),
+        trick_history=state.trick_history,
     )

@@ -11,10 +11,11 @@ from __future__ import annotations
 from typing import Any
 
 from .card_id import card_to_id, id_to_card
-from .state import GameState, PlayerState
+from .state import GameState, PlayerState, TrickRecord
 
 # Versione dello schema di serializzazione (per migrazioni future).
-SERIALIZATION_SCHEMA = 1
+# Storia: 1 = baseline; 2 = aggiunge `trick_history` (encoder v4 / opponent modeling).
+SERIALIZATION_SCHEMA = 2
 
 
 def _player_to_dict(player: PlayerState) -> dict[str, Any]:
@@ -51,6 +52,14 @@ def game_state_to_dict(state: GameState) -> dict[str, Any]:
         "game_over": bool(state.game_over),
         "winner_index": state.winner_index,
         "winning_team": state.winning_team,
+        "trick_history": [
+            {
+                "cards": [[card_to_id(card), int(player_idx)] for card, player_idx in record.cards],
+                "winner_index": int(record.winner_index),
+                "points": int(record.points),
+            }
+            for record in state.trick_history
+        ],
     }
 
 
@@ -65,8 +74,21 @@ def game_state_from_dict(data: dict[str, Any]) -> GameState:
     silenziosamente uno stato sbagliato.
     """
     schema = data.get("schema")
-    if schema != SERIALIZATION_SCHEMA:
-        raise ValueError(f"Schema di serializzazione non supportato: {schema!r} (atteso {SERIALIZATION_SCHEMA})")
+    if schema not in (1, SERIALIZATION_SCHEMA):
+        raise ValueError(f"Schema di serializzazione non supportato: {schema!r} (atteso 1..{SERIALIZATION_SCHEMA})")
+
+    # Migrazione schema 1 -> 2: i dump legacy non hanno `trick_history`. Ricostruirla non è
+    # possibile (l'ordine intra-presa è perso), quindi la storia riparte vuota: le feature v4
+    # per quelle sessioni in corso saranno parziali, ma lo stato di gioco resta corretto.
+    trick_history_raw = data.get("trick_history", [])
+    trick_history = tuple(
+        TrickRecord(
+            cards=tuple((id_to_card(int(cid)), int(player_idx)) for cid, player_idx in record["cards"]),
+            winner_index=int(record["winner_index"]),
+            points=int(record["points"]),
+        )
+        for record in trick_history_raw
+    )
 
     teams_raw = data.get("teams")
     teams: Any = None
@@ -90,4 +112,5 @@ def game_state_from_dict(data: dict[str, Any]) -> GameState:
         game_over=bool(data["game_over"]),
         winner_index=int(winner_index) if winner_index is not None else None,
         winning_team=int(winning_team) if winning_team is not None else None,
+        trick_history=trick_history,
     )

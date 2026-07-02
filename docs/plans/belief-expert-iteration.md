@@ -196,6 +196,34 @@ propaga v4 automaticamente a policy e value model.
   belief su v3, il design delle feature va rivisto prima di procedere.
 - Stima effort: 3-5 sessioni di lavoro (dominio+engine, encoder, fast/numba, test parità).
 
+### 4.4 Stato Fase 1 (2026-07-02): stadio dominio+encoder COMPLETATO
+
+Implementato e testato (431 test verdi):
+
+- **Dominio**: `TrickRecord` (carte in ordine di gioco + vincitore + punti), `GameState.trick_history`
+  popolato da `engine.step` a ogni presa completata; serializzazione **schema 2** con migrazione
+  tollerante dei dump legacy schema 1 (storia vuota, stato di gioco corretto);
+- **Osservazione**: `PlayerObservation.trick_history` (pubblica per costruzione, default vuoto
+  per compatibilità) + `TrickRecordDTO` in `ObservationDTO` (additivo, client vecchi lo ignorano);
+- **Encoder v4** (`FEATURE_DIM_2P_V4 = 369 = v3 + 59`): blocco A comportamento avversario
+  (per-seme, lead, tagli, risposte a seme, scarti, lead briscola/carichi, prese completate)
+  + blocco B ultime 4 prese (12 feature l'una); path dict e oggetto con parità verificata su
+  partite reali; degradazione a zero su dataset pre-v4 (come v2/v3);
+- riconoscimento v4 in `bc_model` e `value_model` (feature_dim 369): **gli agenti runtime
+  (BCModelAgent, PIMC, value-lookahead, backend) possono già usare modelli v4** — girano sul
+  path dominio, che è completo.
+
+**Scelta di sequenza (deliberata)**: il path Numba v4 (encoder arrays + tracking incrementale
+della storia nei kernel di rollout) è rinviato a quando la Fase 3 richiederà il training A2C
+su v4. La Fase 2 (belief + determinizzazioni pesate) gira interamente sul path dominio, quindi
+NON è bloccata; il gate 4.3 "A2C a parità su v4" si sposta di conseguenza dopo il kernel Numba
+(oppure si valuta prima via BC su dataset v4, che non richiede Numba).
+
+Igiene rinviata con consapevolezza: la normalizzazione dei blocchi grezzi v1
+(`hand_points`/`hand_strength` non scalati) non è stata toccata — gli encoder sono cumulativi
+e cambiare v1 dentro v4 romperebbe la proprietà di prefisso; se ne riparla con un eventuale
+encoder v5 non-cumulativo (es. per l'architettura della Fase 4).
+
 ## 5. Fase 2 — Belief network e determinizzazioni pesate
 
 ### 5.1 La rete belief

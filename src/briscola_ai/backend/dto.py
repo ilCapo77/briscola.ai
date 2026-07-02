@@ -24,6 +24,7 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 from ..domain.models import Card
+from ..domain.state import TrickRecord as DomainTrickRecord
 
 
 class CardDTO(BaseModel):
@@ -98,6 +99,29 @@ class PlayerStateDTO(BaseModel):
     captured_cards: list[CardDTO]
 
 
+class TrickRecordDTO(BaseModel):
+    """
+    Una presa completata, come vista pubblicamente al tavolo.
+
+    Informazione pubblica per costruzione (ogni carta è stata giocata scoperta):
+    alimenta l'encoder v4 (opponent modeling) e permette al client/dataset di
+    ricostruire la sequenza di gioco senza violare l'anti-cheat.
+    """
+
+    cards: list[TableCardDTO]
+    winner_index: int
+    points: int
+
+    @classmethod
+    def from_domain(cls, record: DomainTrickRecord) -> TrickRecordDTO:
+        """Converte un `TrickRecord` di dominio nel DTO."""
+        return cls(
+            cards=[TableCardDTO.from_domain(card, player_idx) for card, player_idx in record.cards],
+            winner_index=record.winner_index,
+            points=record.points,
+        )
+
+
 class ObservationDTO(BaseModel):
     """
     Snapshot dello stato di gioco dal punto di vista di un giocatore.
@@ -141,6 +165,10 @@ class ObservationDTO(BaseModel):
     # finché è pescabile/in mano). Distinta da `seen_cards_onehot`: "non più disponibile" vs
     # "vista pubblicamente". Opzionale/default per non rompere payload e dataset vecchi.
     out_of_play_cards_onehot: list[int] = Field(default_factory=list)
+
+    # Storia ordinata e attribuita delle prese completate (pubblica; base dell'encoder v4).
+    # Opzionale/default per backward compatibility con client e dataset precedenti.
+    trick_history: list[TrickRecordDTO] = Field(default_factory=list)
 
     # Campi 4-player (opzionali, None in modalità 2-player)
     my_team: int | None = None

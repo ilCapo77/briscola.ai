@@ -10,7 +10,7 @@ from dataclasses import dataclass, replace
 
 from .models import Card
 from .rules import who_wins_trick
-from .state import GameState, PlayerState
+from .state import GameState, PlayerState, TrickRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -127,6 +127,14 @@ def step(state: GameState, action: PlayCardAction) -> tuple[GameState, StepResul
     trump_suit = state.trump_card.suit if state.trump_card else None
     winner = who_wins_trick(trick_cards, trump_suit)
 
+    # Registra la presa nella storia PUBBLICA (ordine di gioco + attribuzione + vincitore):
+    # è ciò che ogni giocatore ha visto al tavolo, e alimenta l'encoder v4 (opponent modeling).
+    trick_record = TrickRecord(
+        cards=trick_cards,
+        winner_index=winner,
+        points=sum(card.rank.points for card, _ in trick_cards),
+    )
+
     captured_cards = [card for card, _ in trick_cards]
     winner_player = players[winner]
     new_captured = list(winner_player.captured_cards) + captured_cards
@@ -184,6 +192,7 @@ def step(state: GameState, action: PlayCardAction) -> tuple[GameState, StepResul
         game_over=game_over,
         winner_index=winner_index,
         winning_team=winning_team,
+        trick_history=state.trick_history + (trick_record,),
     )
 
     return new_state, StepResult(
