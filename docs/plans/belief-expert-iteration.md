@@ -368,6 +368,14 @@ Decisione:
 
 ### Roadmap delle iterazioni (deciso 2026-07-02, dopo l'iterazione-0)
 
+**Kernel Numba v4: COMPLETATO (2026-07-02).** Storia delle prese mantenuta in tutti i loop
+JIT (play/quality/collector/value-dataset; simulazioni determinizzate con storia dummy:
+i modelli interni restano ≤ v3), `_v4_block_numba` replica esatta dell'helper di dominio,
+parità a tre motori (dominio↔fast↔numba) protetta da test su partite specchiate a ogni
+profondità. La policy in training può essere v4; eval numba accetta modelli v4 (gate veloci).
+Lezione operativa: la cache numba locale può mascherare firme rotte — la CI (compilazione
+fredda) resta il gate di verità per i kernel.
+
 **Iterazione 1 — occhi nuovi a taglia FISSA.** A2C contro expert(v7) congelato
 (value-lookahead/PIMC su base v7), policy warm-start da `best_a2c_v7_padded_v4.npz`
 (hidden 128 invariato; input 369 v4, opzionalmente +40 belief). La taglia resta quella di v7
