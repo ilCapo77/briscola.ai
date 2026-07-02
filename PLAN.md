@@ -247,8 +247,18 @@ L'indagine post-v7 ha identificato tre soffitti che spiegano il ristagno: encode
 attribuita (opponent modeling irrappresentabile), MLP 128×1 flat invariata da 5 generazioni, e
 nessuna search nel loop di training (la distillazione one-shot è fallita per non-identificabilità,
 non per capacità). Il piano dettagliato — fasi, gate, criteri di kill, riferimenti — è in
-`docs/plans/belief-expert-iteration.md`. Primo passo: le tre sonde diagnostiche di Fase 0
-(exploitability, tetto oracolo, controllo from-scratch), tutte eseguibili con gli script esistenti.
+`docs/plans/belief-expert-iteration.md`.
+
+**Fase 0 completata (2026-07-02)**, tre sonde convergenti (dettagli e artefatti nel piano):
+
+- exploitability: best-response dedicato (2M, init=v7) batte v7 solo di `+0.70` (CI `+0.22..+1.19`)
+  → la classe reattiva attuale è satura, league play non è la leva;
+- tetto oracolo: `PIMC(v7,64×10)+solver` vs `v7+solver` = `+3.76` (CI `+3.40..+4.12`), che
+  satura col budget → il margine vive nella QUALITÀ delle determinizzazioni, non nel numero;
+- from-scratch a ricetta/budget v7: `−5.42` vs v7 → la catena warm-start è un asset;
+  ExIt partirà da `policy_0 = v7`.
+
+Prossimo passo dell'ipotesi: Fase 1 (encoder v4 con storia attribuita delle prese).
 
 Qualunque promozione deve includere:
 

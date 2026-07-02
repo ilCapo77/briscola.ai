@@ -118,6 +118,43 @@ Allena un best-response A2C (ricetta identica, 1-2M partite) **contro v7 congela
 Gate di fase: nessuno blocca le fasi successive; i risultati **orientano** (0.a → quanta
 diversità di avversari serve; 0.b → target numerico; 0.c → init della Fase 4).
 
+### Risultati Fase 0 (eseguita 2026-07-02)
+
+Nota di costo: grazie al throughput Numba (~4.150 partite/s per il training, 0,28 s/partita per
+PIMC 64×10) l'intera fase è costata **~45 minuti di CPU**, non "notti". Le stime di effort delle
+fasi successive vanno lette di conseguenza: il collo di bottiglia di ExIt sarà la search del
+teacher (~0,08 s/decisione search), non il training.
+
+**0.a Exploitability — v7 è quasi inespugnabile nella sua classe.**
+Best-response A2C (2M partite, init=v7, opponent=v7 congelato, seed 20260702) vs v7,
+10k seat-fair: **+0.70** (CI95 coppie +0.22..+1.19), score rate 0.511.
+Un avversario allenato SPECIFICAMENTE contro v7 lo batte di meno di un terzo del margine
+v7-su-v6 (+2.46). Lettura: il self-play non sta convergendo a strategie sfruttabili;
+league/population play NON è la leva; la classe "MLP 128×1 su encoder v3" è satura attorno a v7.
+
+**0.b Tetto oracolo — la search vale ~+3.8, e satura con il budget.**
+`PIMC(v7, 64×10)+solver` vs `v7+solver`, 4000 partite seat-fair: **+3.76**
+(CI95 coppie +3.40..+4.12), score rate 0.564. Con budget 4× rispetto al runtime (16×8) il
+margine cresce solo marginalmente rispetto al +3.59 storico → la search a determinizzazioni
+UNIFORMI satura intorno a +3.8: per alzare il tetto serve migliorare la qualità delle
+determinizzazioni (belief, Fase 2), non il loro numero. Dettaglio: le mosse search sono il
+17,5% delle decisioni (14k/80k) — tutto il vantaggio vive nella finestra di fine partita.
+Artefatto: `benchmarks/experiments/fase0/oracle_pimc_v7_64x10_vs_control_4k.json` (locale).
+
+**0.c From-scratch — la catena warm-start è un asset, non una trappola.**
+Ricetta v7 identica (opponent value-lookahead, 5M partite, seed 20260702) ma init casuale:
+vs v7 = **−5.42** (CI95 coppie −5.91..−4.92); vs `heuristic_v1` = +12.58 (v7 fa +18.73).
+A parità di budget il from-scratch arriva a livello ~v2/v3. Lettura: il valore accumulato nella
+catena è reale; non c'è evidenza di ottimo locale indotto dal warm-start. Implicazioni:
+ExIt (Fase 3) parte da `policy_0 = v7`; l'eventuale from-scratch profondo della Fase 4 richiederà
+più budget e/o curriculum, non è gratis.
+
+**Sintesi Fase 0**: le tre sonde convergono sulla stessa conclusione del piano — l'unico
+margine dimostrato (+3.8) vive nella search ed è irraggiungibile dall'interno della classe
+reattiva attuale (0.a); il budget di search non lo alza (0.b); e non c'è scorciatoia
+"ripartire da zero" (0.c). Restano esattamente le leve delle Fasi 1-3: informazione (encoder
+v4), qualità delle determinizzazioni (belief) e trasferimento iterato (ExIt).
+
 ## 4. Fase 1 — Encoder v4: restituire la storia (prerequisito di tutto)
 
 ### 4.1 Modifiche a `PlayerObservation` (dominio)
