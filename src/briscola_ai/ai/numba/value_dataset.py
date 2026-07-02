@@ -161,6 +161,8 @@ def _choose_hybrid_mlp_card_index_numba(
     trump_card: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    num_tricks: int,
 ) -> int:
     """
     Sceglie una carta con `MLP + solver endgame`.
@@ -198,6 +200,8 @@ def _choose_hybrid_mlp_card_index_numba(
         current_turn,
         seen_cards,
         out_of_play_cards,
+        trick_hist,
+        num_tricks,
     )
     action_id = _apply_overkill_guard_numba(
         action_id,
@@ -234,6 +238,10 @@ def _play_hybrid_mlp_to_terminal_numba(
     out_of_play_cards: np.ndarray,
 ) -> tuple[int, int]:
     """Completa una partita deterministica con `MLP + solver`, ritornando i punti finali."""
+    # Storia locale del rollout: i modelli qui sono <= v3 (le feature v4 non entrano);
+    # serve solo per il contratto di _choose/_apply. Riparte da zero per rollout.
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    trick_count = np.zeros(1, dtype=np.int64)
     safety = 256
     while safety > 0:
         safety -= 1
@@ -257,6 +265,8 @@ def _play_hybrid_mlp_to_terminal_numba(
             trump_card,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count[0],
         )
         deck_size, table_size, current_turn = _apply_numba_card_index(
             hands,
@@ -272,6 +282,8 @@ def _play_hybrid_mlp_to_terminal_numba(
             card_index,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count,
         )
     return int(points[0]), int(points[1])
 
@@ -367,6 +379,8 @@ def _collect_value_game_into_numba(
     seen_cards = np.zeros(ACTION_DIM, dtype=np.int64)
     seen_cards[trump_card] = 1
     out_of_play_cards = np.zeros(ACTION_DIM, dtype=np.int64)
+    trick_hist = np.zeros((20, 5), dtype=np.int64)
+    trick_count = np.zeros(1, dtype=np.int64)
 
     record_count = 0
     ply_count = 0
@@ -406,6 +420,8 @@ def _collect_value_game_into_numba(
                 trump_card,
                 seen_cards,
                 out_of_play_cards,
+                trick_hist,
+                trick_count[0],
             )
 
         if should_collect and record_count < _MAX_STATES_PER_GAME_2P:
@@ -493,6 +509,8 @@ def _collect_value_game_into_numba(
             card_index,
             seen_cards,
             out_of_play_cards,
+            trick_hist,
+            trick_count,
         )
         ply_count += 1
 
