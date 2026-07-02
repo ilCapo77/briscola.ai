@@ -106,7 +106,6 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     // Track last known table state to detect changes
-    let lastTableCardsCount = 0;
     let lastAppliedServerVersion = -1;
     let pollingIntervalId = null;
     let pollingInFlight = false;
@@ -387,7 +386,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
             if (next.type === 'ai_card_reveal') {
                 const data = next.data;
-                console.log('AI card reveal:', data.card_index, data.card);
                 activeOpponentReveal = {
                     cardIndex: data.card_index,
                     card: data.card,
@@ -458,14 +456,6 @@ document.addEventListener('DOMContentLoaded', () => {
             UI.showTurnMessage('Avversario sta pensando...', true);
         }
 
-        // Detect trick completion (table cleared)
-        const currentTableCount = (obs.table_cards || []).length;
-        if (lastTableCardsCount === 2 && currentTableCount === 0) {
-            // A trick just completed - show result if we have winner info
-            // The winner is determined by comparing points changes
-            // For simplicity, just show that trick was completed
-        }
-        lastTableCardsCount = currentTableCount;
     };
 
     /**
@@ -637,7 +627,7 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         } catch (error) {
-            alert(`Errore: ${error.message}`);
+            UI.showTurnMessage(`Errore: ${error.message}`);
         }
     };
 
@@ -666,7 +656,7 @@ document.addEventListener('DOMContentLoaded', () => {
             store.setState({ actionInFlight: false });
             // Ripristina la mano "normale" (rimuove highlight/disabled) ri-renderizzando dallo stato corrente.
             if (state.observation) updateUI(state.observation);
-            alert(`Errore: ${error.message}`);
+            UI.showTurnMessage(`Errore: ${error.message}`);
         }
     };
 
@@ -710,7 +700,6 @@ document.addEventListener('DOMContentLoaded', () => {
             gameOver: false
         });
 
-        lastTableCardsCount = 0;
         lastAppliedServerVersion = -1;
         pendingEvents = [];
         uiHoldUntilMs = 0;

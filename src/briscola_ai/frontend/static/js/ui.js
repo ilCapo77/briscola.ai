@@ -315,8 +315,25 @@ const UI = (() => {
         return _cardPreloadPromise;
     };
 
+    // Nomi italiani per le etichette accessibili delle carte (alt/aria-label).
+    const SUIT_NAMES_IT = { clubs: 'Bastoni', cups: 'Coppe', coins: 'Denari', swords: 'Spade' };
+    const RANK_NAMES_IT = {
+        ACE: 'Asso', TWO: 'Due', THREE: 'Tre', FOUR: 'Quattro', FIVE: 'Cinque',
+        SIX: 'Sei', SEVEN: 'Sette', JACK: 'Fante', KNIGHT: 'Cavallo', KING: 'Re'
+    };
+
+    const cardLabelIt = (card) => {
+        if (!card) return 'Carta coperta';
+        const rank = RANK_NAMES_IT[card.rank] || card.rank;
+        const suit = SUIT_NAMES_IT[card.suit] || card.suit;
+        return `${rank} di ${suit}`;
+    };
+
     /**
-     * Create a card element
+     * Create a card element.
+     *
+     * Accessibilità: le carte giocabili sono veri controlli (role="button", tabbabili,
+     * attivabili con Invio/Spazio), non solo div cliccabili col mouse.
      */
     const createCardElement = (card, onClick = null) => {
         const cardEl = document.createElement('div');
@@ -325,15 +342,17 @@ const UI = (() => {
         if (!card) {
             // Face down card
             cardEl.classList.add('card-back');
+            cardEl.setAttribute('aria-label', 'Carta coperta');
             return cardEl;
         }
 
+        const label = cardLabelIt(card);
         const src = _cardImageSrc(card);
         if (src) {
             const img = document.createElement('img');
             img.className = 'card-face';
             img.src = src;
-            img.alt = `Carta`;
+            img.alt = label;
             img.loading = 'lazy';
             cardEl.appendChild(img);
         } else {
@@ -342,9 +361,19 @@ const UI = (() => {
 
         if (onClick) {
             cardEl.classList.add('clickable');
+            cardEl.setAttribute('role', 'button');
+            cardEl.setAttribute('tabindex', '0');
+            cardEl.setAttribute('aria-label', `Gioca ${label}`);
             cardEl.addEventListener('click', onClick);
+            cardEl.addEventListener('keydown', (event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                    event.preventDefault();
+                    onClick(event);
+                }
+            });
         } else {
             cardEl.classList.add('disabled');
+            cardEl.setAttribute('aria-label', label);
         }
 
         return cardEl;
@@ -601,12 +630,10 @@ const UI = (() => {
      */
     const revealOpponentCard = (cardIndex, card, decisionType = null) => {
         const cards = elements.opponentHand.children;
-        console.log('revealOpponentCard called:', cardIndex, 'cards in hand:', cards.length);
         if (cardIndex >= 0 && cardIndex < cards.length) {
             const cardEl = cards[cardIndex];
             // Replace card back with face-up card
             const src = _cardImageSrc(card);
-            console.log('Revealing card with src:', src);
             if (src) {
                 cardEl.classList.remove('card-back');
                 cardEl.classList.add('revealed');
