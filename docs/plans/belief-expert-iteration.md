@@ -365,6 +365,29 @@ Decisione:
 - il dataset expert e il padding v3→v4 restano asset riusabili (l'expert-as-opponent li
   riutilizzerà per eval e per eventuali auxiliary loss a peso basso).
 - Artefatti: `data/exit/iter0_teacher_v7_d64u8_200k.jsonl`, `data/exit/iter0_models/*` (locali).
+
+### Roadmap delle iterazioni (deciso 2026-07-02, dopo l'iterazione-0)
+
+**Iterazione 1 — occhi nuovi a taglia FISSA.** A2C contro expert(v7) congelato
+(value-lookahead/PIMC su base v7), policy warm-start da `best_a2c_v7_padded_v4.npz`
+(hidden 128 invariato; input 369 v4, opzionalmente +40 belief). La taglia resta quella di v7
+PER SCELTA SPERIMENTALE: la domanda dell'iterazione è "quanto vale la nuova informazione a
+parità di tutto il resto?" — cambiare informazione e capacità insieme renderebbe il risultato
+non interpretabile (una variabile alla volta). Prerequisito: kernel Numba v4
+(encoder + tracking incrementale storia nei rollout; belief forward opzionale).
+
+**Iterazione 2 — capacità, con warm start preservato.** Se l'iterazione 1 è positiva ma
+modesta, si allarga l'hidden (256/512) SENZA ripartire da zero (la Fase 0.c mostra che
+from-scratch costa −5.4): widening **net2net** (clonazione dei neuroni esistenti + rumore
+simmetrico), che riproduce esattamente la funzione del modello di partenza. Allargare un
+1-hidden-layer è banale nei kernel (è un parametro); approfondire (2-3 layer, embedding)
+resta Fase 4.
+
+**Nuance importante (da non perdere):** "hidden=512 memorizza" è dimostrato SOLO per la
+copia supervisionata (BC/distillazione: iterazione-0 e probe storico). La capacità extra
+con apprendimento dal GIOCO (A2C, milioni di partite a reward) non è mai stata testata in
+questo progetto — ed è il regime in cui la letteratura (es. DouZero, ~50x i nostri parametri)
+mostra che paga. Non usare il risultato BC come argomento contro la capacità in RL.
 - **Criterio di successo del piano**: `policy_K` (reattiva) ≥ `bc_model_value_lookahead_8x8`
   attuale, oppure `expert_K` > campione attuale di un margine ≥ sonda oracolo/2.
 - Stima effort: 3-4 sessioni per l'harness del loop (molti pezzi esistono già:
