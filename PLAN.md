@@ -221,6 +221,19 @@ Già aggiunti stress test su:
 
 Continuare ad aggiungere test solo quando troviamo un caso reale sospetto o tocchiamo regole/observation/PIMC.
 
+Debito minore residuo dalla review v0.21.0 (nessuno è urgente; prenderli quando si tocca l'area):
+
+- DX script: `scripts/_common.py` come package (parser agent-spec e manifest condivisi) e `logging` al posto di
+  `print` — unico asse della review rinviato per intero (churn alto, beneficio modesto);
+- dominio: validare `data["schema"]` in `game_state_from_dict`; fissare il tipo di `RULES_VERSION`; test sui path
+  d'errore (`who_wins_trick([])`, `id_to_card` fuori range, `step` a partita finita con `after == before`);
+- backend: test end-to-end del WebSocket attraverso l'app (subscriber + fan-out reveal/trick/refresh); gestione
+  riconnessione Redis a livello store; polling fallback UI senza backoff (700ms fissi);
+- AI: documentare/forzare l'assunzione "una istanza `PIMCAgent`/`ValueLookaheadAgent` per partita" (metrics mutabili
+  in dataclass frozen non thread-safe); RNG serial vs parallel non riproducibile cross-`workers` in
+  `decision_quality` (documentato ma footgun);
+- frontend: zero test JS; CSS monolitico (883 righe).
+
 ### 4. Nuovo Modello Solo Con Nuova Ipotesi
 
 Un nuovo `best_a2c_v8` ha senso solo se c'è un segnale concreto, ad esempio:
