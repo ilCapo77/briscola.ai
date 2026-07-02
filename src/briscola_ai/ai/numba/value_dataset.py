@@ -19,7 +19,7 @@ from dataclasses import dataclass
 import numpy as np
 from numba import njit, prange
 
-from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3
+from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
 from ..endgame.numba_solver import choose_endgame_card_numba_arrays
 from .core import ACTION_DIM, _shuffle_deck_numba
 from .observation import (
@@ -28,6 +28,7 @@ from .observation import (
     _apply_overkill_guard_numba,
     _argmax_mlp_policy_action_numba,
     encode_fast_observation_arrays_numba,
+    encode_fast_observation_arrays_v4_numba,
 )
 
 _MAX_DECK_SIZE_2P = 34
@@ -81,6 +82,7 @@ def _validate_mlp_weights_numba(w1: np.ndarray, b1: np.ndarray, w2: np.ndarray, 
         feature_dim != int(FEATURE_DIM_2P_V1)
         and feature_dim != int(FEATURE_DIM_2P_V2)
         and feature_dim != int(FEATURE_DIM_2P_V3)
+        and feature_dim != int(FEATURE_DIM_2P_V4)
     ):
         raise ValueError("feature_dim non supportata")
     if int(b1.shape[0]) != hidden_dim:
@@ -236,12 +238,16 @@ def _play_hybrid_mlp_to_terminal_numba(
     trump_card: int,
     seen_cards: np.ndarray,
     out_of_play_cards: np.ndarray,
+    trick_hist: np.ndarray,
+    trick_count: np.ndarray,
 ) -> tuple[int, int]:
-    """Completa una partita deterministica con `MLP + solver`, ritornando i punti finali."""
-    # Storia locale del rollout: i modelli qui sono <= v3 (le feature v4 non entrano);
-    # serve solo per il contratto di _choose/_apply. Riparte da zero per rollout.
-    trick_hist = np.zeros((20, 5), dtype=np.int64)
-    trick_count = np.zeros(1, dtype=np.int64)
+    """
+    Completa una partita deterministica con `MLP + solver`, ritornando i punti finali.
+
+    `trick_hist`/`trick_count` sono la storia delle prese (COPIA, mutata dal rollout):
+    con una policy v4 la continuazione deve giocare con la memoria REALE, altrimenti
+    le etichette del value dataset rifletterebbero un giocatore "smemorato".
+    """
     safety = 256
     while safety > 0:
         safety -= 1
@@ -425,20 +431,39 @@ def _collect_value_game_into_numba(
             )
 
         if should_collect and record_count < _MAX_STATES_PER_GAME_2P:
-            features, _mask = encode_fast_observation_arrays_numba(
-                hands,
-                hand_sizes,
-                points,
-                table_cards,
-                table_size,
-                deck_size,
-                current_turn,
-                trump_card,
-                player_index,
-                seen_cards,
-                out_of_play_cards,
-                int(w1.shape[0]),
-            )
+            # Le feature registrate seguono l'encoder della policy di self-play:
+            # con una policy v4 il dataset diventa v4 (storia REALE del loop, non dummy).
+            if int(w1.shape[0]) == int(FEATURE_DIM_2P_V4):
+                features, _mask = encode_fast_observation_arrays_v4_numba(
+                    hands,
+                    hand_sizes,
+                    points,
+                    table_cards,
+                    table_size,
+                    deck_size,
+                    current_turn,
+                    trump_card,
+                    player_index,
+                    seen_cards,
+                    out_of_play_cards,
+                    trick_hist,
+                    trick_count[0],
+                )
+            else:
+                features, _mask = encode_fast_observation_arrays_numba(
+                    hands,
+                    hand_sizes,
+                    points,
+                    table_cards,
+                    table_size,
+                    deck_size,
+                    current_turn,
+                    trump_card,
+                    player_index,
+                    seen_cards,
+                    out_of_play_cards,
+                    int(w1.shape[0]),
+                )
             for feature_index in range(int(w1.shape[0])):
                 xs[record_count, feature_index] = features[feature_index]
 
@@ -461,6 +486,8 @@ def _collect_value_game_into_numba(
                 seen_cards,
                 out_of_play_cards,
             )
+            label_trick_hist = trick_hist.copy()
+            label_trick_count = trick_count.copy()
             final0, final1 = _play_hybrid_mlp_to_terminal_numba(
                 w1,
                 b1,
@@ -479,6 +506,8 @@ def _collect_value_game_into_numba(
                 trump_card,
                 label_seen,
                 label_out,
+                label_trick_hist,
+                label_trick_count,
             )
 
             current_delta = points[player_index] - points[1 - player_index]
