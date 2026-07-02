@@ -326,19 +326,26 @@ def evaluate_predictions(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Allena value MLP da dataset value_observation")
-    parser.add_argument("--data", required=True)
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--encoder-version", choices=["v1", "v2", "v3"], default="v3")
-    parser.add_argument("--hidden-dim", type=int, default=128)
-    parser.add_argument("--target", choices=["residual", "absolute"], default="residual")
-    parser.add_argument("--loss", choices=["huber", "mse"], default="huber")
-    parser.add_argument("--huber-delta", type=float, default=0.25)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=0.0)
-    parser.add_argument("--val-frac", type=float, default=0.1)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--data", required=True, help="Dataset value-observation: JSONL canonico o .npz compatto")
+    parser.add_argument("--out", required=True, help="Path del value model .npz da salvare")
+    parser.add_argument(
+        "--encoder-version", choices=["v1", "v2", "v3"], default="v3", help="Versione encoder osservazioni (default v3)"
+    )
+    parser.add_argument("--hidden-dim", type=int, default=128, help="Neuroni hidden layer della MLP (default 128)")
+    parser.add_argument(
+        "--target",
+        choices=["residual", "absolute"],
+        default="residual",
+        help="Target: residuo (final-current)/120 (consigliato) oppure delta assoluto scalato",
+    )
+    parser.add_argument("--loss", choices=["huber", "mse"], default="huber", help="Loss di regressione (default huber)")
+    parser.add_argument("--huber-delta", type=float, default=0.25, help="Soglia delta della Huber loss (default 0.25)")
+    parser.add_argument("--epochs", type=int, default=30, help="Epoche di training (default 30)")
+    parser.add_argument("--batch-size", type=int, default=512, help="Dimensione minibatch (default 512)")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate Adam-like (default 1e-3)")
+    parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay L2 (default 0: disattivo)")
+    parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione dei dati per la validation (default 0.1)")
+    parser.add_argument("--seed", type=int, default=0, help="Seed RNG per split/shuffle (riproducibilita')")
     args = parser.parse_args()
 
     data_path = Path(args.data)

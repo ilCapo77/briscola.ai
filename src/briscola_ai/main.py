@@ -22,7 +22,6 @@ from fastapi.responses import FileResponse, HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from .backend import server as backend_server
-from .backend.event_log import build_event_log, parse_event_db_path, resolve_database_url
 from .versioning import get_code_version
 
 
@@ -89,32 +88,10 @@ async def lifespan(app: FastAPI):
     non ricevono eventi lifespan. Per evitare che features come cleanup e event log
     restino disabilitate, le inizializziamo esplicitamente qui.
     """
-    event_log_created_here = False
-    # Backend event log: Postgres se `DATABASE_URL` è impostata (cloud multi-replica), altrimenti
-    # SQLite locale se è dato un path, altrimenti disabilitato. `desired` è l'identità del backend
-    # voluto (per decidere se ricreare la connessione tra due startup, tipico nei test).
-    database_url = resolve_database_url()
-    sqlite_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
-    desired = database_url or sqlite_path
-
-    existing_event_log = getattr(backend_server.app.state, "event_log", None)
-    event_log = existing_event_log
-
-    # Config cambiata o disabilitata: chiudi e azzera.
-    if event_log is not None and (desired is None or event_log.path != desired):
-        with suppress(Exception):
-            event_log.close()
-        event_log = None
-        backend_server.app.state.event_log = None
-
-    if event_log is None and desired is not None:
-        try:
-            event_log = build_event_log(sqlite_path=sqlite_path, database_url=database_url)
-            backend_server.app.state.event_log = event_log
-            event_log_created_here = event_log is not None
-        except Exception as exc:
-            print(f"Event log: inizializzazione fallita, feature disabilitata ({exc!r}).")
-            backend_server.app.state.event_log = None
+    # Event log: logica condivisa col lifespan del backend (una sola implementazione,
+    # vedi `backend_server.initialize_event_log_from_env`). Lo stato vive sul sub-app
+    # backend, che è quello che i suoi endpoint interrogano.
+    event_log, event_log_created_here = backend_server.initialize_event_log_from_env(backend_server.app)
 
     # Provisioning modelli (best-effort): scarica gli asset `.npz` configurati nella directory modelli.
     # Non blocca l'avvio in caso di errore.

@@ -16,6 +16,26 @@ Scelte implementative:
   per-giocatore (anti-cheat: mai lo stato completo).
 - L'agente IA non è serializzato: la sessione salva la sua config (nome + model_id) e l'agente viene
   ricostruito per mossa (con cache modello).
+
+Contratto WebSocket (riferimento unico)
+---------------------------------------
+Esistono DUE livelli di messaggi, da non confondere:
+
+1. Messaggi INTERNI sul pub/sub dello store (mai inviati verbatim al client):
+   - `{"type": "refresh", "server_version": int, "state": <GameState serializzato>}`
+     Pubblicato da `notify_clients` dopo ogni avanzamento. Lo `state` è embeddato
+     point-in-time perché il subscriber NON deve rileggere dallo store (lo stato potrebbe
+     essere già avanzato dal task IA, invertendo l'ordine percepito degli eventi).
+
+2. Messaggi VERSO IL CLIENT (quello che il frontend riceve davvero):
+   - `ObservationDTO` (`type: "observation"`): il subscriber traduce ogni `refresh` nella
+     vista per-giocatore (anti-cheat: mai lo stato completo sul socket).
+   - `AiCardRevealDTO` (`type: "ai_card_reveal"`): carta giocata dall'IA (inoltrato verbatim).
+   - `TrickResultDTO` (`type: "trick_result"`): esito della presa (inoltrato verbatim).
+   - `{"type": "ping"|"pong"}`: keepalive, filtrati dal client senza toccare lo stato UI.
+
+L'ordinamento è garantito dal publisher (pubblicazioni sequenziali nello stesso task) e dal
+guard `server_version` lato client, che scarta snapshot più vecchi dell'ultimo applicato.
 """
 
 import asyncio
@@ -296,6 +316,51 @@ def _maybe_log_game_finished(game_id: str, *, state: DomainGameState, server_ver
     )
 
 
+def initialize_event_log_from_env(target_app: FastAPI) -> tuple[EventLogProtocol | None, bool]:
+    """
+    Inizializza (o riusa) l'event log su `target_app.state.event_log` in base alle env.
+
+    Perché è un helper condiviso: il backend può girare direttamente (`server:app`) oppure
+    montato dentro l'app principale (`main:app`), e in alcuni setup i sub-app montati non
+    ricevono eventi lifespan. Entrambi i lifespan usano quindi questa stessa logica —
+    tenerne due copie aveva già iniziato a farle divergere.
+
+    Regole:
+    - Postgres se `DATABASE_URL` è impostata, altrimenti SQLite se `BRISCOLA_EVENT_DB_PATH`
+      è dato, altrimenti feature disabilitata;
+    - se un logger esiste già con la stessa identità (`path`), viene riusato senza toccarlo;
+    - se la config è cambiata tra due startup (tipico nei test), il vecchio viene chiuso;
+    - un fallimento di init NON blocca il server (feature opzionale).
+
+    Ritorna `(event_log, created_here)`: `created_here` dice al chiamante se è lui il
+    proprietario (e quindi chi deve chiuderlo allo shutdown).
+    """
+    database_url = resolve_database_url()
+    sqlite_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
+    desired = database_url or sqlite_path
+
+    event_log: EventLogProtocol | None = getattr(target_app.state, "event_log", None)
+    created_here = False
+
+    if event_log is not None and (desired is None or event_log.path != desired):
+        with suppress(Exception):
+            event_log.close()
+        event_log = None
+        target_app.state.event_log = None
+
+    if event_log is None and desired is not None:
+        try:
+            event_log = build_event_log(sqlite_path=sqlite_path, database_url=database_url)
+            created_here = event_log is not None
+        except Exception as exc:
+            # Il logger è un "optional feature": se fallisce non vogliamo bloccare il server.
+            print(f"Event log: inizializzazione fallita, feature disabilitata ({exc!r}).")
+            event_log = None
+        target_app.state.event_log = event_log
+
+    return event_log, created_here
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -303,44 +368,7 @@ async def lifespan(app: FastAPI):
 
     Usiamo un task in background per fare periodicamente cleanup delle partite inattive.
     """
-    # Inizializzazione event log (Phase 4).
-    #
-    # Nota importante: questo backend può essere eseguito in due modi:
-    # - direttamente (`TestClient(server.app)` / uvicorn su `briscola_ai.backend.server:app`)
-    # - montato dentro l'app principale (`briscola_ai.main:app`)
-    #
-    # In alcuni setup i mounted sub-app non ricevono eventi lifespan; per questo motivo,
-    # l'app principale può inizializzare `app.state.event_log` in anticipo.
-    #
-    # Qui adottiamo quindi una regola semplice:
-    # - se `app.state.event_log` esiste già, non lo tocchiamo (né lo chiudiamo).
-    # - altrimenti, proviamo a crearlo da env.
-    event_log_created_here = False
-    # Backend event log: Postgres se `DATABASE_URL` è impostata (cloud multi-replica), altrimenti
-    # SQLite locale se è dato un path, altrimenti disabilitato. `desired` = identità del backend
-    # voluto (per ricreare la connessione se la config cambia tra due startup, tipico nei test).
-    database_url = resolve_database_url()
-    sqlite_path = parse_event_db_path(os.getenv("BRISCOLA_EVENT_DB_PATH"))
-    desired = database_url or sqlite_path
-
-    existing_event_log = getattr(app.state, "event_log", None)
-    event_log: EventLogProtocol | None = existing_event_log
-
-    if event_log is not None and (desired is None or event_log.path != desired):
-        with suppress(Exception):
-            event_log.close()
-        event_log = None
-        app.state.event_log = None
-
-    if event_log is None and desired is not None:
-        try:
-            event_log = build_event_log(sqlite_path=sqlite_path, database_url=database_url)
-            event_log_created_here = event_log is not None
-        except Exception as exc:
-            # Il logger è un "optional feature": se fallisce non vogliamo bloccare il server.
-            print(f"Event log: inizializzazione fallita, feature disabilitata ({exc!r}).")
-            event_log = None
-        app.state.event_log = event_log
+    event_log, event_log_created_here = initialize_event_log_from_env(app)
 
     cleanup_task = asyncio.create_task(cleanup_inactive_games())
     try:
@@ -424,7 +452,7 @@ def _utcnow() -> datetime:
     """
     Ora corrente timezone-aware in UTC.
 
-    Perché non `_utcnow()` naive: i timestamp finiscono in `updated_at` sullo store
+    Perché non `datetime.now()` naive: i timestamp finiscono in `updated_at` sullo store
     condiviso e vengono confrontati da repliche diverse; con orologi/timezone non allineati
     il confronto naive sbaglierebbe la staleness. UTC aware è privo di ambiguità.
     """

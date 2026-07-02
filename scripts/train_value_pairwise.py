@@ -440,26 +440,37 @@ def train_pairwise(args: argparse.Namespace) -> dict:
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Allena value MLP con loss pairwise su leaf PIMC.")
-    parser.add_argument("--data", required=True)
-    parser.add_argument("--out", required=True)
-    parser.add_argument("--hidden-dim", type=int, default=128)
+    parser.add_argument(
+        "--data", required=True, help="Dataset foglie decision-aligned (JSONL con root_id/action_value)"
+    )
+    parser.add_argument("--out", required=True, help="Path del value model .npz da salvare")
+    parser.add_argument("--hidden-dim", type=int, default=128, help="Neuroni hidden layer della MLP (default 128)")
     parser.add_argument(
         "--init-value-model",
         default="",
         help="Value model `.npz` da cui inizializzare i pesi; richiede stesso feature_dim/hidden_dim.",
     )
-    parser.add_argument("--loss", choices=["huber", "mse"], default="huber")
-    parser.add_argument("--huber-delta", type=float, default=0.25)
-    parser.add_argument("--epochs", type=int, default=30)
-    parser.add_argument("--batch-size", type=int, default=512)
-    parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--weight-decay", type=float, default=0.0)
-    parser.add_argument("--val-frac", type=float, default=0.1)
-    parser.add_argument("--pairwise-beta", type=float, default=1.0)
-    parser.add_argument("--pair-temperature", type=float, default=0.10)
-    parser.add_argument("--pair-min-margin", type=float, default=2.0)
-    parser.add_argument("--pair-batch-size", type=int, default=512)
-    parser.add_argument("--seed", type=int, default=0)
+    parser.add_argument("--loss", choices=["huber", "mse"], default="huber", help="Loss di regressione (default huber)")
+    parser.add_argument("--huber-delta", type=float, default=0.25, help="Soglia delta della Huber loss (default 0.25)")
+    parser.add_argument("--epochs", type=int, default=30, help="Epoche di training (default 30)")
+    parser.add_argument("--batch-size", type=int, default=512, help="Dimensione minibatch regressione (default 512)")
+    parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default 1e-3)")
+    parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay L2 (default 0: disattivo)")
+    parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione dei dati per la validation (default 0.1)")
+    parser.add_argument(
+        "--pairwise-beta", type=float, default=1.0, help="Peso del termine ranking pairwise nella loss (default 1.0)"
+    )
+    parser.add_argument(
+        "--pair-temperature", type=float, default=0.10, help="Temperatura della logistic pairwise (default 0.10)"
+    )
+    parser.add_argument(
+        "--pair-min-margin",
+        type=float,
+        default=2.0,
+        help="Margine minimo (punti) tra due foglie per formare una coppia di ranking (default 2.0)",
+    )
+    parser.add_argument("--pair-batch-size", type=int, default=512, help="Minibatch delle coppie ranking (default 512)")
+    parser.add_argument("--seed", type=int, default=0, help="Seed RNG per split/shuffle (riproducibilita')")
     args = parser.parse_args()
     train_pairwise(args)
     return 0
