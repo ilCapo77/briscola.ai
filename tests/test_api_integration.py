@@ -824,8 +824,28 @@ def test_get_game_state_returns_404_for_unknown_game() -> None:
     assert r.json()["detail"] == "Partita non trovata"
 
 
-def test_get_game_state_without_player_index_returns_game_state_dto() -> None:
-    """Contratto: `GET /games/{id}` (senza player_index) ritorna `type: \"game_state\"`."""
+def test_get_game_state_without_player_index_is_forbidden_by_default() -> None:
+    """
+    Anti-cheat: la vista full-state (mani di tutti + `next_deck_card`) NON deve essere
+    raggiungibile da un client qualunque. Senza `BRISCOLA_DEBUG_STATE_ENDPOINT` => 403.
+    """
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    r = client.get(f"/games/{game_id}")
+    assert r.status_code == 403
+    assert "full-state" in r.json()["detail"]
+
+    # La vista fair per-giocatore resta disponibile.
+    observation = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+    assert observation["type"] == "observation"
+    assert "next_deck_card" not in observation
+
+
+def test_get_game_state_without_player_index_returns_game_state_dto(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Contratto debug (opt-in): `GET /games/{id}` senza player_index ritorna `type: \"game_state\"`."""
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
@@ -1063,6 +1083,8 @@ def test_server_version_is_monotone_on_actions_when_ai_disabled(monkeypatch: pyt
         return None
 
     monkeypatch.setattr(server, "_maybe_ai_turn", _no_ai)
+    # Il loop usa la vista full-state (debug) per seguire `current_turn`: va abilitata esplicitamente.
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
 
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})

@@ -28,6 +28,8 @@ _ENV_TO_CLEAR = (
     "BRISCOLA_MODEL_SHA256",
     "BRISCOLA_VALUE_MODEL_URL",
     "BRISCOLA_VALUE_MODEL_SHA256",
+    # Vista full-state di debug: deve restare opt-in anche se abilitata nella shell di chi lancia i test.
+    "BRISCOLA_DEBUG_STATE_ENDPOINT",
 )
 
 

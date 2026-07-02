@@ -708,6 +708,21 @@ async def create_game(config: GameConfig):
         raise HTTPException(status_code=400, detail="Modello .npz non trovato (ai_model_id)")
 
 
+def _debug_state_endpoint_enabled() -> bool:
+    """
+    Ritorna True se la vista full-state di `GET /games/{id}` (senza `player_index`) è abilitata.
+
+    Perché esiste:
+    la vista full-state espone le mani di TUTTI i giocatori e `next_deck_card`, quindi
+    contraddice l'invariante anti-cheat se raggiungibile da qualunque client in produzione.
+    La teniamo come strumento di debug/spectator locale, ma va abilitata esplicitamente
+    dall'operatore con `BRISCOLA_DEBUG_STATE_ENDPOINT=1`. Leggiamo l'env a ogni richiesta
+    (non a import time) così i test possono attivarla/disattivarla con `monkeypatch`.
+    """
+    raw = os.getenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
 @app.get("/games/{game_id}", response_model=Dict)
 async def get_game_state(game_id: str, player_index: Optional[int] = None):
     """Ottiene lo stato corrente di una partita"""
@@ -728,7 +743,16 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e))
     else:
-        # Restituisce lo stato completo (per spettatori o debugging) come DTO Pydantic.
+        # Vista completa (mani di tutti + `next_deck_card`) per spettatori o debugging.
+        # Anti-cheat: disabilitata di default, l'operatore deve abilitarla esplicitamente.
+        if not _debug_state_endpoint_enabled():
+            raise HTTPException(
+                status_code=403,
+                detail=(
+                    "Vista full-state disabilitata (anti-cheat). Usa `player_index` per la vista "
+                    "del giocatore, oppure imposta BRISCOLA_DEBUG_STATE_ENDPOINT=1 per il debug."
+                ),
+            )
         game_state_dto = build_game_state_dto(game, session.version)
         return game_state_dto.model_dump()
 
