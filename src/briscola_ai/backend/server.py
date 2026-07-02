@@ -22,14 +22,15 @@ import asyncio
 import json
 import os
 import random
+import time
 import uuid
 from contextlib import aclosing, asynccontextmanager, suppress
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, field_validator
 
 from ..ai.agents import AI_AGENTS_COMMON_NOTE_IT, Agent, agent_uses_selected_model, build_agent, list_agent_specs
 from ..ai.models import (
@@ -69,26 +70,42 @@ __all__ = ["app", "game_store", "InMemoryGameSessionStore"]
 
 
 # Modelli per richieste e risposte API
+#
+# I vincoli Field non sostituiscono la validazione di dominio (es. `new_game_state` rifiuta
+# comunque num_players diversi da 2/4): mettono un tetto a input arbitrariamente grandi che
+# finirebbero nello stato, nei log e nei messaggi WS (nomi chilometrici, liste enormi, ...).
 class GameConfig(BaseModel):
     """Payload per creare una partita."""
 
-    num_players: int
-    player_names: Optional[List[str]] = None
-    ai_agent: Optional[str] = None
-    ai_model_id: Optional[str] = None
-    client_id: Optional[str] = None
+    num_players: int = Field(ge=2, le=4)
+    player_names: Optional[List[str]] = Field(default=None, max_length=4)
+    ai_agent: Optional[str] = Field(default=None, max_length=100)
+    ai_model_id: Optional[str] = Field(default=None, max_length=200)
+    client_id: Optional[str] = Field(default=None, max_length=100)
     consent_to_data_collection: Optional[bool] = None
+
+    @field_validator("player_names")
+    @classmethod
+    def _limit_player_name_length(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        """I nomi sono input libero mostrato in UI e nei log: 40 caratteri bastano."""
+        if value is None:
+            return None
+        max_len = 40
+        for name in value:
+            if len(name) > max_len:
+                raise ValueError(f"Nome giocatore troppo lungo (max {max_len} caratteri)")
+        return value
 
 
 class GameAction(BaseModel):
     """Payload per giocare una carta."""
 
-    game_id: str
-    player_index: int
-    card_index: int
+    game_id: str = Field(max_length=100)
+    player_index: int = Field(ge=0, le=3)
+    card_index: int = Field(ge=0, le=39)
     # Metadati client-side (opzionali): utili per analisi qualità dati umani.
     client_observed_server_version: Optional[int] = None
-    client_decision_time_ms: Optional[int] = None
+    client_decision_time_ms: Optional[int] = Field(default=None, ge=0)
 
 
 class GameState(BaseModel):
@@ -199,10 +216,14 @@ def _safe_log_event(
                 code_version=get_code_version(),
                 rules_version=get_rules_version(),
             )
+        # Privacy: i nomi giocatore sono input libero dell'utente. Non li persistiamo mai in
+        # chiaro, in NESSUNA modalità: anche `debug` in cloud scrive su un DB condiviso, e la
+        # sanificazione (nomi -> `player_N`) non toglie nulla di utile al debugging.
+        # La funzione è idempotente: i payload già sanificati dai chiamanti restano invariati.
         log.log_event(
             game_id,
             event_type,
-            payload,
+            sanitize_dataset_payload(payload),
             server_version=server_version,
             player_index=player_index,
         )
@@ -393,8 +414,44 @@ game_store = build_game_session_store()
 game_timestamps: Dict[str, datetime] = {}
 game_data: Dict[str, List[Dict]] = {}  # Memorizza le azioni per il training ML
 
+# Cap sui buffer per-replica: senza limiti, un flusso continuo di partite (o un client abusivo)
+# farebbe crescere la RAM senza vincolo fino al cleanup orario. I valori sono larghi rispetto
+# all'uso legittimo (una partita 2p ha 40 giocate).
+_MAX_BUFFERED_GAMES = 2000
+_MAX_ACTIONS_PER_GAME = 400
+
 _DEFAULT_AI_AGENT_NAME = "random"
 _AI_PLAYER_DISPLAY_NAME = "Giocatore AI"
+
+
+def _utcnow() -> datetime:
+    """
+    Ora corrente timezone-aware in UTC.
+
+    Perché non `_utcnow()` naive: i timestamp finiscono in `updated_at` sullo store
+    condiviso e vengono confrontati da repliche diverse; con orologi/timezone non allineati
+    il confronto naive sbaglierebbe la staleness. UTC aware è privo di ambiguità.
+    """
+    return datetime.now(timezone.utc)
+
+
+def _remember_game_action(game_id: str, entry: Dict) -> None:
+    """
+    Accoda un'azione nel buffer ML per-replica applicando i cap anti-crescita.
+
+    - per partita: teniamo solo le ultime `_MAX_ACTIONS_PER_GAME` azioni;
+    - globale: sopra `_MAX_BUFFERED_GAMES` partite bufferizzate, scartiamo la più vecchia
+      (best-effort: il buffer è un'ottimizzazione locale, non la fonte dati canonica).
+    """
+    actions = game_data.setdefault(game_id, [])
+    actions.append(entry)
+    if len(actions) > _MAX_ACTIONS_PER_GAME:
+        del actions[: len(actions) - _MAX_ACTIONS_PER_GAME]
+    if len(game_data) > _MAX_BUFFERED_GAMES:
+        oldest_id = min(game_timestamps, key=lambda gid: game_timestamps[gid], default=None)
+        if oldest_id is not None and oldest_id != game_id:
+            game_data.pop(oldest_id, None)
+            game_timestamps.pop(oldest_id, None)
 
 
 def _agent_for_seat(cfg: AiSeatConfig) -> Agent:
@@ -603,9 +660,54 @@ async def meta() -> Dict:
     }
 
 
+# Rate limiting sulla creazione partite: senza tetto, un client può creare partite senza
+# limite (RAM/Redis/DB unbounded). Sliding window in-process per IP: in multi-replica il
+# limite effettivo è `limite * num_repliche`, accettabile come protezione di primo livello.
+_CREATE_GAME_RATE_WINDOW_SECONDS = 60.0
+_create_game_requests: Dict[str, List[float]] = {}
+
+
+def _create_game_rate_limit() -> int:
+    """
+    Tetto di partite create per IP nella finestra (0 o negativo = disabilitato).
+
+    Letto a ogni richiesta (non a import time) così i test possono controllarlo con
+    `monkeypatch.setenv` e l'operatore può cambiarlo senza redeploy del codice.
+    """
+    raw = os.getenv("BRISCOLA_CREATE_GAME_RATE_LIMIT", "30").strip()
+    try:
+        return int(raw)
+    except ValueError:
+        return 30
+
+
+def _check_create_game_rate_limit(client_ip: str) -> None:
+    """Solleva 429 se `client_ip` ha superato il tetto di partite create nella finestra."""
+    limit = _create_game_rate_limit()
+    if limit <= 0:
+        return  # disabilitato (utile nei test/dev)
+    now = time.monotonic()
+    window_start = now - _CREATE_GAME_RATE_WINDOW_SECONDS
+    timestamps = [t for t in _create_game_requests.get(client_ip, []) if t > window_start]
+    if len(timestamps) >= limit:
+        raise HTTPException(
+            status_code=429,
+            detail="Troppe partite create di recente: riprova tra qualche secondo.",
+        )
+    timestamps.append(now)
+    _create_game_requests[client_ip] = timestamps
+    # Pulizia best-effort della mappa (bounded): via gli IP senza richieste recenti.
+    if len(_create_game_requests) > 10_000:
+        for ip in list(_create_game_requests):
+            if not any(t > window_start for t in _create_game_requests[ip]):
+                _create_game_requests.pop(ip, None)
+
+
 @app.post("/games", response_model=Dict)
-async def create_game(config: GameConfig):
+async def create_game(config: GameConfig, request: Request):
     """Crea una nuova partita di Briscola"""
+    client_ip = request.client.host if request.client is not None else "unknown"
+    _check_create_game_rate_limit(client_ip)
     try:
         if _get_event_log_mode() == "dataset" and config.consent_to_data_collection is not True:
             raise HTTPException(
@@ -644,7 +746,7 @@ async def create_game(config: GameConfig):
                 build_agent(ai_agent_name)
                 ai_seats = {1: AiSeatConfig(agent_name=ai_agent_name, model_id=None)}
 
-        now_iso = datetime.now().isoformat()
+        now_iso = _utcnow().isoformat()
         session = GameSession(
             game_id=game_id,
             state=state,
@@ -656,10 +758,10 @@ async def create_game(config: GameConfig):
         )
         await game_store.set(session)
 
-        game_timestamps[game_id] = datetime.now()
+        game_timestamps[game_id] = _utcnow()
         game_data[game_id] = [
             {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": _utcnow().isoformat(),
                 "event": "game_created",
                 "seed": seed,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
@@ -733,7 +835,7 @@ async def get_game_state(game_id: str, player_index: Optional[int] = None):
     game = session.state
 
     # Aggiorna il timestamp per mantenere la partita attiva
-    game_timestamps[game_id] = datetime.now()
+    game_timestamps[game_id] = _utcnow()
 
     if player_index is not None:
         # Restituisce una vista specifica per il giocatore (stesso formato dei messaggi WS)
@@ -807,7 +909,7 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
 
         session.state = new_state
         session.version += 1
-        session.updated_at = datetime.now().isoformat()
+        session.updated_at = _utcnow().isoformat()
         await game_store.set(session)
         server_version = session.version
 
@@ -834,19 +936,20 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
         )
 
         # Aggiorna timestamp
-        game_timestamps[game_id] = datetime.now()
+        game_timestamps[game_id] = _utcnow()
 
         # Registra l'azione per il training ML.
         # setdefault: game_data e' per-replica; se l'azione arriva su una replica diversa da
         # quella che ha creato la partita, la lista non esiste ancora (stato vive nello store).
-        game_data.setdefault(game_id, []).append(
+        _remember_game_action(
+            game_id,
             {
-                "timestamp": datetime.now().isoformat(),
+                "timestamp": _utcnow().isoformat(),
                 "player_index": action.player_index,
                 "card_index": action.card_index,
                 # Salviamo il DTO (JSON-friendly) invece di oggetti di dominio.
                 "result": action_result_dto.model_dump(exclude_none=True),
-            }
+            },
         )
 
         # Event log (opzionale): azione umana + risultato.
@@ -1009,7 +1112,13 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
         card_index = rng.randrange(len(valid_actions))
     else:
         observation = make_player_observation(state, ai_player_index)
-        card_index = agent.choose_card_index(observation, rng=rng)
+        # La scelta dell'agente è CPU-bound e può durare centinaia di ms (PIMC, value-lookahead,
+        # solver): eseguirla direttamente bloccherebbe l'intero event loop del worker, congelando
+        # TUTTE le altre partite/WS/HTTP della replica. La spostiamo in un thread del pool di
+        # default. Il lock di partita resta volutamente acquisito: lo stato non deve cambiare
+        # mentre l'agente decide (vedi nota sul TTL del lock Redis in `game_store.py`).
+        loop = asyncio.get_running_loop()
+        card_index = await loop.run_in_executor(None, lambda: agent.choose_card_index(observation, rng=rng))
         if card_index not in valid_actions:
             # Fallback di sicurezza: se un agente ritorna un indice invalido, non blocchiamo la partita.
             action_coerced = True
@@ -1041,7 +1150,7 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
 
     session.state = new_state
     session.version += 1
-    session.updated_at = datetime.now().isoformat()
+    session.updated_at = _utcnow().isoformat()
     await game_store.set(session)
     server_version = session.version
 
@@ -1116,15 +1225,16 @@ async def _execute_ai_turn_locked(session: GameSession, human_player_index: int)
         await notify_clients(game_id, new_state, server_version)
 
     # Registra l'azione AI (setdefault: game_data e' per-replica, vedi nota in play_action).
-    game_timestamps[game_id] = datetime.now()
-    game_data.setdefault(game_id, []).append(
+    game_timestamps[game_id] = _utcnow()
+    _remember_game_action(
+        game_id,
         {
-            "timestamp": datetime.now().isoformat(),
+            "timestamp": _utcnow().isoformat(),
             "player_index": ai_player_index,
             "card_index": card_index,
             "result": ai_action_result_dto.model_dump(exclude_none=True),
             "is_ai": True,
-        }
+        },
     )
 
     _safe_log_event(
@@ -1371,7 +1481,7 @@ async def cleanup_inactive_games():
     """Rimuove le partite inattive da più di 1 ora"""
     while True:
         await asyncio.sleep(3600)  # Check every hour
-        now = datetime.now()
+        now = _utcnow()
 
         # Trova le partite da rimuovere
         games_to_remove = []
@@ -1390,6 +1500,11 @@ async def cleanup_inactive_games():
             if session is not None:
                 try:
                     updated = datetime.fromisoformat(session.updated_at)
+                    if updated.tzinfo is None:
+                        # Sessioni legacy con timestamp naive (pre-UTC): le trattiamo come UTC.
+                        # Nel transitorio la staleness può sbagliare di qualche ora, in favore
+                        # del non-cancellare (il TTL dello store resta la rete di sicurezza).
+                        updated = updated.replace(tzinfo=timezone.utc)
                     truly_stale = (now - updated).total_seconds() > 3600
                 except Exception:
                     truly_stale = False

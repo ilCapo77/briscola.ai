@@ -1360,3 +1360,82 @@ def test_root_injects_realtime_mode(monkeypatch: pytest.MonkeyPatch) -> None:
         html = client.get("/").text
     assert "__BRISCOLA_REALTIME_MODE_VALUE__" not in html  # placeholder valore sostituito
     assert 'window.__BRISCOLA_REALTIME_MODE__ = "ws"' in html  # nome variabile intatto + valore risolto
+
+
+def test_create_game_rate_limit_returns_429(monkeypatch: pytest.MonkeyPatch) -> None:
+    """
+    Sopra il tetto per-IP nella finestra, `POST /games` deve rispondere 429.
+
+    Il conftest disattiva il limite per l'intera suite; qui lo riabilitiamo con un valore
+    piccolo per esercitare il percorso reale.
+    """
+    monkeypatch.setenv("BRISCOLA_CREATE_GAME_RATE_LIMIT", "3")
+    server._create_game_requests.clear()
+    client = TestClient(server.app)
+
+    payload = {"num_players": 2, "player_names": ["A", "B"]}
+    for _ in range(3):
+        assert client.post("/games", json=payload).status_code == 200
+
+    r = client.post("/games", json=payload)
+    assert r.status_code == 429
+    assert "Troppe partite" in r.json()["detail"]
+
+    # Ripulisce lo stato condiviso del modulo per i test successivi.
+    server._create_game_requests.clear()
+
+
+def test_create_game_rejects_oversized_or_invalid_input() -> None:
+    """I vincoli Pydantic devono bloccare input fuori misura PRIMA della logica di dominio."""
+    client = TestClient(server.app)
+
+    # num_players fuori range (il vincolo Field scatta prima di new_game_state).
+    assert client.post("/games", json={"num_players": 7}).status_code == 422
+
+    # Nome giocatore chilometrico: finirebbe nello stato, nei log e nei messaggi WS.
+    r = client.post("/games", json={"num_players": 2, "player_names": ["x" * 100, "B"]})
+    assert r.status_code == 422
+
+    # Troppi nomi.
+    r = client.post("/games", json={"num_players": 2, "player_names": ["A", "B", "C", "D", "E"]})
+    assert r.status_code == 422
+
+    # card_index fuori dallo spazio azioni [0,39].
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+    r = client.post(
+        f"/games/{game_id}/actions",
+        json={"game_id": game_id, "player_index": 0, "card_index": 99},
+    )
+    assert r.status_code == 422
+
+
+def test_event_log_sanitizes_player_names_in_debug_mode(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """
+    Privacy: i nomi liberi dei giocatori non devono finire nell'event log nemmeno in
+    modalità `debug` (in cloud scrive su un DB condiviso senza consenso esplicito).
+    """
+    import sqlite3
+
+    monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "debug")
+    db_path = tmp_path / "events.sqlite3"
+    log = EventLog(EventLogConfig(path=str(db_path)))
+    previous_log = getattr(server.app.state, "event_log", None)
+    server.app.state.event_log = log
+    try:
+        client = TestClient(server.app)
+        r = client.post("/games", json={"num_players": 2, "player_names": ["NomePrivato", "B"]})
+        assert r.status_code == 200
+    finally:
+        server.app.state.event_log = previous_log
+        log.close()
+
+    conn = sqlite3.connect(db_path)
+    try:
+        payloads = [row[0] for row in conn.execute("SELECT payload_json FROM events")]
+    finally:
+        conn.close()
+
+    assert payloads, "atteso almeno un evento loggato in modalità debug"
+    for payload in payloads:
+        assert "NomePrivato" not in payload

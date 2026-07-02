@@ -130,6 +130,12 @@ class InMemoryGameSessionStore:
 
     async def delete(self, game_id: str) -> None:
         self._data.pop(game_id, None)
+        # Rimuoviamo anche il lock per non accumulare un entry per ogni partita mai creata
+        # (leak lento ma illimitato in processi long-running). Solo se non è detenuto:
+        # rimuovere un lock mentre qualcuno lo tiene creerebbe due lock per la stessa partita.
+        lk = self._locks.get(game_id)
+        if lk is not None and not lk.locked():
+            self._locks.pop(game_id, None)
 
     @contextlib.asynccontextmanager
     async def lock(self, game_id: str) -> AsyncIterator[None]:
@@ -190,7 +196,13 @@ class RedisGameSessionStore:
     async def lock(self, game_id: str) -> AsyncIterator[None]:
         # Lock distribuito Redis: serializza le azioni concorrenti sulla stessa partita,
         # anche tra repliche diverse.
-        redis_lock = self._redis.lock(f"game:{game_id}:lock", timeout=30, blocking_timeout=10)
+        #
+        # `timeout` è il TTL di sicurezza del lock (rilascio automatico se il detentore muore).
+        # Deve essere ampiamente superiore alla mossa IA più lenta (PIMC/value-lookahead
+        # possono richiedere secondi sotto carico): se scadesse mentre è logicamente detenuto,
+        # un'operazione concorrente potrebbe mutare lo stato in parallelo. 120s è un compromesso:
+        # ordini di grandezza sopra una mossa normale, ma recupera comunque un processo morto.
+        redis_lock = self._redis.lock(f"game:{game_id}:lock", timeout=120, blocking_timeout=10)
         acquired = await redis_lock.acquire()
         if not acquired:
             # Dopo `blocking_timeout` non abbiamo ottenuto il lock: NON cediamo il contesto

@@ -38,3 +38,7 @@ def _hermetic_env(monkeypatch: pytest.MonkeyPatch) -> None:
     """Rimuove le env che selezionano backend esterni, così i test non dipendono dall'ambiente."""
     for name in _ENV_TO_CLEAR:
         monkeypatch.delenv(name, raising=False)
+    # Rate limit sulla creazione partite disattivato di default: la suite crea decine di
+    # partite dallo stesso "IP" (TestClient) in pochi secondi e scatterebbero 429 spuri.
+    # I test del rate limit lo riabilitano esplicitamente con un valore piccolo.
+    monkeypatch.setenv("BRISCOLA_CREATE_GAME_RATE_LIMIT", "0")
