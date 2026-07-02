@@ -17,6 +17,7 @@ Regola pratica:
 - refactor, test, doc, ottimizzazioni: NON richiedono bump.
 """
 
-# Versione delle regole (schema semplice: stringa/integer).
-# Partiamo da 1: significa “regole attuali baseline”.
-RULES_VERSION = "1"
+# Versione delle regole. Il tipo è STRINGA, fissato per contratto: finisce nell'event log
+# e nei metadati dataset, dove un confronto accidentale `"1" != 1` sarebbe un bug subdolo.
+# Partiamo da "1": significa “regole attuali baseline”.
+RULES_VERSION: str = "1"

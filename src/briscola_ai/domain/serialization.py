@@ -55,7 +55,19 @@ def game_state_to_dict(state: GameState) -> dict[str, Any]:
 
 
 def game_state_from_dict(data: dict[str, Any]) -> GameState:
-    """Ricostruisce un `GameState` da un dict prodotto da `game_state_to_dict`."""
+    """
+    Ricostruisce un `GameState` da un dict prodotto da `game_state_to_dict`.
+
+    Nota sulla fiducia nell'input: il dict arriva dallo store interno (Redis/in-memory),
+    quindi non validiamo qui tutti gli invarianti di dominio (40 carte uniche, ecc.).
+    Il campo `schema` però viene VERIFICATO: se in futuro lo schema evolve, un processo
+    vecchio che legge un dump nuovo deve fallire in modo esplicito, non ricostruire
+    silenziosamente uno stato sbagliato.
+    """
+    schema = data.get("schema")
+    if schema != SERIALIZATION_SCHEMA:
+        raise ValueError(f"Schema di serializzazione non supportato: {schema!r} (atteso {SERIALIZATION_SCHEMA})")
+
     teams_raw = data.get("teams")
     teams: Any = None
     if teams_raw is not None:

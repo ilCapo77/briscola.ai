@@ -99,6 +99,10 @@ class ValueLookaheadAgent:
     """
     Agente depth-1 basato su value model.
 
+    Concorrenza (assunzione di contratto): UNA istanza per partita, mai condivisa tra
+    richieste concorrenti — `metrics` è stato mutabile non thread-safe (vedi la nota
+    analoga in `PIMCAgent`).
+
     Scelta:
     - mazzo vuoto: solver esatto ricostruito da `PlayerObservation`;
     - troppe carte ignote o errore: fallback `v6 + solver`;

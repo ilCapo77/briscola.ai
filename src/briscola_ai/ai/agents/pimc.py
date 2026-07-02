@@ -385,6 +385,11 @@ class PIMCAgent:
 
     Il fallback viene usato quando lo stato è fuori scope, quando ci sono troppe carte ignote o quando
     una determinizzazione fallisce. Il rollout agent rappresenta la policy approssimata per entrambi i lati.
+
+    Concorrenza (assunzione di contratto): UNA istanza per partita, mai condivisa tra
+    richieste concorrenti. La dataclass è `frozen` ma `metrics` e `last_search_diagnostics`
+    sono stato mutabile non thread-safe (il backend li legge dopo ogni mossa); la factory
+    `build_agent` crea un'istanza nuova per mossa/partita, e va mantenuto così.
     """
 
     spec: ClassVar[AgentSpec] = AgentSpec(

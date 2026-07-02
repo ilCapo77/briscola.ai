@@ -109,6 +109,9 @@ document.addEventListener('DOMContentLoaded', () => {
     let lastAppliedServerVersion = -1;
     let pollingIntervalId = null;
     let pollingInFlight = false;
+    // Token di sessione polling: _stopPolling lo incrementa, così i pollOnce ancora in
+    // volo di una sessione precedente non ri-schedulano nulla dopo lo stop.
+    let pollingGeneration = 0;
 
     // Timing umano (client-side): stimiamo il tempo decisionale (ms) come il tempo trascorso
     // da quando la UI applica uno snapshot in cui `my_turn=true` fino al click.
@@ -198,8 +201,9 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     const _stopPolling = () => {
+        pollingGeneration += 1;
         if (pollingIntervalId) {
-            clearInterval(pollingIntervalId);
+            clearTimeout(pollingIntervalId);
             pollingIntervalId = null;
         }
         pollingInFlight = false;
@@ -209,23 +213,39 @@ document.addEventListener('DOMContentLoaded', () => {
         _stopPolling();
         UI.updateGameInfo({ connected: false, statusText: 'Polling', statusClass: 'connecting' });
 
+        // Backoff sugli errori: il polling è un fallback di debug, ma a 700ms fissi un
+        // backend irraggiungibile verrebbe martellato ~1.4 volte/secondo per tab aperta.
+        // Dopo ogni errore l'intervallo raddoppia (fino a 5s) e si resetta al primo successo.
+        const BASE_INTERVAL_MS = 700;
+        const MAX_INTERVAL_MS = 5000;
+        const generation = pollingGeneration;
+        let currentIntervalMs = BASE_INTERVAL_MS;
+
+        const scheduleNext = () => {
+            if (generation !== pollingGeneration) return; // sessione fermata o rimpiazzata
+            pollingIntervalId = setTimeout(pollOnce, currentIntervalMs);
+        };
+
         const pollOnce = async () => {
-            if (pollingInFlight) return;
+            if (generation !== pollingGeneration) return;
             pollingInFlight = true;
             try {
                 const obs = await API.getGameState(gameId, playerIndex);
                 handleGameUpdate(obs);
+                currentIntervalMs = BASE_INTERVAL_MS;
             } catch (error) {
                 console.warn('Polling error:', error);
+                currentIntervalMs = Math.min(currentIntervalMs * 2, MAX_INTERVAL_MS);
                 UI.updateGameInfo({ connected: false, statusText: 'Polling: errore rete', statusClass: 'reconnecting' });
             } finally {
                 pollingInFlight = false;
+                scheduleNext();
             }
         };
 
-        // Primo fetch immediato, poi intervallo.
-        pollOnce();
-        pollingIntervalId = setInterval(pollOnce, 700);
+        // Primo fetch immediato, poi catena di setTimeout (intervallo adattivo:
+        // a differenza di setInterval, il prossimo giro parte solo a richiesta conclusa).
+        pollingIntervalId = setTimeout(pollOnce, 0);
     };
 
     const _scheduleFlush = () => {
