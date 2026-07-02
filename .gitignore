@@ -30,6 +30,13 @@ benchmarks/
 build/
 dist/
 
+# Scratch locali in root (bozze di piano, appunti di lavoro non ufficiali)
+tmp/
+PLAN_*_DRAFT.md
+
+# Config locale degli agenti CLI (comandi/preferenze personali)
+.claude/
+
 # Symlink locale ad AGENTS.md (non versionato)
 CLAUDE.md
 
