@@ -287,8 +287,13 @@ Kill del ramo BC. L'operatore che ha già funzionato è **A2C con l'expert come 
 (CI coppie `+0.56..+0.87`, big 100k); il controllo v3 a ricetta identica fa `+0.44`; il
 testa a testa appaiato dà **+0.27 netto alle feature v4** (CI `+0.12..+0.42`) — prima
 evidenza runtime positiva del programma encoder. L'operatore sparring mostra rendimenti
-decrescenti (+2.46 → +0.44 per generazione). Prossime leve: belief come input della policy
-(1b), net2net widening (iter-2), expert a tutta partita. Nessuna promozione per ora.
+decrescenti (+2.46 → +0.44 per generazione). Prossime leve misurate
+nello stesso giorno: capacità net2net 128→256 marginale (+0.18 confuso con un giro di
+operatore in più); belief come input della policy NEGATIVA (−0.56 vs il proprio init:
+è informazione ridondante — funzione delle stesse feature v4 — e il gradiente che la
+insegue erode l'istinto). **Tutte le leve lato allievo sono esaurite: il vincolo è il
+maestro.** Prossimo passo: expert a tutta partita (value v4 + lookahead dalla prima
+carta, piano §6). Nessuna promozione per ora.
 
 Qualunque promozione deve includere:
 

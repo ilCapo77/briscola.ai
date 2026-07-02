@@ -417,6 +417,30 @@ Prossime leve, in ordine di rapporto valore/costo:
 
 Artefatti: `data/models/exit_iter1_*`, `benchmarks/experiments/fase3/*.json` (locali).
 
+**Risultati iterazione 2 / braccio capacità (2026-07-02).** Net2Net widening 128→256
+(`scripts/widen_mlp_net2net.py`, funzione preservata esattamente: 200/200 scelte invariate
+sul modello reale) + 5M partite stessa ricetta. Gate big 100k: iter2-h256 vs iter1 **+0.18**
+(CI +0.03..+0.33); vs v7 **+0.89** (CI +0.74..+1.05). Il +0.18 confonde capacità e un
+ulteriore giro di operatore: il contributo marginale della capacità è ~0. **La capacità
+non è il collo di bottiglia.**
+
+**Risultati iterazione 1b / belief come input della policy (2026-07-02).** Input 409 =
+v4 + 40 probabilità belief congelata (kernel `_policy_input_v4_belief_numba`, artefatto
+self-contained), init iter1 con pad a zero (start identico), 5M stessa ricetta. Gate
+medium 10k (engine domain): iter1b vs iter1 **−0.56** (CI −1.05..−0.06) — NEGATIVO;
+vs v7 +0.82 (residuo dell'istinto di iter1). **Kill della belief-as-policy-input**, con
+diagnosi: la belief è una funzione deterministica delle stesse feature v4 che la policy
+già riceve — come input NON aggiunge informazione, solo una base ridondante, e il
+gradiente che la insegue erode l'istinto accumulato. Dove la belief aggiunge valore vero
+è dentro l'EXPERT (pesare le determinizzazioni: un'operazione che la policy non può
+replicare strutturalmente, §5).
+
+**Bilancio leve lato allievo (tutte misurate, 2026-07-02):** feature v4 **+0.27 netto**
+(reale, validata); capacità 256 **~0 marginale**; belief input **−0.56** (dannosa).
+Il vincolo attivo è il MAESTRO: la prossima leva è l'expert a tutta partita
+(value model v4 + lookahead dalla prima carta, nota §6), eventualmente con belief-weighted
+determinizations, per ridare pendenza al segnale di sparring.
+
 **Iterazione 2 — capacità, con warm start preservato.** Se l'iterazione 1 è positiva ma
 modesta, si allarga l'hidden (256/512) SENZA ripartire da zero (la Fase 0.c mostra che
 from-scratch costa −5.4): widening **net2net** (clonazione dei neuroni esistenti + rumore
