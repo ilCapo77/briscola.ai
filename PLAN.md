@@ -6,9 +6,10 @@
 
 ## Stato Corrente
 
-- Versione: `0.23.1`. In preparazione `0.24.0` (in revisione maintainer): diario di bordo
-  sul sito (`/diario`, fonte `static/diario.md` + approfondimenti `docs/diario/`), default
-  UI = `bc_model_pimc_belief_64x10`, persistenza selezioni in localStorage.
+- Versione: `0.25.0`. Rilasciati in v0.24.x: diario di bordo sul sito (`/diario`, fonte
+  `static/diario.md` + approfondimenti `docs/diario/`), default UI =
+  `bc_model_pimc_belief_64x10`, persistenza selezioni in localStorage, SEO+favicon.
+  In v0.25.0: search PIMC su kernel Numba (produzione ~2× più economica per mossa).
 - Produzione: <https://ai.briscola.dev> (FastAPI Cloud, stato su Redis, realtime pub/sub,
   event log Postgres in modalità `dataset` con eventi `ai_action` auditabili).
 - Modello consigliato: `best_a2c_v8.npz` (encoder **v4** con memoria delle prese,
@@ -16,7 +17,7 @@
   +0.89 su v7 (CI coppie +0.74..+1.05, big 100k).
 - Avversari avanzati selezionabili: **`bc_model_pimc_belief_64x10`** (il più forte: PIMC 64
   determinizzazioni pesate dalla belief, finestra 10 — +3.66 su v8+solver, CI +3.32..+4.00,
-  ~75 ms/mossa pensata; release v0.23.0), `bc_model_value_lookahead_8x8` (+2.12, più
+  ~37 ms/mossa pensata con la search JIT di v0.25.0; release v0.23.0), `bc_model_value_lookahead_8x8` (+2.12, più
   leggero), `bc_model_pimc_16x8`.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
   La vista full-state di debug è opt-in (`BRISCOLA_DEBUG_STATE_ENDPOINT=1`), 403 di default.
@@ -61,12 +62,12 @@ Ogni riga è una decisione con evidenza; numeri e diagnosi in
 
 ## Prossime Azioni
 
-### 1. Release 0.24.0 (in revisione)
+### 1. Post-Deploy 0.25.0
 
-Diario di bordo pubblico, default PIMC-belief, persistenza selezioni UI. Post-deploy:
-monitorare la CPU delle repliche nei primi giorni — il default costa ~50–100× per mossa
-rispetto a v8 puro; se il traffico lo rende oneroso, tornare a default `bc_model` è un
-one-liner nel frontend.
+Monitorare la CPU delle repliche nei primi giorni: il default PIMC-belief costa
+~25–50× per mossa rispetto a v8 puro anche con la search JIT (~37 ms/mossa pensata).
+Se il traffico lo rende oneroso, tornare a default `bc_model` è un one-liner nel frontend.
+Opzionale: registrare il sito su Google Search Console e inviare la sitemap.
 
 ### 2. Monitoraggio Produzione E Audit
 
