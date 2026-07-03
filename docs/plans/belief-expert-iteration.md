@@ -364,7 +364,7 @@ Decisione:
   rollout JIT). Il pezzo di infrastruttura rinviato in Fase 1 è ora il percorso critico;
 - il dataset expert e il padding v3→v4 restano asset riusabili (l'expert-as-opponent li
   riutilizzerà per eval e per eventuali auxiliary loss a peso basso).
-- Artefatti: `data/exit/iter0_teacher_v7_d64u8_200k.jsonl`, `data/exit/iter0_models/*` (locali).
+- Artefatti: `data/exit/iter0_models/*` (locali). Il dataset `iter0_teacher_v7_d64u8_200k.jsonl` (798MB) è stato rimosso nella pulizia del 2026-07-03: rigenerabile con `generate_pimc_teacher_dataset.py` (ricetta nei commit).
 
 ### Roadmap delle iterazioni (deciso 2026-07-02, dopo l'iterazione-0)
 

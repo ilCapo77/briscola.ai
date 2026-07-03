@@ -1,329 +1,99 @@
 # Piano operativo — Briscola AI
 
-Questo file è la fonte di verità per decidere cosa fare dopo. Deve restare breve: i dettagli storici completi vivono
-nei commit, nei test e nei report.
+> Questo file è VOLUTAMENTE breve: fotografa lo stato reale e le prossime azioni.
+> I dettagli storici vivono nei messaggi di commit, in `docs/plans/` (ipotesi, gate e
+> risultati) e nel diario di bordo (<https://ai.briscola.dev/diario> + `docs/diario/`).
 
 ## Stato Corrente
 
-- Versione progetto: `0.21.1`.
-- Produzione: <https://ai.briscola.dev>.
-- Modello consigliato: `best_a2c_v7.npz` (encoder v3, `feature_dim=310`, guard anti-overkill ON).
-- Default UI: `bc_model` + modello consigliato, cioè v7 puro. È la nuova policy `.npz` veloce promossa in v0.19.0.
-- Seconda scelta vicina nel menu: `bc_model_value_lookahead_8x8`, cioè modello selezionato (default v7) + solver
-  finale + V-lookahead depth-1 quando restano al massimo 8 carte vive ignote. Resta l'opzione runtime più forte,
-  ma costa più CPU.
-- Altro avversario avanzato selezionabile: `bc_model_pimc_16x8`, cioè PIMC(v6, 16 determinizzazioni, max 8 carte
-  vive ignote) + solver finale.
-- Backend: FastAPI + WebSocket, stato in `GameSessionStore` (Redis in cloud), event log SQLite/Postgres.
-- Dataset cloud: `DATABASE_URL` + `BRISCOLA_EVENT_LOG_MODE=dataset`; il backend salva eventi `ai_action` auditabili
-  per mosse IA/search (`fallback`, `lookahead`, `search`, `solver`).
-- Diagnostica cloud: `/version` e `/api/meta` espongono `event_log_available`, `event_log_healthy`,
-  `event_log_backend`, `event_log_database_name` ed `event_log_database_host` per verificare che il processo live
-  abbia un event log Postgres raggiungibile e collegato al Neon atteso.
-- Debug UI: la vista full-state di `GET /api/games/{id}` (senza `player_index`, include `next_deck_card`) è ora
-  **opt-in** via `BRISCOLA_DEBUG_STATE_ENDPOINT=1`; di default risponde 403 (anti-cheat in produzione). La vista
-  fair (`player_index`) e gli agenti continuano a ricevere solo `ObservationDTO`.
+- Versione: `0.23.1`. In preparazione `0.24.0` (in revisione maintainer): diario di bordo
+  sul sito (`/diario`, fonte `static/diario.md` + approfondimenti `docs/diario/`), default
+  UI = `bc_model_pimc_belief_64x10`, persistenza selezioni in localStorage.
+- Produzione: <https://ai.briscola.dev> (FastAPI Cloud, stato su Redis, realtime pub/sub,
+  event log Postgres in modalità `dataset` con eventi `ai_action` auditabili).
+- Modello consigliato: `best_a2c_v8.npz` (encoder **v4** con memoria delle prese,
+  `feature_dim=369`, hidden 256 via Net2Net, guard anti-overkill ON). Promosso v0.22.0:
+  +0.89 su v7 (CI coppie +0.74..+1.05, big 100k).
+- Avversari avanzati selezionabili: **`bc_model_pimc_belief_64x10`** (il più forte: PIMC 64
+  determinizzazioni pesate dalla belief, finestra 10 — +3.66 su v8+solver, CI +3.32..+4.00,
+  ~75 ms/mossa pensata; release v0.23.0), `bc_model_value_lookahead_8x8` (+2.12, più
+  leggero), `bc_model_pimc_16x8`.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
-- CI: GitHub Actions (`.github/workflows/ci.yml`) esegue ruff format/check, mypy e pytest+coverage su ogni push/PR.
-- Test-àncora anti-divergenza: `tests/test_card_tables_parity.py` (tabelle punti/forza e `who_wins_trick` di fast,
-  numba core, numba solver ed encoding contro `domain.models.Rank`; parità `_card_to_id_fast`↔`card_to_id`) e
-  `tests/test_reward_shaping_numba_parity.py` (overkill penalty JIT ↔ reward shaping canonico); il test del solver
-  endgame Numba verifica anche `final_delta_p0_p1` (valore di foglia del value-lookahead). Da v0.21.0 le tabelle
-  numeriche sono DERIVATE dal dominio in `ai/card_tables.py` (fonte unica) e il kernel "chi vince la presa" è
-  condiviso in `ai/trick_kernel.py`.
-- **Statistica seat-fair (v0.21.0)**: le CI sono calcolate sull'unità COPPIA (stesso mazzo, seat scambiati), non
-  per-partita: le CI storiche erano anti-conservative. Riverifica v7 vs v6 con CI corrette: medium 10k `+2.42`
-  (CI95 coppie `+1.92..+2.91`), big 100k `+2.46` (CI95 coppie `+2.31..+2.62`) → la promozione di v7 resta valida.
-  Usare `seat_fair_avg_point_diff_ci`/`seat_fair_score_rate_ci` per nuove valutazioni.
-- Hardening backend (v0.21.0): mossa IA in thread executor (event loop libero), lock Redis TTL 120s, vincoli
-  Pydantic sugli input, rate limiting su `POST /games` (`BRISCOLA_CREATE_GAME_RATE_LIMIT`, default 30/min/IP),
-  sanificazione nomi giocatore nell'event log in TUTTE le modalità, datetime UTC aware, cap sui buffer per-replica.
-- `new_game_state` senza `seed` ora genera un seed casuale (prima: seed=0 fisso, rischio dataset degeneri).
-- UI accessibile da tastiera (carte come bottoni, aria-live sui messaggi); niente più `alert()`.
-- Test rapidi: `pytest -m "not slow and not numba"` (~3s) esclude subprocess e compilazioni JIT.
-- Artefatti locali (`data/`, `benchmarks/`) restano gitignored; `docs/reports/model_progress.xlsx` è un artefatto
-  curato del maintainer (richiede artefatti locali, non rigenerabile da clone pulito: documentato nello script).
+  La vista full-state di debug è opt-in (`BRISCOLA_DEBUG_STATE_ENDPOINT=1`), 403 di default.
+- CI GitHub Actions: ruff format/check, mypy, pytest+coverage su ogni push/PR. Lezione
+  operativa: la cache Numba locale può mascherare firme rotte — la CI (compilazione fredda)
+  è il gate di verità per i kernel.
+- Statistica seat-fair: le CI si calcolano sull'unità COPPIA (stesso mazzo, seat scambiati)
+  via `seat_fair_avg_point_diff_ci`/`seat_fair_score_rate_ci`. Le CI per-partita storiche
+  erano anti-conservative.
+- Test-àncora anti-divergenza: tabelle carte e `who_wins_trick` derivate dal dominio
+  (`ai/card_tables.py`, `ai/trick_kernel.py`), parità dominio↔fast↔numba per encoder
+  v1–v4 su partite specchiate, reward shaping JIT ↔ canonico.
+- Diagnostica deploy: `/version` espone `recommended_model_present`,
+  `value_lookahead_model_present`, `pimc_belief_model_present` e lo stato dell'event log.
+- Artefatti locali (`data/`, `benchmarks/`) gitignored. Pulizia 2026-07-03: rimossi ~11.5 GB
+  di dataset di rami chiusi (teacher v3, diagnostiche distillazione, dataset ExIt iter-0,
+  value full-game) — tutti rigenerabili dagli script; ricette nei commit.
+- Test rapidi: `pytest -m "not slow and not numba"` (~3s).
 
 ## Decisioni Chiuse
 
-### v7 È Il Default `.npz`
+Ogni riga è una decisione con evidenza; numeri e diagnosi in
+`docs/plans/belief-expert-iteration.md` (§ indicati), `docs/diario/*.md` e nei commit.
 
-`best_a2c_v7.npz` è il modello consigliato ufficiale.
-
-Numeri di promozione principali:
-
-- v7 vs v6 big holdout seat-fair: `+2.27` punti medi su 100k partite, CI95 `+2.11..+2.44`.
-- `v7 + solver` vs `v6 + solver`, 10k: `+2.27`, CI95 `+1.77..+2.77`.
-- v7 vs `heuristic_v1` big holdout: `+18.73`.
-- decision-quality medium vs `heuristic_v1`: `trump_overkill_rate=0.0%`; `trump_waste_rate` circa `0.3%`
-  contro circa `0.1%` di v6 nello stesso harness, da monitorare.
-
-Contesto: v7 non supera il value-lookahead runtime basato su v6; nel confronto 10k `v7 + solver` perde di `-0.64`,
-CI95 `-1.15..-0.13`. Quindi v7 diventa il default veloce `.npz`, mentre value-lookahead resta l'opzione avanzata più
-forte. Smoke 2k: `value-lookahead(v7)` batte `value-lookahead(v6)` di `+1.93`, da confermare solo se serve.
-
-### Solver Endgame È Deployabile
-
-Il solver endgame 2-player a mazzo vuoto è esatto. `ai/endgame/solver.py` resta l'oracolo didattico basato su
-`domain.step()`, `ai/endgame/fast_solver.py` è il solver completo numerico/Python, e il loop caldo usa
-`ai/endgame/numba_solver.py` choose-only JIT, equivalente e coperto da test di parità. Viene eseguito solo dopo
-ricostruzione da `PlayerObservation`.
-
-Decisione: il solver resta una variante runtime valida e a basso rischio; ora può essere usato sopra v7 per confronti
-offline, mentre il default UI resta `bc_model` puro con `best_a2c_v7.npz`.
-
-### PIMC È Utile Come Runtime, Non Come Modello Distillato
-
-Evidenza offline:
-
-- `PIMC(v6,16×10)` vs `v6 + solver`, 2000 partite: avg diff `+3.59`, CI95 `+2.48..+4.70`.
-- `PIMC(v6,16×8)` vs `16×10`, 2000 partite: nessuna evidenza che `16×10` sia più forte; `16×8` costa meno.
-- allargare la finestra a `16×12`/`16×16` aumenta CPU/search move ma non mostra vantaggio.
-
-Decisione: mantenere `bc_model_pimc_16x8` come avversario avanzato selezionabile, non come default.
-
-Caveat: i benchmark misurano forza contro v6 nell'harness offline. Contro umani il modello d'avversario nei rollout è
-mis-specificato; validare con audit qualitativo reale.
-
-### Distillazione PIMC In Policy: Negativa Per Ora
-
-Esperimenti chiusi:
-
-- hard-label PIMC su correzioni search: val acc circa `57%`, non abbastanza.
-- mix deploy-relevant `(coverage v6 + correzioni PIMC pesate)`: peggiora `(candidato+solver)` vs `(v6+solver)`.
-- MLP più larga (`hidden=512`) memorizza il train ma non migliora la generalizzazione.
-- soft-label da `mean_score` PIMC: T=`2` best val acc `56.9%`, T=`5` `55.6%`, T=`10` `52.8%`; non supera hard-label.
-
-Decisione: non continuare distillazione PIMC in questa MLP/recipe senza una nuova ipotesi sostanziale.
-
-### V-Lookahead Stage 0: Positivo
-
-Ipotesi: non distillare l'argmax PIMC in una policy reattiva; allenare invece un value model `V(observation)` e usarlo
-per ordinare foglie di una lookahead corta.
-
-Stage 0 validato con dataset `v6 + solver`, `epsilon=0.10`, label pulita `v6-continuation`:
-
-- 50k partite, 2M record value-observation.
-- `train_value.py`: MAE `14.02` vs baseline delta corrente `16.34`; sign acc `0.734` vs `0.633`; best checkpoint epoca
-  16.
-- gate ranking vs diagnostica PIMC 64×8, 5000 record search: top1 `0.7276` vs reference v6 `0.5278`;
-  strong/reliable top1 `0.8395` vs `0.6359`; pairwise `0.8016`, strong pairwise `0.8502`; `records_failed=0`.
-
-Decisione: esporre `modello selezionato + solver + V-lookahead depth-1` come avversario selezionabile vicino a
-`bc_model`. Resta più forte del solo `.npz` v7, ma costa più CPU e non diventa default.
-
-### A2C Contro Value-Lookahead: Chiuso Positivo
-
-`train_a2c.py` può usare `bc_model_value_lookahead_8x8` come opponent nel fast rollout Numba. In questo path
-l'avversario usa la partita numerica determinizzata come singola determinizzazione (`fast_numba_determinized`):
-è un opponent forte per training/screening, non una replica bit-a-bit dell'agente UI.
-
-Run effettivo:
-
-- 5M partite, warm-start v6, opponent `bc_model_value_lookahead_8x8`, seed `20260701`.
-- esito: promosso come `best_a2c_v7.npz`.
-
-Decisione:
-
-- non ripetere subito lo stesso training;
-- usare v7 come nuova policy base per confronti futuri;
-- se si vuole migliorare ancora, partire da audit reali o da un nuovo value model/value-lookahead con v7 come base.
-
-### Population League Declassata
-
-Il round-robin `{best_a2c_v2, v3, v4, v5, v6, heuristic_v1}` mostra famiglia monotona/transitiva: nessun ciclo
-confidente.
-
-Decisione: niente population league come asse primario. Si può fare solo uno screening economico di robustezza, con
-kill criterion esplicito, se nasce un motivo nuovo.
+- **v8 è il default `.npz`** (v0.22.0): le feature v4 valgono +0.27 netto a parità di tutto
+  (prima evidenza runtime positiva del programma encoder); la capacità (Net2Net 128→256) è
+  marginale da sola. Catena completa nel piano §6 e in `docs/diario/05-catena-campioni.md`.
+- **La search insegna facendo sparring, non facendosi copiare**: la distillazione
+  PIMC→policy è stata chiusa NEGATIVA due volte (giugno su v6; luglio come ExIt iter-0) con
+  diagnosi: la CE su mosse-argmax è lossy (hidden 512: ~100% train, 56–57% validation).
+  v7 e v8 nascono dall'operatore che funziona: A2C con la search come avversario.
+- **La belief network**: NO come input della policy (−0.56: ridondante, erode l'istinto);
+  SÌ per pesare le determinizzazioni della search (+3.66 in produzione, v0.23.0). §5–6.
+- **Niente expert full-game via value depth-1**: dose-risposta pulita (finestra 8: +1.80 →
+  tutta partita: −5.16); a inizio partita il valore è dominato dal caso del mazzo (MAE ~14
+  irriducibile) e l'argmax su V rumorosa perde dall'istinto della policy. §6.
+- **Value decision-aligned**: chiuso negativo (il fit pairwise/leaf non migliora il ranking
+  che conta per la lookahead).
+- **Population league**: declassata (costo alto, beneficio non dimostrato vs league semplice).
+- **Solver endgame esatto**: deployabile e in produzione in tutti gli agenti avanzati
+  (+1.8/+1.9 sopra policy forti, anti-cheat via ricostruzione da `PlayerObservation`).
 
 ## Prossime Azioni
 
-### 1. Value Model Decision-Aligned Chiuso
+### 1. Release 0.24.0 (in revisione)
 
-Stato: due varianti di riaddestramento del value model sono state misurate e non battono `value_v0`.
+Diario di bordo pubblico, default PIMC-belief, persistenza selezioni UI. Post-deploy:
+monitorare la CPU delle repliche nei primi giorni — il default costa ~50–100× per mossa
+rispetto a v8 puro; se il traffico lo rende oneroso, tornare a default `bc_model` è un
+one-liner nel frontend.
 
-- `value_v1_h128_v7_window500k_seed20260701.npz` migliora molto MAE/sign sul proprio holdout, ma non migliora
-  materialmente il value-lookahead runtime;
-- ranking gate vs diagnostica PIMC: top1 circa pari a `value_v0`;
-- A/B runtime diretto `value_v1` vs `value_v0`, 4k seat-fair: `+0.24`, CI95 `-0.55..+1.04`;
-- decisione: non promuovere `value_v1`; tenere `value_v0` come value model deployato.
+### 2. Monitoraggio Produzione E Audit
 
-Ipotesi successiva testata: `V` deve imparare a ordinare le foglie come la search PIMC, non solo predire l'esito della
-continuazione base.
-
-Implementazione pronta:
-
-- `scripts/generate_value_dataset_numba.py` genera dataset `.npz` compatti da self-play numerico JIT;
-- `scripts/generate_pimc_leaf_value_dataset.py` converte diagnostica PIMC root-level in foglie value decision-aligned;
-- `train_value.py` legge sia JSONL canonico sia `.npz` compatto.
-- `scripts/train_value_pairwise.py` allena `V` con regressione + ranking pairwise intra-root, con warm-start opzionale da
-  `value_v0`;
-- `scripts/evaluate_value_lookahead_pair.py` confronta due value model nello stesso harness value-lookahead.
-
-Probe tecnico con teacher PIMC v6:
-
-- usando diagnostica PIMC v6 esistente e policy base v7, dataset 5k root / 15k leaf;
-- training da zero perde nettamente contro `value_v0` (`-2.05`, CI95 `-3.62..-0.47`, 1k);
-- fine-tune da `value_v0` è sano offline ma non supera `value_v0` (`-0.55`, CI95 `-2.14..+1.03`, 1k);
-- lettura: il plumbing è valido, ma il teacher v6 è disallineato. Non usare questo artefatto per promozione.
-
-Probe definitivo con teacher PIMC v7:
-
-- teacher `best_a2c_v7.npz`, `d=64`, `u=8`, 40k record:
-  - `records_written_search=18184`, `records_written_endgame_solver=21816`;
-  - `records_written_search_disagree_reference=8176`;
-  - `records_written_search_strong_reliable_disagree=2935`;
-  - `teacher_seconds_per_search_decision=0.0718`;
-- leaf dataset decision-aligned:
-  - `roots_used=5022`, `leaf_records_written=15066`;
-  - `leaf_records_skipped_terminal_or_endgame=12684`;
-  - `leaf_records_skipped_error=0`;
-- fine-tune da `value_v0`:
-  - best epoch 15;
-  - validation pairwise `0.809`, top1 `0.735`;
-- A/B runtime diretto, 4k seat-fair, seed `20260710`:
-  - `value_leaf_pairwise_v7_40k` vs `value_v0`;
-  - score rate `0.4888`, CI95 `0.4733..0.5042`;
-  - avg diff `-0.69`, CI95 `-1.48..+0.11`.
-
-Decisione:
-
-- non promuovere `value_leaf_pairwise_v7_40k`;
-- mantenere `value_v0_h128_clean50k_seed20260701.npz` come value model dell'agente `bc_model_value_lookahead_8x8`;
-- non rilanciare altri fine-tune value piccoli senza una nuova ipotesi strutturale;
-- se si riprende questo asse, servono o una diversa architettura/capacità per `V`, o un test mirato su errori reali
-  raccolti da audit, non un altro dataset simile.
-
-### 2. Monitoraggio Produzione E Audit Value-Lookahead/PIMC
-
-Fare:
-
-- mantenere `bc_model_value_lookahead_8x8` come opzione avanzata vicina al default;
-- mantenere `bc_model_pimc_16x8` come confronto avanzato opzionale;
-- classificare ogni mossa sospetta dal `decision_type`: se è `fallback`, il problema è la policy base; se è `solver`,
-  verificare ricostruzione/endgame; se è `lookahead`/`search`, verificare value/PIMC/guard/determinizzazione;
-- se emergono errori ricorrenti, trasformarli in una nuova ipotesi misurabile.
-
-Non fare:
-
-- non usare dati umani per training finché volume, consenso, qualità e privacy non sono riverificati;
-- non avviare v8 per inerzia.
+- Classificare le mosse sospette dal `decision_type` dell'event log: `fallback` → policy
+  base; `solver` → ricostruzione/endgame; `lookahead`/`search` → value/PIMC/guard.
+- Errori ricorrenti → nuova ipotesi misurabile, non fix estemporanei.
+- Non usare dati umani per training finché volume, consenso, qualità e privacy non sono
+  riverificati.
 
 ### 3. Hardening Continuo
 
-Già aggiunti stress test su:
+Aggiungere test solo su casi reali sospetti o quando si toccano regole/observation/search.
+Debito minore residuo (nessuno urgente; prenderlo quando si tocca l'area):
 
-- solver reale vs solver ricostruito da `PlayerObservation`, anche secondo di mano;
-- determinizzazioni PIMC senza duplicati/leak e con punteggi pubblici coerenti;
-- PIMC search senza determinizzazioni/rollout falliti né mosse normalizzate;
-- solver/lookahead Numba usabili nei loop di training.
+- DX script: `scripts/_common.py` condiviso e `logging` al posto di `print`;
+- backend: test e2e WebSocket attraverso l'app; gestione riconnessione Redis nello store;
+- AI: RNG serial vs parallel non riproducibile cross-`workers` in `decision_quality`;
+- frontend: zero test JS; CSS monolitico (~900 righe).
 
-Continuare ad aggiungere test solo quando troviamo un caso reale sospetto o tocchiamo regole/observation/PIMC.
+### 4. Nuovo Ciclo Di Training Solo Con Nuova Ipotesi
 
-Debito minore residuo dalla review v0.21.0 (nessuno è urgente; prenderli quando si tocca l'area):
-
-- DX script: `scripts/_common.py` come package (parser agent-spec e manifest condivisi) e `logging` al posto di
-  `print` — unico asse della review rinviato per intero (churn alto, beneficio modesto);
-- backend: test end-to-end del WebSocket attraverso l'app (subscriber + fan-out reveal/trick/refresh); gestione
-  riconnessione Redis a livello store;
-- AI: RNG serial vs parallel non riproducibile cross-`workers` in `decision_quality` (documentato ma footgun);
-- frontend: zero test JS; CSS monolitico (883 righe).
-
-Chiusi come quick-win post-v0.21.0: validazione `schema` in `game_state_from_dict`, tipo di `RULES_VERSION`,
-test sui path d'errore del dominio, backoff sul polling UI, nota di concorrenza su PIMC/ValueLookahead.
-
-### 4. Nuovo Modello Solo Con Nuova Ipotesi
-
-Un nuovo `best_a2c_v8` ha senso solo se c'è un segnale concreto, ad esempio:
-
-- pattern di errore V-lookahead/PIMC/v7 ripetibile da dataset reale;
-- nuova architettura/feature che risolve un limite osservato;
-- nuovo value model/value-lookahead con v7 come base e segnale preliminare forte, misurato prima come agente runtime;
-- aumento di volume umano sufficiente e privacy/qualità verificata.
-
-**Ipotesi candidata (2026-07): Belief → Determinizzazioni Pesate → Expert Iteration.**
-L'indagine post-v7 ha identificato tre soffitti che spiegano il ristagno: encoder senza storia
-attribuita (opponent modeling irrappresentabile), MLP 128×1 flat invariata da 5 generazioni, e
-nessuna search nel loop di training (la distillazione one-shot è fallita per non-identificabilità,
-non per capacità). Il piano dettagliato — fasi, gate, criteri di kill, riferimenti — è in
-`docs/plans/belief-expert-iteration.md`.
-
-**Fase 0 completata (2026-07-02)**, tre sonde convergenti (dettagli e artefatti nel piano):
-
-- exploitability: best-response dedicato (2M, init=v7) batte v7 solo di `+0.70` (CI `+0.22..+1.19`)
-  → la classe reattiva attuale è satura, league play non è la leva;
-- tetto oracolo: `PIMC(v7,64×10)+solver` vs `v7+solver` = `+3.76` (CI `+3.40..+4.12`), che
-  satura col budget → il margine vive nella QUALITÀ delle determinizzazioni, non nel numero;
-- from-scratch a ricetta/budget v7: `−5.42` vs v7 → la catena warm-start è un asset;
-  ExIt partirà da `policy_0 = v7`.
-
-**Fase 1 (stadio dominio+encoder) completata (2026-07-02)**: `TrickRecord`/`trick_history` nel
-dominio (serializzazione schema 2, migrazione da schema 1), `trick_history` in
-`PlayerObservation`/`ObservationDTO`, encoder **v4** (369 = v3 + 59: comportamento avversario +
-ultime 4 prese) con parità dict/oggetto testata. Gli agenti runtime possono già usare modelli
-v4 (path dominio completo); il kernel Numba v4 è rinviato a quando la Fase 3 richiederà il
-training A2C su v4.
-
-**Fase 2 completata (2026-07-02)** — esito misto, con spiegazione (dettagli nel piano §5):
-
-- gate offline SUPERATO: `belief_v0` legge la mano avversaria dalle feature v4
-  (top-k recall `0.593` vs `0.399` uniforme; BCE `0.492` vs `0.612`);
-- gate runtime NEGATIVO per il deploy: nella config campione (16×8) il pool di ignote è
-  troppo piccolo perché l'inferenza conti (`+0.15`, CI `−0.08..+0.39`); a finestra larga
-  la belief funziona davvero (`+0.56` a 16×12 vs uniforme 16×12, CI `+0.15..+0.97`) ma la
-  finestra larga resta un netto svantaggio; NESSUN agente `pimc_belief` promosso;
-- decisione: belief e determinizzazioni pesate restano come infrastruttura; il valore
-  dell'inferenza si sposta sulla policy (input/auxiliary) e sulla Fase 3 (ExIt), dove agisce
-  su tutta la partita e non solo nella finestra di search.
-
-**Fase 3, iterazione-0 completata (2026-07-02) — negativa, con diagnosi** (dettagli nel piano §6):
-quattro varianti di improvement via BC (hard/soft/anchored/hidden-512) perdono tutte da v7
-(da −1.52 a −9.19): la CE su argmax è un operatore lossy su una policy raffinata da RL.
-Kill del ramo BC. L'operatore che ha già funzionato è **A2C con l'expert come avversario**.
-
-**Fase 3, iterazione-1 completata (2026-07-02) — positiva ma modesta, attribuzione pulita**
-(kernel Numba v4 completato; dettagli e tabella nel piano §6): iter1-v4 batte v7 di `+0.72`
-(CI coppie `+0.56..+0.87`, big 100k); il controllo v3 a ricetta identica fa `+0.44`; il
-testa a testa appaiato dà **+0.27 netto alle feature v4** (CI `+0.12..+0.42`) — prima
-evidenza runtime positiva del programma encoder. L'operatore sparring mostra rendimenti
-decrescenti (+2.46 → +0.44 per generazione). Prossime leve misurate
-nello stesso giorno: capacità net2net 128→256 marginale (+0.18 confuso con un giro di
-operatore in più); belief come input della policy NEGATIVA (−0.56 vs il proprio init:
-è informazione ridondante — funzione delle stesse feature v4 — e il gradiente che la
-insegue erode l'istinto). **Tutte le leve lato allievo sono esaurite: il vincolo è il
-maestro.** Il capitolo "expert a tutta
-partita" (2026-07-03) è stato costruito e misurato: NEGATIVO con curva dose-risposta
-pulita (finestra 8: +1.80; tutta partita: −5.16) — il depth-1 su V rumorosa perde
-dall'istinto della policy fuori dal finale, e il value v4 è identico al v3 nel suo regime
-(+1.80 vs +1.78). Kill. L'headroom dimostrato residuo era la search a rollout: la strada
-(b) è stata eseguita e RILASCIATA (v0.23.0): nuovo avversario avanzato
-`bc_model_pimc_belief_64x10` (PIMC 64 det pesate dalla belief, finestra 10) — +3.66 vs
-v8+solver (CI +3.32..+4.00, 4k), contro il +2.12 del value-lookahead. La belief è in
-produzione nel suo ruolo giusto. Resta nel piano §6 la strada (a) (PIMC-as-teacher nei
-kernel numba) come eventuale prossimo ciclo di training.
-
-**Promozione v8 (2026-07-03, release v0.22.0):** `best_a2c_v8.npz` = iter2-h256
-(encoder v4 + Net2Net 256, catena v7→pad v4→5M vs VL(v7)→widening→5M). Gate: vs v7
-`+0.89` (CI coppie `+0.74..+1.05`, big 100k), vs heuristic_v1 `+17.61` (il punteggio
-più basso di v7 su heuristic_v1, 18.73, è non-transitività di stile, non regressione).
-Default UI/server/cloud → v8; value model invariato. Nota: nelle simulazioni
-determinizzate del value-lookahead il blocco memoria v4 della base è vuoto
-(degradazione lieve dell'opponent avanzato, non un errore). Ricetta riproducibile:
-`docs/plans/belief-expert-iteration.md` §6.
-
-Qualunque promozione deve includere:
-
-- confronto seat-fair con CI;
-- holdout non peggiore;
-- decision-quality vs `heuristic_v1`;
-- `trump_waste_rate` e `trump_overkill_rate` non peggiorati materialmente;
-- aggiornamento `docs/reports/model_progress.xlsx` se cambia un best ufficiale.
-
-### 5. PPO/GAE: Bassa Priorità
-
-Valutare PPO/GAE solo dopo un blocco reale di A2C/PIMC e con esperimento piccolo e isolato. Non introdurre DQN per ora:
-action mask, osservabilità parziale e self-play rendono più coerente restare su policy-gradient.
+Tutte le leve lato allievo e lato maestro-stimato sono state misurate e chiuse (v. Decisioni).
+L'unica strada aperta con headroom dimostrato è **PIMC-as-teacher nei kernel Numba**
+(sparring contro la search a rollout, oracle +3.76): in frigo, perché il rendimento atteso
+di una generazione di sparring è una frazione dell'edge del maestro (~+0.5–1) a fronte di
+un cantiere kernel significativo. Riaprire solo con una ragione di prodotto per volere la
+policy pura più forte. PPO/GAE: bassa priorità, nessuna evidenza che serva.
 
 ## Comandi Utili
 
@@ -348,17 +118,6 @@ Report modelli:
 
 ```bash
 uv run python scripts/build_model_report.py
-```
-
-Value-learning / V-lookahead:
-
-```bash
-uv run python scripts/generate_value_dataset.py --help
-uv run python scripts/generate_value_dataset_numba.py --help
-uv run python scripts/train_value.py --help
-uv run python scripts/evaluate_value_ranking.py --help
-uv run python scripts/evaluate_value_lookahead.py --help
-uv run python scripts/evaluate_value_lookahead_quality.py --help
 ```
 
 Avvio locale:

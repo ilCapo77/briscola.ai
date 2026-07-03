@@ -120,6 +120,10 @@ Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Il b
     git push <remote> vX.Y.Z
     ```
     Nota: `get_code_version()` (footer UI, `/version`, cache-busting) legge la versione da `pyproject.toml` anche in editable, quindi non serve reinstallare per vederla aggiornata.
+  - **Verifica catalogo/UI a ogni cambio di asset**: dopo promozioni o nuovi asset nella directory
+    modelli, controlla ENTRAMBI i versi del catalogo (`GET /api/ai/models`): il nuovo modello deve
+    apparire `is_compatible: true`, e gli asset interni (value/belief, format `value_mlp_v1`/`belief_mlp_v1`)
+    NON devono apparire come selezionabili. Le due regressioni di v0.22.x/v0.23.x nascevano qui.
   - **Report modelli per ogni release**: a ogni nuova release rigenera `docs/reports/model_progress.xlsx` con
     `uv run python scripts/build_model_report.py`. Controlla esplicitamente il foglio Dashboard e in particolare il
     grafico di progressione: deve includere il nuovo best/versione promossa e il range del grafico deve arrivare

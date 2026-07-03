@@ -208,15 +208,17 @@ Due one‑hot pubbliche (entrambe lecite, derivate solo da informazione visibile
 - `seen_cards_onehot[40]`: carte **viste** = briscola scoperta + tavolo + carte uscite nelle prese;
 - `out_of_play_cards_onehot[40]`: carte **non più disponibili** = prese + tavolo (la briscola scoperta NON è qui finché è pescabile/in mano). Invariante: `out_of_play ⊆ seen`.
 
-### Encoder: v1, v2, v3
+### Encoder: v1, v2, v3, v4
 
 Lo stesso stato lecito può essere codificato a livelli crescenti di “memoria/strategia”:
 
 - **v1** (`feature_dim=248`): vista istantanea (mano, tavolo, briscola, scalari di stato).
 - **v2** (`288`): v1 + `seen_cards_onehot[40]` → card counting lecito (storia pubblica).
 - **v3** (`310`): v2 + 22 feature **strategiche aggregate**, leggibili: briscole/carichi ignoti, assi/tre usciti per seme, fase partita (`deck_size`, carte in mano, endgame flag), e info sulla presa corrente. Usa `out_of_play_cards_onehot` per distinguere “visto” da “fuori gioco”.
+- **v4** (`369`): v3 + 59 feature di **memoria delle prese** (`trick_history`): aggregati sul comportamento avversario (semi giocati, tagli, risposte, uscite con briscola/carichi) + dettaglio delle ultime 4 prese. È l'encoder di `best_a2c_v8`; il suo contributo misurato è +0.27 punti/partita a parità di tutto (CI +0.12..+0.42).
+- **v4+belief** (`409`, solo policy sperimentali): v4 + 40 probabilità della belief network embedded. Misurato NEGATIVO come input della policy (−0.56: informazione ridondante); la belief vive in produzione dentro la search (`bc_model_pimc_belief_64x10`).
 
-L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast** (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, in fallback, dalla `feature_dim` (248/288/310).
+L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast** (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, in fallback, dalla `feature_dim` (248/288/310/369).
 
 ### Agenti disponibili
 
@@ -231,6 +233,9 @@ L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in ver
 - `bc_model_value_lookahead_8x8` – modello locale `.npz` scelto dalla UI + solver finale + lookahead depth‑1
   guidata dal value model `value_v0_h128_clean50k_seed20260701.npz` quando restano al massimo 8 carte vive ignote.
 - `bc_model_pimc_16x8` – modello locale `.npz` scelto dalla UI + PIMC 16×8 nel semi‑finale + solver esatto nel finale.
+- `bc_model_pimc_belief_64x10` – **l'avversario più forte**: PIMC con 64 determinizzazioni **pesate dalla belief network**
+  (stima della mano avversaria dedotta dal comportamento) nella finestra delle ultime 10 carte ignote + solver finale.
+  +3.66 punti/partita su v8+solver (CI +3.32..+4.00 su 4k). Richiede `belief_v0_h128_50k_seed20260702.npz` nella directory modelli.
 
 Il **solver endgame** calcola la mossa ottima esatta con minimax a mazzo vuoto. `ai/endgame/solver.py` resta
 l'oracolo didattico sul dominio canonico; `ai/endgame/fast_solver.py` è il solver completo numerico/Python;
@@ -344,43 +349,17 @@ Idea didattica: prima un modello supervisionato che **imita** un teacher (Behavi
 
 **Spazio azioni**: “40 carte + action mask” (il modello sceglie tra 40 classi; la mask abilita solo le carte in mano).
 
-**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3` (v3 richiede dataset con `out_of_play` popolato). Per fine-tuning controllato supporta `--init` da un MLP `.npz` compatibile e `--bc-anchor ... --bc-anchor-beta ...` per restare vicino a un modello congelato. Per esperimenti di distillazione può filtrare il dataset con `--filter-disagree-with-model`: tiene solo gli esempi in cui il teacher sceglie una carta diversa dal modello base.
+**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3|v4` (v3/v4 richiedono dataset con `out_of_play` popolato; v4 aggiunge la memoria delle prese). Per fine-tuning controllato supporta `--init` da un MLP `.npz` compatibile e `--bc-anchor ... --bc-anchor-beta ...` per restare vicino a un modello congelato. Per esperimenti di distillazione può filtrare il dataset con `--filter-disagree-with-model`: tiene solo gli esempi in cui il teacher sceglie una carta diversa dal modello base.
 
-**Distillazione PIMC** (`scripts/generate_pimc_teacher_dataset.py`): genera un JSONL compatibile con BC del tipo
-"v6 ovunque + correzioni PIMC nel finale". Di default le partite avanzano con il modello base v6 e il teacher etichetta
-anche le posizioni fuori finestra search delegando al fallback v6; usa `--only-pimc-window` per salvare solo esempi di
-finale/semi-finale:
-
-```bash
-python scripts/generate_pimc_teacher_dataset.py \
-  --model ./data/models/best_a2c_v6.npz \
-  --out ./data/pimc_teacher_v7.jsonl \
-  --num-examples 50000 \
-  --determinizations 16 \
-  --max-unknown-cards 8
-
-python scripts/train_bc.py \
-  --data ./data/pimc_teacher_v7.jsonl \
-  --out ./data/models/pimc_distill_v7_candidate.npz \
-  --encoder-version v3 \
-  --model mlp \
-  --init ./data/models/best_a2c_v6.npz \
-  --bc-anchor ./data/models/best_a2c_v6.npz \
-  --bc-anchor-beta 0.01 \
-  --inference-overkill-guard
-
-# Variante diagnostica: addestra solo sulle correzioni teacher != v6.
-python scripts/train_bc.py \
-  --data ./data/pimc_teacher_v7.jsonl \
-  --out ./data/models/pimc_distill_v7_disagree_candidate.npz \
-  --encoder-version v3 \
-  --model mlp \
-  --init ./data/models/best_a2c_v6.npz \
-  --bc-anchor ./data/models/best_a2c_v6.npz \
-  --bc-anchor-beta 0.20 \
-  --filter-disagree-with-model ./data/models/best_a2c_v6.npz \
-  --inference-overkill-guard
-```
+**Distillazione PIMC — nota storica (ramo chiuso).** L'idea di comprimere le mosse della search
+PIMC in una policy reattiva via BC è stata tentata due volte (giugno su v6, luglio come iterazione-0
+di Expert Iteration su v7) e chiusa entrambe le volte con esito NEGATIVO e diagnosi: la
+cross-entropy su mosse-argmax è un operatore lossy (una MLP hidden=512 memorizza il train al ~100%
+e resta al 56–57% in validation). Gli script (`generate_pimc_teacher_dataset.py`, i flag
+`--filter-disagree-with-model`, `--soft-labels`) restano utilizzabili per esperimenti, ma la strada
+consigliata per sfruttare la search è usarla come **avversario di training** (è così che sono nati
+v7 e v8) o direttamente a runtime (`bc_model_pimc_belief_64x10`). Dettagli e numeri:
+`docs/plans/belief-expert-iteration.md` e `docs/diario/06-search-endgame.md`.
 
 **Value learning / V-lookahead**: alternativa alla distillazione policy PIMC. Invece di comprimere l'argmax della
 search in una policy reattiva, si allena un value model scalare `V(observation)` e si misura se ordina le carte come
@@ -437,87 +416,37 @@ python scripts/generate_value_dataset_numba.py \
 python scripts/train_value.py \
   --data ./data/value/value_v7_solver_eps10_window_1M_seed20260701.npz \
   --out ./data/models/value_v1_h128_v7_window1M_seed20260701.npz \
-  --encoder-version v3 \
   --hidden-dim 128 \
   --target residual \
   --loss huber \
   --epochs 30
 
-# Percorso decision-aligned: richiede diagnostica PIMC generata con la stessa policy base del candidato.
-python scripts/generate_pimc_teacher_dataset.py \
-  --model ./data/models/best_a2c_v8.npz \
-  --out ./data/pimc_teacher_v7_d64_u8_20k_seed20260707.jsonl \
-  --num-examples 20000 \
-  --max-games 5000 \
-  --seed 20260707 \
-  --determinizations 64 \
-  --max-unknown-cards 8 \
-  --only-pimc-window
-
-python scripts/generate_pimc_leaf_value_dataset.py \
-  --data ./data/pimc_teacher_v7_d64_u8_20k_seed20260707.jsonl \
-  --policy-model ./data/models/best_a2c_v8.npz \
-  --out ./data/value/pimc_leaf_value_v7_d64_u8_20k_seed20260707.npz \
-  --max-roots 20000 \
-  --samples-per-root 1 \
-  --seed 20260707
-
-python scripts/train_value_pairwise.py \
-  --data ./data/value/pimc_leaf_value_v7_d64_u8_20k_seed20260707.npz \
-  --out ./data/models/value_leaf_pairwise_ft_v0_v7_d64_u8_20k_seed20260707.npz \
-  --hidden-dim 128 \
-  --init-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz \
-  --epochs 20 \
-  --lr 1e-4 \
-  --pairwise-beta 0.2
-
-python scripts/evaluate_value_lookahead_pair.py \
-  --policy-model ./data/models/best_a2c_v8.npz \
-  --value-model-a ./data/models/value_leaf_pairwise_ft_v0_v7_d64_u8_20k_seed20260707.npz \
-  --value-model-b ./data/models/value_v0_h128_clean50k_seed20260701.npz \
-  --label-a value_leaf_pairwise_candidate \
-  --label-b value_v0 \
-  --num-games 4000 \
-  --seed 20260708
+# NOTA storica: il percorso "decision-aligned" (teacher PIMC -> value pairwise) è stato
+# esplorato e chiuso con esito NEGATIVO (vedi docs/plans e report modelli): resta nei
+# commit per riferimento, non è una ricetta consigliata.
 
 # Percorso leggibile/didattico precedente, utile per smoke o debug record-per-record.
 python scripts/generate_value_dataset.py \
   --agent bc_model_hybrid_endgame \
-  --model ./data/models/best_a2c_v6.npz \
+  --model ./data/models/best_a2c_v8.npz \
   --epsilon 0.10 \
-  --label-mode v6-continuation \
-  --num-games 50000 \
-  --out ./data/value/value_v6_solver_eps10_clean_50k.jsonl \
-  --seed 20260701
+  --num-games 5000 \
+  --out ./data/value/value_dataset_didattico.jsonl \
+  --seed 42
 
 python scripts/train_value.py \
-  --data ./data/value/value_v6_solver_eps10_clean_50k.jsonl \
-  --out ./data/models/value_v0_h128_clean50k.npz \
-  --encoder-version v3 \
+  --data ./data/value/value_dataset_didattico.jsonl \
+  --encoder-version v4 \
+  --out ./data/models/value_didattico.npz \
   --hidden-dim 128 \
   --target residual \
   --loss huber \
   --epochs 30
 
-python scripts/evaluate_value_ranking.py \
-  --data ./data/pimc_teacher_diag_175k_d64_u8_seed20260630.jsonl \
-  --value-model ./data/models/value_v0_h128_clean50k.npz \
-  --continuation-agent bc_model_hybrid_endgame \
-  --continuation-model ./data/models/best_a2c_v6.npz \
-  --determinizations 8 \
-  --max-records 5000
-
 python scripts/evaluate_value_lookahead.py \
-  --policy-model ./data/models/best_a2c_v6.npz \
-  --value-model ./data/models/value_v0_h128_clean50k.npz \
+  --policy-model ./data/models/best_a2c_v8.npz \
+  --value-model ./data/models/value_didattico.npz \
   --num-games 2000 \
-  --determinizations 8 \
-  --max-unknown-cards 8
-
-python scripts/evaluate_value_lookahead_quality.py \
-  --policy-model ./data/models/best_a2c_v6.npz \
-  --value-model ./data/models/value_v0_h128_clean50k.npz \
-  --benchmark small \
   --determinizations 8 \
   --max-unknown-cards 8
 ```
@@ -547,17 +476,25 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 Il modello consigliato è **`data/models/best_a2c_v8.npz`** (encoder v4 con memoria delle prese, hidden 256 via widening Net2Net, guard anti‑overkill ON), promosso perché batte `best_a2c_v7` head‑to‑head sul big holdout appaiato (+0.89, CI95 +0.74..+1.05 su 100k). In UI, quando disponibile, il default è `bc_model`: v8 puro, senza solver/search aggiunti. L'avversario avanzato più forte è `bc_model_pimc_belief_64x10`: search PIMC con 64 determinizzazioni pesate dalla **belief network** (stima del contenuto della mano avversaria dedotta dal comportamento) nella finestra delle ultime 10 carte ignote — batte v8+solver di +3.66 punti/partita (CI +3.32..+4.00 su 4k). Resta selezionabile anche `bc_model_value_lookahead_8x8` (+2.12, più leggero lato CPU). `best_a2c_v7.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v8 è in `PLAN.md` e in `docs/plans/belief-expert-iteration.md`.
 
-Il ramo corrente usa `best_a2c_v7.npz` come modello consigliato e salva `ai_action` in modalità dataset per auditare le mosse IA/search. Per abilitare `bc_model_value_lookahead_8x8` serve anche il value model `value_v0_h128_clean50k_seed20260701.npz` in `BRISCOLA_MODELS_DIR`; il catalogo modelli UI non lo mostra come policy selezionabile perché è un asset interno del lookahead. Il provisioning scarica la policy consigliata e, se configurate le env dedicate, anche il value model.
+Gli agenti search richiedono asset ausiliari in `BRISCOLA_MODELS_DIR`: il value model per
+`bc_model_value_lookahead_8x8` e la belief network per `bc_model_pimc_belief_64x10`. Il catalogo
+modelli UI **non** li mostra come policy selezionabili (sono asset interni, filtrati per formato).
+Il provisioning allo startup scarica policy consigliata, value e belief dalle env dedicate:
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v7.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.19.0/best_a2c_v7.npz
-BRISCOLA_MODEL_SHA256=89df3bc4f61a09972a13ddf7a0fea3f740eb1d296a8a8d85f4a942d8e6aeafe3
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v8.npz
+BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.22.0/best_a2c_v8.npz
+BRISCOLA_MODEL_SHA256=1d44fd2f817fce93a6e7839f3b1dfad5c85212a2c68201c16fd991ddaf73722c
 BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
 BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
+BRISCOLA_BELIEF_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.23.0/belief_v0_h128_50k_seed20260702.npz
+BRISCOLA_BELIEF_MODEL_SHA256=4100b23b65a5566e047230ced665b91eef1942ea31e4a4cbe201b64545e7d035
 ```
 
-Il provisioning è best-effort: se un download fallisce l'app parte comunque, ma `/version` espone `recommended_model_present` e `value_lookahead_model_present` per verificare il deploy. Su ambienti con disco limitato (es. 512 MB) evita di rendere disponibili troppi `.npz` contemporaneamente. Se vuoi mantenere anche `best_a2c_v5.npz` selezionabile online, caricalo nella stessa directory modelli solo se il budget disco lo consente.
+Il provisioning è best-effort: se un download fallisce l'app parte comunque, ma `/version` espone
+`recommended_model_present`, `value_lookahead_model_present` e `pimc_belief_model_present` per
+verificare il deploy. Su ambienti con disco limitato evita di rendere disponibili troppi `.npz`
+contemporaneamente.
 
 ### Report progressione modelli
 
@@ -580,12 +517,16 @@ Esempio di confronto testa‑a‑testa tra due modelli:
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent0 bc_model --agent0-model ./data/models/best_a2c_v8.npz \
-  --agent1 bc_model --agent1-model ./data/models/best_a2c_v6.npz
+  --agent1 bc_model --agent1-model ./data/models/best_a2c_v7.npz
 ```
 
 ## Stato e roadmap
 
 Il gioco è **online** su <https://ai.briscola.dev> (deploy su FastAPI Cloud: stato partita su Redis, realtime via pub/sub, event log Postgres opzionale). Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
+
+La storia del progetto — scelte, errori e svolte, raccontati in tono divulgativo — è il **diario di
+bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`), con
+approfondimenti tecnici per capitolo in `docs/diario/`.
 
 ## Licenza
 
