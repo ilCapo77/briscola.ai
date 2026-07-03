@@ -269,6 +269,9 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
             max_unknown_cards=_PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS,
             use_endgame_solver=True,
             belief_model=belief_model,
+            # Search JIT: stessa semantica della search python, ~2x meno CPU per mossa
+            # (equivalenza di forza verificata: +3.38 vs +3.83 python, CI sovrapposte).
+            use_numba_search=True,
             name="bc_model_pimc_belief_64x10",
         )
 

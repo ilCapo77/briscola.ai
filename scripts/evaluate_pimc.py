@@ -79,6 +79,11 @@ def main() -> int:
         default=0.10,
         help="Frazione di uniforme mescolata ai pesi belief (pavimento anti punti-ciechi). Default: 0.10.",
     )
+    parser.add_argument(
+        "--numba-search",
+        action="store_true",
+        help="Usa il kernel JIT per la search dell'agente A (stessa semantica, ~20-50x piu' veloce).",
+    )
     parser.add_argument("--out-json", default="", help="Path JSON opzionale per salvare il risultato.")
 
     args = parser.parse_args()
@@ -94,6 +99,7 @@ def main() -> int:
         use_endgame_solver=not args.disable_endgame_solver,
         belief_model=belief_model,
         belief_uniform_mix=args.belief_uniform_mix,
+        use_numba_search=bool(args.numba_search),
         name=f"pimc({model_path.name}{belief_label})",
     )
     if args.opponent == "control":

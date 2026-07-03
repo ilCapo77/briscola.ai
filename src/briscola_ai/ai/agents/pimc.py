@@ -514,6 +514,10 @@ class PIMCAgent:
     # con i pesi della belief network invece che uniformemente.
     belief_model: MLPBeliefModel | None = None
     belief_uniform_mix: float = 0.10
+    # Search JIT (kernel `ai/numba/pimc.py`): stessa semantica della search python
+    # (~20-50x piu' veloce). Richiede un rollout_agent MLP (`BCModelAgent`); su stati
+    # non determinizzabili il kernel ritorna -1 e si degrada alla search python.
+    use_numba_search: bool = False
     name: str = "pimc"
     metrics: PIMCSearchStats = field(default_factory=PIMCSearchStats, repr=False, compare=False)
     last_search_diagnostics: PIMCSearchDiagnostics | None = field(
@@ -522,6 +526,92 @@ class PIMCAgent:
         repr=False,
         compare=False,
     )
+
+    def _choose_with_numba_search(self, observation: PlayerObservation, *, rng: random.Random) -> int | None:
+        """
+        Path JIT della search: costruisce gli array numerici dall'osservazione e delega
+        al kernel `choose_pimc_card_numba_arrays`. Ritorna None quando il kernel non e'
+        applicabile (rollout non-MLP, stato non determinizzabile): il chiamante prosegue
+        con la search python, identica in semantica.
+        """
+        from ..models.bc_model import BCModelAgent, MLPBCModel
+
+        rollout = self.rollout_agent
+        if not isinstance(rollout, BCModelAgent) or not isinstance(rollout.model, MLPBCModel):
+            return None
+        if rollout.model.has_belief_input:
+            return None  # policy 409: il rollout JIT ibrido non supporta l'input belief
+
+        import numpy as np
+
+        from ..numba.pimc import choose_pimc_card_numba_arrays
+
+        my_index = observation.player_index
+        my_hand = np.full(3, -1, dtype=np.int64)
+        for i, card in enumerate(observation.hand):
+            my_hand[i] = card_to_id(card)
+
+        table_cards = np.full(2, -1, dtype=np.int64)
+        table_players = np.full(2, -1, dtype=np.int64)
+        for i, (card, seat) in enumerate(observation.table_cards):
+            table_cards[i] = card_to_id(card)
+            table_players[i] = int(seat)
+
+        trick_hist = np.zeros((20, 5), dtype=np.int64)
+        num_tricks = min(len(observation.trick_history), 20)
+        for i in range(num_tricks):
+            record = observation.trick_history[i]
+            (lead_card, lead_player), (resp_card, _resp_player) = record.cards
+            trick_hist[i, 0] = card_to_id(lead_card)
+            trick_hist[i, 1] = int(lead_player)
+            trick_hist[i, 2] = card_to_id(resp_card)
+            trick_hist[i, 3] = int(record.winner_index)
+            trick_hist[i, 4] = int(record.points)
+
+        weights = np.ones(40, dtype=np.float64)
+        if self.belief_model is not None:
+            weight_map = belief_card_weights(self.belief_model, observation, uniform_mix=self.belief_uniform_mix)
+            weights[:] = 0.0
+            for card_id, w in weight_map.items():
+                weights[card_id] = w
+
+        trump_card = observation.trump_card
+        assert trump_card is not None  # gia' validato dal chiamante
+
+        search_started = time.perf_counter()
+        card_index = int(
+            choose_pimc_card_numba_arrays(
+                rollout.model.w1,
+                rollout.model.b1,
+                rollout.model.w2,
+                rollout.model.b2,
+                bool(rollout.overkill_guard_enabled),
+                weights,
+                my_hand,
+                len(observation.hand),
+                int(observation.players_hand_sizes[1 - my_index]),
+                int(observation.deck_size),
+                table_cards,
+                table_players,
+                len(observation.table_cards),
+                int(my_index),
+                card_to_id(trump_card),
+                np.asarray(observation.players_points, dtype=np.int64),
+                np.asarray(observation.out_of_play_cards_onehot, dtype=np.int64),
+                np.asarray(observation.seen_cards_onehot, dtype=np.int64),
+                trick_hist,
+                num_tricks,
+                max(1, int(self.num_determinizations)),
+                rng.randrange(0, 2**31),
+            )
+        )
+        if card_index < 0:
+            return None  # stato non determinizzabile: search python (che sapra' fallire con metrica)
+        determinations = max(1, int(self.num_determinizations))
+        self.metrics.successful_determinizations += determinations
+        self.metrics.completed_rollouts += determinations * len(observation.hand)
+        self.metrics.search_elapsed_seconds += time.perf_counter() - search_started
+        return card_index
 
     def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
         if not observation.hand:
@@ -550,6 +640,10 @@ class PIMCAgent:
             return _safe_agent_card_index(self.fallback, observation, rng=rng, metrics=self.metrics)
 
         self.metrics.search_decisions += 1
+        if self.use_numba_search:
+            fast_index = self._choose_with_numba_search(observation, rng=rng)
+            if fast_index is not None:
+                return fast_index
         search_started = time.perf_counter()
         legal_indices = list(range(len(observation.hand)))
         scores = [0.0 for _ in legal_indices]

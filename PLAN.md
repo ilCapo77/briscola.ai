@@ -89,11 +89,15 @@ Debito minore residuo (nessuno urgente; prenderlo quando si tocca l'area):
 ### 4. Nuovo Ciclo Di Training Solo Con Nuova Ipotesi
 
 Tutte le leve lato allievo e lato maestro-stimato sono state misurate e chiuse (v. Decisioni).
-L'unica strada aperta con headroom dimostrato è **PIMC-as-teacher nei kernel Numba**
-(sparring contro la search a rollout, oracle +3.76): in frigo, perché il rendimento atteso
-di una generazione di sparring è una frazione dell'edge del maestro (~+0.5–1) a fronte di
-un cantiere kernel significativo. Riaprire solo con una ragione di prodotto per volere la
-policy pura più forte. PPO/GAE: bassa priorità, nessuna evidenza che serva.
+
+**Kernel PIMC JIT (2026-07-03, v0.25.0)**: la search PIMC belief è stata portata su Numba
+(`ai/numba/pimc.py`): forza equivalente al python (+3.38 vs +3.83 contro lo stesso
+controllo, CI sovrapposte), CPU **~2× più economica** per mossa (37ms vs 73ms) — non i
+20-50× sperati, perché il costo python era già dominato dalle matmul BLAS di numpy.
+La variante di produzione usa la search JIT. Conseguenza per PIMC-as-teacher: a ~37ms/mossa
+resta impraticabile come opponent di training su milioni di partite a 64 det (config ridotte
+tipo 16×8 sarebbero ~fattibili overnight, con edge maestro però più piccolo). Il ramo resta
+in frigo con questa quantificazione. PPO/GAE: bassa priorità, nessuna evidenza che serva.
 
 ## Comandi Utili
 
