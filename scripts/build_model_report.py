@@ -1062,7 +1062,7 @@ def drawing_xml() -> str:
         'xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main">'
         "<xdr:twoCellAnchor>"
         "<xdr:from><xdr:col>5</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>3</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:from>"
-        "<xdr:to><xdr:col>13</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>20</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
+        "<xdr:to><xdr:col>16</xdr:col><xdr:colOff>0</xdr:colOff><xdr:row>26</xdr:row><xdr:rowOff>0</xdr:rowOff></xdr:to>"
         '<xdr:graphicFrame macro="">'
         '<xdr:nvGraphicFramePr><xdr:cNvPr id="2" name="Progression Chart"/>'
         "<xdr:cNvGraphicFramePr/></xdr:nvGraphicFramePr>"
@@ -1125,13 +1125,13 @@ def chart_xml(progress_row_count: int) -> str:
         "<c:plotArea><c:layout/>"
         '<c:lineChart><c:grouping val="standard"/>'
         '<c:ser><c:idx val="0"/><c:order val="0"/>'
-        "<c:tx><c:v>Big holdout vs heuristic_v1</c:v></c:tx>"
+        "<c:tx><c:v>vs heuristic_v1 (metro fisso)</c:v></c:tx>"
         '<c:marker><c:symbol val="circle"/><c:size val="7"/></c:marker>'
         f"<c:cat><c:strRef><c:f>{cats_ref}</c:f></c:strRef></c:cat>"
         f"<c:val><c:numRef><c:f>{vals_ref}</c:f></c:numRef></c:val>"
         "</c:ser>"
         '<c:ser><c:idx val="1"/><c:order val="1"/>'
-        "<c:tx><c:v>Cumulative strength index (sum of H2H)</c:v></c:tx>"
+        "<c:tx><c:v>Indice cumulato (somma H2H)</c:v></c:tx>"
         '<c:marker><c:symbol val="diamond"/><c:size val="7"/></c:marker>'
         f"<c:cat><c:strRef><c:f>{cats_ref}</c:f></c:strRef></c:cat>"
         f"<c:val><c:numRef><c:f>{cumul_ref}</c:f></c:numRef></c:val>"
@@ -1146,7 +1146,9 @@ def chart_xml(progress_row_count: int) -> str:
         '<c:tickLblPos val="nextTo"/><c:crossAx val="100"/><c:crosses val="autoZero"/>'
         '<c:crossBetween val="between"/></c:valAx>'
         "</c:plotArea>"
-        '<c:legend><c:legendPos val="b"/><c:layout/></c:legend>'
+        '<c:legend><c:legendPos val="b"/><c:layout/><c:overlay val="0"/>'
+        '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100"/></a:pPr>'
+        '<a:endParaRPr lang="it-IT"/></a:p></c:txPr></c:legend>'
         '<c:plotVisOnly val="1"/>'
         "</c:chart>"
         "</c:chartSpace>"
