@@ -76,6 +76,59 @@ def _weighted_sample_without_replacement_numba(
 
 
 @njit(cache=True)
+def _belief_card_weights_numba(
+    v4_features: np.ndarray,
+    belief_w1: np.ndarray,
+    belief_b1: np.ndarray,
+    belief_w2: np.ndarray,
+    belief_b2: np.ndarray,
+    in_my_hand: np.ndarray,
+    out_of_play_cards: np.ndarray,
+    uniform_mix: float,
+    out_weights: np.ndarray,
+) -> None:
+    """
+    Pesi di campionamento per-carta dalla belief network (replica JIT di
+    `belief_card_weights`): sigmoid sulle sole carte IGNOTE, normalizzate a somma 1,
+    mixate con l'uniforme (pavimento anti punti-ciechi). `out_weights[40]` mutato,
+    0 per le carte non ignote; belief degenere (somma 0) -> uniforme.
+    """
+    hidden_dim = belief_w1.shape[1]
+    feature_dim = belief_w1.shape[0]
+    hidden = np.empty(hidden_dim, dtype=np.float64)
+    for h_idx in range(hidden_dim):
+        value = float(belief_b1[h_idx])
+        for f_idx in range(feature_dim):
+            value += float(v4_features[f_idx]) * float(belief_w1[f_idx, h_idx])
+        hidden[h_idx] = value if value > 0.0 else 0.0
+
+    n_unknown = 0
+    total = 0.0
+    for card_id in range(ACTION_DIM):
+        out_weights[card_id] = 0.0
+        if in_my_hand[card_id] == 0 and out_of_play_cards[card_id] == 0:
+            logit = float(belief_b2[card_id])
+            for h_idx in range(hidden_dim):
+                logit += hidden[h_idx] * float(belief_w2[h_idx, card_id])
+            prob = 1.0 / (1.0 + np.exp(-logit))
+            out_weights[card_id] = prob
+            total += prob
+            n_unknown += 1
+
+    if n_unknown == 0:
+        return
+    if total <= 0.0:
+        for card_id in range(ACTION_DIM):
+            if in_my_hand[card_id] == 0 and out_of_play_cards[card_id] == 0:
+                out_weights[card_id] = 1.0
+        return
+    uniform = 1.0 / n_unknown
+    for card_id in range(ACTION_DIM):
+        if out_weights[card_id] > 0.0 or (in_my_hand[card_id] == 0 and out_of_play_cards[card_id] == 0):
+            out_weights[card_id] = (1.0 - uniform_mix) * (out_weights[card_id] / total) + uniform_mix * uniform
+
+
+@njit(cache=True)
 def choose_pimc_card_numba_arrays(
     w1: np.ndarray,
     b1: np.ndarray,
@@ -109,8 +162,12 @@ def choose_pimc_card_numba_arrays(
     il delta punti finale dal punto di vista di `my_index`. Vince la media piu' alta.
 
     Ritorna -1 se lo stato non e' determinizzabile (il chiamante usa il fallback).
+
+    `seed >= 0` risemina lo stream numpy (riproducibilita' runtime); `seed < 0` continua
+    lo stream corrente (uso nel collector di training, che ha gia' il suo seeding).
     """
-    np.random.seed(seed)
+    if seed >= 0:
+        np.random.seed(seed)
 
     # ---- pool ignoto: non in mano mia, non fuori gioco ----
     in_my_hand = np.zeros(ACTION_DIM, dtype=np.int64)

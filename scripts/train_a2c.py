@@ -70,6 +70,7 @@ from briscola_ai.ai.numba.observation import encode_fast_observation_numba_2p
 from briscola_ai.ai.numba.types import NumbaA2CBatch, NumbaA2CTrajectory
 from briscola_ai.ai.numba.value_lookahead import (
     OPPONENT_MODE_MODEL,
+    OPPONENT_MODE_PIMC_BELIEF,
     OPPONENT_MODE_RULE,
     OPPONENT_MODE_VALUE_LOOKAHEAD,
     collect_a2c_batch_numba_value_lookahead_2p,
@@ -473,8 +474,51 @@ def _load_fast_numba_value_lookahead_opponent(
     )
 
 
-def _fast_numba_opponent_mode_for_name(name: str, *, value_lookahead_name: str | None) -> int:
+def _load_fast_numba_pimc_belief_opponent(
+    *,
+    opponent_model_path: str,
+    opponent_belief_model_path: str,
+    max_unknown_cards: int,
+) -> FastNumbaValueLookaheadOpponent:
+    """
+    Carica il maestro `bc_model_pimc_belief` per il rollout A2C Numba (mode 3).
+
+    Riusa il container del value-lookahead con un value model DUMMY (la modalita' PIMC
+    non lo legge): policy base MLP + belief network per pesare le determinizzazioni.
+    La finestra riusa `--opponent-value-max-unknown-cards`.
+    """
+    if not opponent_model_path.strip():
+        raise ValueError("`bc_model_pimc_belief` nel fast rollout richiede `--opponent-model <policy.npz>`.")
+    agent = build_agent("bc_model", model_path=Path(opponent_model_path.strip()))
+    if not isinstance(agent, BCModelAgent) or not isinstance(agent.model, MLPBCModel):
+        raise ValueError("`bc_model_pimc_belief` richiede una policy base `.npz` MLP.")
+    import numpy as _np
+
+    from briscola_ai.ai.models.value_model import MLPValueModel
+
+    dummy_value = MLPValueModel(
+        w1=_np.zeros((int(agent.model.feature_dim), 1), dtype=_np.float32),
+        b1=_np.zeros(1, dtype=_np.float32),
+        w2=_np.zeros(1, dtype=_np.float32),
+        b2=0.0,
+        metadata={"format": "value_mlp_v1", "note": "dummy per opponent PIMC (mode 3)"},
+    )
+    if int(max_unknown_cards) < 0:
+        raise ValueError("--opponent-value-max-unknown-cards deve essere >= 0")
+    return FastNumbaValueLookaheadOpponent(
+        agent=agent,
+        model=agent.model,
+        value_model=dummy_value,
+        max_unknown_cards=int(max_unknown_cards),
+    )
+
+
+def _fast_numba_opponent_mode_for_name(
+    name: str, *, value_lookahead_name: str | None, pimc_belief_name: str | None = None
+) -> int:
     """Codifica il tipo opponent per il collector A2C value-aware."""
+    if pimc_belief_name is not None and name == pimc_belief_name:
+        return OPPONENT_MODE_PIMC_BELIEF
     if value_lookahead_name is not None and name == value_lookahead_name:
         return OPPONENT_MODE_VALUE_LOOKAHEAD
     if name in {"best_a2c", "bc_model"}:
@@ -909,6 +953,20 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--opponent-belief-model",
+        default="",
+        help=(
+            "Belief network `.npz` quando `--opponent bc_model_pimc_belief` (maestro PIMC nel "
+            "fast rollout Numba): pesa le determinizzazioni della search del maestro."
+        ),
+    )
+    parser.add_argument(
+        "--opponent-pimc-determinizations",
+        type=int,
+        default=32,
+        help="Determinizzazioni della search del maestro PIMC (default 32).",
+    )
+    parser.add_argument(
         "--opponent-value-model",
         default=str(Path("data/models") / VALUE_LOOKAHEAD_MODEL_ID),
         help=("Path al value model `.npz` quando l'opponent è `bc_model_value_lookahead_8x8` nel fast rollout Numba."),
@@ -1107,6 +1165,8 @@ def main() -> int:
     fast_numba_value_lookahead_opponent: FastNumbaValueLookaheadOpponent | None = None
     fast_numba_model_mix_name: str | None = None
     fast_numba_value_mix_name: str | None = None
+    fast_numba_pimc_belief_name: str | None = None
+    fast_numba_opponent_belief = None
     opponent_mix_raw = args.opponent_mix.strip()
     if opponent_mix_raw:
         items = parse_opponent_mix(opponent_mix_raw)
@@ -1194,7 +1254,25 @@ def main() -> int:
         opponent = agents_by_name[items[0].name]
     else:
         opponent_name = str(args.opponent)
-        if rollout_engine == "fast" and opponent_name == "bc_model_value_lookahead_8x8":
+        if rollout_engine == "fast" and opponent_name == "bc_model_pimc_belief":
+            if fast_rollout != "numba":
+                raise ValueError("Opponent PIMC belief nel fast path richiede `--fast-rollout numba`.")
+            belief_path = str(args.opponent_belief_model).strip()
+            if not belief_path:
+                raise ValueError("`--opponent bc_model_pimc_belief` richiede `--opponent-belief-model <path.npz>`.")
+            fast_numba_pimc_belief_name = opponent_name
+            fast_numba_opponent_belief = load_belief_model_npz(belief_path)
+            fast_numba_value_lookahead_opponent = _load_fast_numba_pimc_belief_opponent(
+                opponent_model_path=str(args.opponent_model),
+                opponent_belief_model_path=belief_path,
+                max_unknown_cards=int(args.opponent_value_max_unknown_cards),
+            )
+            fast_numba_model_opponent = FastNumbaModelOpponent(
+                agent=fast_numba_value_lookahead_opponent.agent,
+                model=fast_numba_value_lookahead_opponent.model,
+            )
+            opponent = NamedAgentProxy(opponent_name, fast_numba_value_lookahead_opponent.agent)
+        elif rollout_engine == "fast" and opponent_name == "bc_model_value_lookahead_8x8":
             if fast_rollout != "numba":
                 raise ValueError("Opponent value-lookahead nel fast path richiede `--fast-rollout numba`.")
             fast_numba_value_mix_name = opponent_name
@@ -1509,6 +1587,7 @@ def main() -> int:
                                         _fast_numba_opponent_mode_for_name(
                                             name,
                                             value_lookahead_name=fast_numba_value_mix_name,
+                                            pimc_belief_name=fast_numba_pimc_belief_name,
                                         )
                                         for name in sampled_names
                                     ],
@@ -1520,6 +1599,7 @@ def main() -> int:
                                         if _fast_numba_opponent_mode_for_name(
                                             name,
                                             value_lookahead_name=fast_numba_value_mix_name,
+                                            pimc_belief_name=fast_numba_pimc_belief_name,
                                         )
                                         == OPPONENT_MODE_RULE
                                         else 0
@@ -1546,6 +1626,7 @@ def main() -> int:
                                 mode = _fast_numba_opponent_mode_for_name(
                                     current_opponent.name,
                                     value_lookahead_name=fast_numba_value_mix_name,
+                                    pimc_belief_name=fast_numba_pimc_belief_name,
                                 )
                                 opponent_modes = np.full(batch_size, mode, dtype=np.int64)
                             if opponent_codes is None:
@@ -1556,6 +1637,19 @@ def main() -> int:
                                 )
                                 opponent_codes = np.full(batch_size, code, dtype=np.int64)
                             numba_batch = collect_a2c_batch_numba_value_lookahead_2p(
+                                opponent_belief_w1=fast_numba_opponent_belief.w1
+                                if fast_numba_opponent_belief is not None
+                                else None,
+                                opponent_belief_b1=fast_numba_opponent_belief.b1
+                                if fast_numba_opponent_belief is not None
+                                else None,
+                                opponent_belief_w2=fast_numba_opponent_belief.w2
+                                if fast_numba_opponent_belief is not None
+                                else None,
+                                opponent_belief_b2=fast_numba_opponent_belief.b2
+                                if fast_numba_opponent_belief is not None
+                                else None,
+                                opponent_pimc_determinizations=int(args.opponent_pimc_determinizations),
                                 policy_belief_w1=policy_belief.w1 if policy_belief is not None else None,
                                 policy_belief_b1=policy_belief.b1 if policy_belief is not None else None,
                                 policy_belief_w2=policy_belief.w2 if policy_belief is not None else None,
@@ -1666,9 +1760,23 @@ def main() -> int:
                         mode = _fast_numba_opponent_mode_for_name(
                             current_opponent.name,
                             value_lookahead_name=fast_numba_value_mix_name,
+                            pimc_belief_name=fast_numba_pimc_belief_name,
                         )
                         code = numba_agent_code(current_opponent.name) if mode == OPPONENT_MODE_RULE else 0
                         numba_traj = collect_a2c_trajectory_numba_value_lookahead_2p(
+                            opponent_belief_w1=fast_numba_opponent_belief.w1
+                            if fast_numba_opponent_belief is not None
+                            else None,
+                            opponent_belief_b1=fast_numba_opponent_belief.b1
+                            if fast_numba_opponent_belief is not None
+                            else None,
+                            opponent_belief_w2=fast_numba_opponent_belief.w2
+                            if fast_numba_opponent_belief is not None
+                            else None,
+                            opponent_belief_b2=fast_numba_opponent_belief.b2
+                            if fast_numba_opponent_belief is not None
+                            else None,
+                            opponent_pimc_determinizations=int(args.opponent_pimc_determinizations),
                             policy_belief_w1=policy_belief.w1 if policy_belief is not None else None,
                             policy_belief_b1=policy_belief.b1 if policy_belief is not None else None,
                             policy_belief_w2=policy_belief.w2 if policy_belief is not None else None,

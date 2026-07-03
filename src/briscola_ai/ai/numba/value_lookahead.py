@@ -37,6 +37,7 @@ from .observation import (
     encode_fast_observation_arrays_numba,
     encode_fast_observation_arrays_v4_numba,
 )
+from .pimc import _belief_card_weights_numba, choose_pimc_card_numba_arrays
 from .types import NumbaA2CBatch, NumbaA2CTrajectory
 
 _MAX_DECK_SIZE_2P = 34
@@ -45,6 +46,7 @@ _TABLE_CAPACITY_2P = 2
 OPPONENT_MODE_RULE = 0
 OPPONENT_MODE_MODEL = 1
 OPPONENT_MODE_VALUE_LOOKAHEAD = 2
+OPPONENT_MODE_PIMC_BELIEF = 3
 
 
 def arrays_from_game_state_for_value_lookahead(
@@ -755,6 +757,12 @@ def _choose_training_opponent_card_index_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    opponent_belief_w1: np.ndarray,
+    opponent_belief_b1: np.ndarray,
+    opponent_belief_w2: np.ndarray,
+    opponent_belief_b2: np.ndarray,
+    opponent_pimc_determinizations: int,
+    opponent_belief_uniform_mix: float,
     opponent_overkill_guard: bool,
     hands: np.ndarray,
     hand_sizes: np.ndarray,
@@ -771,7 +779,90 @@ def _choose_training_opponent_card_index_numba(
     trick_hist: np.ndarray,
     num_tricks: int,
 ) -> int:
-    """Dispatch dell'avversario nel collector A2C con supporto V-lookahead determinized."""
+    """Dispatch dell'avversario nel collector A2C: rule / model / V-lookahead / PIMC belief."""
+    if opponent_mode == OPPONENT_MODE_PIMC_BELIEF:
+        # Maestro PIMC belief: la search vede SOLO l'informazione lecita del suo seat
+        # (la propria mano + pubblico); la finestra riusa `value_max_unknown_cards`.
+        if deck_size == 0:
+            # Finale a informazione completa deducibile: solver esatto, come nel runtime.
+            solver_index, _delta = choose_endgame_card_numba_arrays(
+                hands,
+                hand_sizes,
+                points,
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+            )
+            if 0 <= solver_index < hand_sizes[current_turn]:
+                return int(solver_index)
+        unknown_live_cards = int(hand_sizes[1 - current_turn]) + int(deck_size)
+        if deck_size > 0 and unknown_live_cards <= int(value_max_unknown_cards):
+            my_hand = np.full(3, -1, dtype=np.int64)
+            my_hand_size = int(hand_sizes[current_turn])
+            for i in range(my_hand_size):
+                my_hand[i] = hands[current_turn, i]
+            in_my_hand = np.zeros(ACTION_DIM, dtype=np.int64)
+            for i in range(my_hand_size):
+                in_my_hand[my_hand[i]] = 1
+
+            v4_features, _mask = encode_fast_observation_arrays_v4_numba(
+                hands,
+                hand_sizes,
+                points,
+                table_cards,
+                table_size,
+                deck_size,
+                current_turn,
+                trump_card,
+                current_turn,
+                seen_cards,
+                out_of_play_cards,
+                trick_hist,
+                num_tricks,
+            )
+            weights = np.empty(ACTION_DIM, dtype=np.float64)
+            _belief_card_weights_numba(
+                v4_features,
+                opponent_belief_w1,
+                opponent_belief_b1,
+                opponent_belief_w2,
+                opponent_belief_b2,
+                in_my_hand,
+                out_of_play_cards,
+                opponent_belief_uniform_mix,
+                weights,
+            )
+            card_index = choose_pimc_card_numba_arrays(
+                opponent_w1,
+                opponent_b1,
+                opponent_w2,
+                opponent_b2,
+                opponent_overkill_guard,
+                weights,
+                my_hand,
+                my_hand_size,
+                int(hand_sizes[1 - current_turn]),
+                int(deck_size),
+                table_cards,
+                table_players,
+                table_size,
+                current_turn,
+                trump_card,
+                points,
+                out_of_play_cards,
+                seen_cards,
+                trick_hist,
+                num_tricks,
+                opponent_pimc_determinizations,
+                -1,
+            )
+            if 0 <= card_index < my_hand_size:
+                return int(card_index)
+        # Fuori finestra o kernel non applicabile: stesso fallback MLP del runtime.
+        opponent_mode = OPPONENT_MODE_MODEL
+
     if opponent_mode == OPPONENT_MODE_VALUE_LOOKAHEAD:
         unknown_live_cards = int(hand_sizes[1 - current_turn]) + int(deck_size)
         if deck_size == 0 or unknown_live_cards <= int(value_max_unknown_cards):
@@ -877,6 +968,12 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    opponent_belief_w1: np.ndarray,
+    opponent_belief_b1: np.ndarray,
+    opponent_belief_w2: np.ndarray,
+    opponent_belief_b2: np.ndarray,
+    opponent_pimc_determinizations: int,
+    opponent_belief_uniform_mix: float,
     belief_enabled: bool,
     belief_w1: np.ndarray,
     belief_b1: np.ndarray,
@@ -956,6 +1053,12 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
                 value_target_scale,
                 value_target_is_residual,
                 value_max_unknown_cards,
+                opponent_belief_w1,
+                opponent_belief_b1,
+                opponent_belief_w2,
+                opponent_belief_b2,
+                opponent_pimc_determinizations,
+                opponent_belief_uniform_mix,
                 opponent_overkill_guard,
                 hands,
                 hand_sizes,
@@ -1077,6 +1180,12 @@ def _collect_mlp_policy_game_value_lookahead_opponent_into_numba(
                 value_target_scale,
                 value_target_is_residual,
                 value_max_unknown_cards,
+                opponent_belief_w1,
+                opponent_belief_b1,
+                opponent_belief_w2,
+                opponent_belief_b2,
+                opponent_pimc_determinizations,
+                opponent_belief_uniform_mix,
                 opponent_overkill_guard,
                 hands,
                 hand_sizes,
@@ -1155,6 +1264,12 @@ def _collect_mlp_policy_value_lookahead_game_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    opponent_belief_w1: np.ndarray,
+    opponent_belief_b1: np.ndarray,
+    opponent_belief_w2: np.ndarray,
+    opponent_belief_b2: np.ndarray,
+    opponent_pimc_determinizations: int,
+    opponent_belief_uniform_mix: float,
     belief_enabled: bool,
     belief_w1: np.ndarray,
     belief_b1: np.ndarray,
@@ -1215,6 +1330,12 @@ def _collect_mlp_policy_value_lookahead_game_numba(
             value_target_scale,
             value_target_is_residual,
             value_max_unknown_cards,
+            opponent_belief_w1,
+            opponent_belief_b1,
+            opponent_belief_w2,
+            opponent_belief_b2,
+            opponent_pimc_determinizations,
+            opponent_belief_uniform_mix,
             belief_enabled,
             belief_w1,
             belief_b1,
@@ -1274,6 +1395,12 @@ def _collect_mlp_policy_value_lookahead_batch_numba(
     value_target_scale: float,
     value_target_is_residual: bool,
     value_max_unknown_cards: int,
+    opponent_belief_w1: np.ndarray,
+    opponent_belief_b1: np.ndarray,
+    opponent_belief_w2: np.ndarray,
+    opponent_belief_b2: np.ndarray,
+    opponent_pimc_determinizations: int,
+    opponent_belief_uniform_mix: float,
     belief_enabled: bool,
     belief_w1: np.ndarray,
     belief_b1: np.ndarray,
@@ -1341,6 +1468,12 @@ def _collect_mlp_policy_value_lookahead_batch_numba(
             value_target_scale,
             value_target_is_residual,
             value_max_unknown_cards,
+            opponent_belief_w1,
+            opponent_belief_b1,
+            opponent_belief_w2,
+            opponent_belief_b2,
+            opponent_pimc_determinizations,
+            opponent_belief_uniform_mix,
             belief_enabled,
             belief_w1,
             belief_b1,
@@ -1445,6 +1578,12 @@ def collect_a2c_trajectory_numba_value_lookahead_2p(
     policy_belief_b1: np.ndarray | None = None,
     policy_belief_w2: np.ndarray | None = None,
     policy_belief_b2: np.ndarray | None = None,
+    opponent_belief_w1: np.ndarray | None = None,
+    opponent_belief_b1: np.ndarray | None = None,
+    opponent_belief_w2: np.ndarray | None = None,
+    opponent_belief_b2: np.ndarray | None = None,
+    opponent_pimc_determinizations: int = 32,
+    opponent_belief_uniform_mix: float = 0.10,
     overkill_penalty_beta: float = 0.0,
     overkill_low_lead_points_max: int = 2,
     overkill_penalty_mode: str = "flat",
@@ -1461,6 +1600,18 @@ def collect_a2c_trajectory_numba_value_lookahead_2p(
         belief_w2_arr,
         belief_b2_arr,
     ) = _prepare_policy_belief_arrays(w1, policy_belief_w1, policy_belief_b1, policy_belief_w2, policy_belief_b2)
+    # Belief del MAESTRO PIMC (opponent mode 3): array reali se dati, dummy altrimenti
+    # (il kernel non li legge negli altri mode). Nessun vincolo sulla dim della policy.
+    if opponent_belief_w1 is None:
+        opp_belief_w1_arr = np.zeros((1, 1), dtype=np.float32)
+        opp_belief_b1_arr = np.zeros(1, dtype=np.float32)
+        opp_belief_w2_arr = np.zeros((1, ACTION_DIM), dtype=np.float32)
+        opp_belief_b2_arr = np.zeros(ACTION_DIM, dtype=np.float32)
+    else:
+        opp_belief_w1_arr = np.ascontiguousarray(np.asarray(opponent_belief_w1, dtype=np.float32))
+        opp_belief_b1_arr = np.ascontiguousarray(np.asarray(opponent_belief_b1, dtype=np.float32))
+        opp_belief_w2_arr = np.ascontiguousarray(np.asarray(opponent_belief_w2, dtype=np.float32))
+        opp_belief_b2_arr = np.ascontiguousarray(np.asarray(opponent_belief_b2, dtype=np.float32))
     if float(overkill_penalty_beta) < 0.0:
         raise ValueError("overkill_penalty_beta deve essere >= 0")
     if int(overkill_low_lead_points_max) < 0:
@@ -1531,6 +1682,12 @@ def collect_a2c_trajectory_numba_value_lookahead_2p(
         float(value_target_scale),
         bool(value_target_is_residual),
         int(value_max_unknown_cards),
+        opp_belief_w1_arr,
+        opp_belief_b1_arr,
+        opp_belief_w2_arr,
+        opp_belief_b2_arr,
+        int(opponent_pimc_determinizations),
+        float(opponent_belief_uniform_mix),
         belief_enabled,
         belief_w1_arr,
         belief_b1_arr,
@@ -1587,6 +1744,12 @@ def collect_a2c_batch_numba_value_lookahead_2p(
     policy_belief_b1: np.ndarray | None = None,
     policy_belief_w2: np.ndarray | None = None,
     policy_belief_b2: np.ndarray | None = None,
+    opponent_belief_w1: np.ndarray | None = None,
+    opponent_belief_b1: np.ndarray | None = None,
+    opponent_belief_w2: np.ndarray | None = None,
+    opponent_belief_b2: np.ndarray | None = None,
+    opponent_pimc_determinizations: int = 32,
+    opponent_belief_uniform_mix: float = 0.10,
     overkill_penalty_beta: float = 0.0,
     overkill_low_lead_points_max: int = 2,
     overkill_penalty_mode: str = "flat",
@@ -1610,6 +1773,7 @@ def collect_a2c_batch_numba_value_lookahead_2p(
         (modes_arr == OPPONENT_MODE_RULE)
         | (modes_arr == OPPONENT_MODE_MODEL)
         | (modes_arr == OPPONENT_MODE_VALUE_LOOKAHEAD)
+        | (modes_arr == OPPONENT_MODE_PIMC_BELIEF)
     ):
         raise ValueError("opponent_modes contiene modalità non supportate")
     if int(value_max_unknown_cards) < 0:
@@ -1621,6 +1785,18 @@ def collect_a2c_batch_numba_value_lookahead_2p(
         belief_w2_arr,
         belief_b2_arr,
     ) = _prepare_policy_belief_arrays(w1, policy_belief_w1, policy_belief_b1, policy_belief_w2, policy_belief_b2)
+    # Belief del MAESTRO PIMC (opponent mode 3): array reali se dati, dummy altrimenti
+    # (il kernel non li legge negli altri mode). Nessun vincolo sulla dim della policy.
+    if opponent_belief_w1 is None:
+        opp_belief_w1_arr = np.zeros((1, 1), dtype=np.float32)
+        opp_belief_b1_arr = np.zeros(1, dtype=np.float32)
+        opp_belief_w2_arr = np.zeros((1, ACTION_DIM), dtype=np.float32)
+        opp_belief_b2_arr = np.zeros(ACTION_DIM, dtype=np.float32)
+    else:
+        opp_belief_w1_arr = np.ascontiguousarray(np.asarray(opponent_belief_w1, dtype=np.float32))
+        opp_belief_b1_arr = np.ascontiguousarray(np.asarray(opponent_belief_b1, dtype=np.float32))
+        opp_belief_w2_arr = np.ascontiguousarray(np.asarray(opponent_belief_w2, dtype=np.float32))
+        opp_belief_b2_arr = np.ascontiguousarray(np.asarray(opponent_belief_b2, dtype=np.float32))
     if float(overkill_penalty_beta) < 0.0:
         raise ValueError("overkill_penalty_beta deve essere >= 0")
     if int(overkill_low_lead_points_max) < 0:
@@ -1689,6 +1865,12 @@ def collect_a2c_batch_numba_value_lookahead_2p(
         float(value_target_scale),
         bool(value_target_is_residual),
         int(value_max_unknown_cards),
+        opp_belief_w1_arr,
+        opp_belief_b1_arr,
+        opp_belief_w2_arr,
+        opp_belief_b2_arr,
+        int(opponent_pimc_determinizations),
+        float(opponent_belief_uniform_mix),
         belief_enabled,
         belief_w1_arr,
         belief_b1_arr,
