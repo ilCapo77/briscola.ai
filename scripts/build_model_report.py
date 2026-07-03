@@ -1146,7 +1146,7 @@ def chart_xml(progress_row_count: int) -> str:
         '<c:tickLblPos val="nextTo"/><c:crossAx val="100"/><c:crosses val="autoZero"/>'
         '<c:crossBetween val="between"/></c:valAx>'
         "</c:plotArea>"
-        '<c:legend><c:legendPos val="b"/><c:layout/><c:overlay val="0"/>'
+        '<c:legend><c:legendPos val="r"/><c:layout/><c:overlay val="0"/>'
         '<c:txPr><a:bodyPr/><a:lstStyle/><a:p><a:pPr><a:defRPr sz="1100"/></a:pPr>'
         '<a:endParaRPr lang="it-IT"/></a:p></c:txPr></c:legend>'
         '<c:plotVisOnly val="1"/>'
