@@ -8,6 +8,8 @@ const UI = (() => {
     const CARD_ASSET_BASE = '/static/assets/cards';
     const DATA_CONSENT_STORAGE_KEY = 'briscola_data_collection_consent';
     const PLAYER_NAME_STORAGE_KEY = 'briscola_player_name';
+    const AI_AGENT_STORAGE_KEY = 'briscola_last_ai_agent';
+    const AI_MODEL_STORAGE_KEY = 'briscola_last_ai_model';
     const DEFAULT_PLAYER_NAME = 'Giocatore';
 
     // Map rank names to numbers for image paths
@@ -86,6 +88,28 @@ const UI = (() => {
             }
         } catch (e) {
             // Il consenso viene comunque inviato nel payload della partita corrente.
+        }
+    };
+
+    const _readStoredSelection = (key) => {
+        try {
+            const value = window.localStorage.getItem(key);
+            return typeof value === 'string' && value.length > 0 ? value : '';
+        } catch (e) {
+            // Privacy mode o storage disabilitato: si usa il default.
+            return '';
+        }
+    };
+
+    const _writeStoredSelection = (key, value) => {
+        try {
+            if (value) {
+                window.localStorage.setItem(key, value);
+            } else {
+                window.localStorage.removeItem(key);
+            }
+        } catch (e) {
+            // Storage disabilitato: la selezione resta valida per la sessione corrente.
         }
     };
 
@@ -411,10 +435,14 @@ const UI = (() => {
         });
 
         elements.aiAgentSelect?.addEventListener('change', () => {
+            _writeStoredSelection(AI_AGENT_STORAGE_KEY, elements.aiAgentSelect?.value || '');
             _updateAiAgentDescription();
             _updateAiModelUi();
         });
-        elements.aiModelSelect?.addEventListener('change', _updateAiModelUi);
+        elements.aiModelSelect?.addEventListener('change', () => {
+            _writeStoredSelection(AI_MODEL_STORAGE_KEY, elements.aiModelSelect?.value || '');
+            _updateAiModelUi();
+        });
         elements.playerNameInput?.addEventListener('change', _handlePlayerNameChange);
         elements.dataConsentCheckbox?.addEventListener('change', _handleDataConsentChange);
 
@@ -454,12 +482,15 @@ const UI = (() => {
             elements.aiAgentSelect.appendChild(option);
         });
 
-        // Default: modello puro v6 quando disponibile. Le varianti runtime più forti restano vicine nel menu,
-        // ma non diventano default finché non sono provate anche in cloud/contro umani.
+        // Default: l'ultima scelta dell'utente (localStorage) se ancora disponibile;
+        // altrimenti la variante più forte (PIMC belief), con fallback a scendere.
         const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
         const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
+        const stored = _readStoredSelection(AI_AGENT_STORAGE_KEY);
         let defaultAgent;
-        if (isAvail('bc_model')) defaultAgent = 'bc_model';
+        if (isAvail(stored)) defaultAgent = stored;
+        else if (isAvail('bc_model_pimc_belief_64x10')) defaultAgent = 'bc_model_pimc_belief_64x10';
+        else if (isAvail('bc_model')) defaultAgent = 'bc_model';
         else if (isAvail('heuristic_v1')) defaultAgent = 'heuristic_v1';
         else defaultAgent = firstAvailable || agents[0]?.name || 'random';
         elements.aiAgentSelect.value = defaultAgent;
@@ -518,10 +549,14 @@ const UI = (() => {
             elements.aiModelSelect.appendChild(option);
         });
 
-        // Default: modello consigliato compatibile; fallback al best più recente compatibile.
+        // Default: ultima scelta dell'utente (localStorage) se ancora presente e compatibile;
+        // altrimenti modello consigliato compatibile; fallback al best più recente compatibile.
+        const storedModel = _readStoredSelection(AI_MODEL_STORAGE_KEY);
+        const storedCompatible = orderedModels.find((m) => m?.id === storedModel && m.is_compatible !== false);
         const recommendedCompatible = orderedModels.find((m) => _isBestAiModel(m) && m?.id && m.is_compatible !== false);
         const firstCompatible = orderedModels.find((m) => m?.id && m.is_compatible !== false);
-        if (recommendedCompatible?.id) elements.aiModelSelect.value = recommendedCompatible.id;
+        if (storedCompatible?.id) elements.aiModelSelect.value = storedCompatible.id;
+        else if (recommendedCompatible?.id) elements.aiModelSelect.value = recommendedCompatible.id;
         else if (firstCompatible?.id) elements.aiModelSelect.value = firstCompatible.id;
         else if (orderedModels[0]?.id) elements.aiModelSelect.value = orderedModels[0].id;
 

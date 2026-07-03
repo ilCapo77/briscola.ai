@@ -18,7 +18,7 @@ from urllib.parse import quote
 
 import uvicorn
 from fastapi import FastAPI
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from .backend import server as backend_server
@@ -206,6 +206,46 @@ async def read_root():
     # Versione "software" (SemVer) mostrata nel footer — distinta dall'asset version (cache-busting).
     html = html.replace("__BRISCOLA_APP_VERSION__", get_code_version())
     return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/diario", response_class=HTMLResponse)
+async def read_diario():
+    """
+    Serve il diario di bordo: la storia del progetto raccontata in tono divulgativo.
+
+    Fonte unica: `static/diario.md` (markdown, facile da aggiornare); il rendering HTML
+    avviene qui a richiesta e viene vestito dal template `static/diario_template.html`.
+    """
+    import markdown as md_lib
+
+    with open(os.path.join(static_dir, "diario.md"), encoding="utf-8") as f:
+        md_source = f.read()
+    content = md_lib.markdown(md_source, extensions=["smarty"])
+    with open(os.path.join(static_dir, "diario_template.html"), encoding="utf-8") as f:
+        template = f.read()
+    html = template.replace("__DIARIO_CONTENT__", content)
+    html = html.replace("__BRISCOLA_ASSET_VERSION__", _asset_version())
+    return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
+
+
+@app.get("/robots.txt", include_in_schema=False)
+async def robots_txt():
+    """SEO di base: consenti l'indicizzazione delle pagine pubbliche e dichiara la sitemap."""
+    body = "User-agent: *\nAllow: /\nDisallow: /api/\n\nSitemap: https://ai.briscola.dev/sitemap.xml\n"
+    return Response(content=body, media_type="text/plain")
+
+
+@app.get("/sitemap.xml", include_in_schema=False)
+async def sitemap_xml():
+    """Sitemap minimale: le due pagine indicizzabili (home e diario di bordo)."""
+    body = (
+        '<?xml version="1.0" encoding="UTF-8"?>\n'
+        '<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">\n'
+        "  <url><loc>https://ai.briscola.dev/</loc><changefreq>weekly</changefreq></url>\n"
+        "  <url><loc>https://ai.briscola.dev/diario</loc><changefreq>monthly</changefreq></url>\n"
+        "</urlset>\n"
+    )
+    return Response(content=body, media_type="application/xml")
 
 
 # Serve la favicon
