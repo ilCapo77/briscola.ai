@@ -225,6 +225,7 @@ async def read_diario():
         template = f.read()
     html = template.replace("__DIARIO_CONTENT__", content)
     html = html.replace("__BRISCOLA_ASSET_VERSION__", _asset_version())
+    html = html.replace("__BRISCOLA_APP_VERSION__", get_code_version())
     return HTMLResponse(content=html, headers={"Cache-Control": "no-cache"})
 
 
