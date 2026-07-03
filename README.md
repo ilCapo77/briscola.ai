@@ -73,6 +73,15 @@ L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 6. **Valutazione**: match offline riproducibili (win‑rate/punti medi).
 7. **Training**: imitation/RL quando contratti e pipeline sono stabili.
 
+## Sviluppo assistito da agenti AI
+
+Il codice e il brainstorming del progetto sono stati sviluppati a più riprese in
+collaborazione con **agenti AI** (Claude Code, Codex, Gemini): il repository è anche un
+**banco di prova** per valutarli su un progetto reale — con convenzioni rigide
+(`AGENTS.md` è il documento di riferimento condiviso che tutti gli agenti seguono),
+quality gate automatici e decisioni finali sempre del maintainer. La storia di questo
+processo, errori inclusi, è nel [diario di bordo](https://ai.briscola.dev/diario).
+
 ## Struttura del progetto
 
 - `src/briscola_ai/domain/` – dominio canonico, puro e testabile

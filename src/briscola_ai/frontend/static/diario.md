@@ -15,6 +15,14 @@ Questo progetto è nato con un'ambizione semplice da dire e lunga da fare: costr
 
 Il modo più onesto di leggere questa storia è immaginare una bottega artigiana: prima si costruisce il banco da lavoro, poi gli attrezzi, poi arriva un apprendista che impara — prima copiando, poi provando, infine facendo sparring con maestri sempre più forti. E come in ogni bottega vera, gli errori non si nascondono: si appendono al muro, perché sono lezioni.
 
+C'è poi un dettaglio che rende questa storia doppiamente curiosa: in bottega non si è
+lavorato da soli. Gran parte del codice e del ragionamento — le ipotesi, gli esperimenti, le
+retromarce — è nata in dialogo con **agenti di intelligenza artificiale** (Claude, Codex,
+Gemini), usati a più riprese come colleghi di banco. Un progetto che costruisce un'IA,
+costruito insieme alle IA — e che è servito anche da *banco di prova* per loro: metterle
+davanti a un progetto vero, con regole rigide, test severi e un maintainer esigente, dice
+delle loro capacità molto più di qualunque demo.
+
 Un'ultima avvertenza prima di cominciare: tutto quello che leggerai è ricostruito dalla
 storia *scritta* del progetto — ogni modifica, ogni esperimento e ogni promozione di un
 campione è registrata con data, numeri e motivazione. Dove la storia tace (e in un punto
