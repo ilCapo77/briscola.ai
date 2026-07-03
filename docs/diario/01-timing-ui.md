@@ -19,4 +19,4 @@ architetturale: il ritmo lo detta il client (browser) o il server?
 
 Lo stato di gioco ha UNA fonte di verità (il server); la UX è un problema di *racconto*
 degli eventi, non di controllo del flusso. Il backend non introduce delay di presentazione:
-è una regola scritta in `CLAUDE.md` e mai più violata.
+è una regola scritta in `AGENTS.md` (il documento di riferimento condiviso per gli agenti; `CLAUDE.md` ne è un alias) e mai più violata.
