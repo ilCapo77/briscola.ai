@@ -297,8 +297,9 @@ def list_local_models(models_dir: Path, *, recursive: bool = False) -> list[Loca
             with np.load(path) as data:
                 if "metadata_json" in data:
                     metadata = _parse_metadata_json(data["metadata_json"])
-                if metadata.get("format") == "value_mlp_v1":
-                    # I value model sono asset interni per agenti lookahead, non policy selezionabili dalla UI.
+                if metadata.get("format") in ("value_mlp_v1", "belief_mlp_v1"):
+                    # Value e belief model sono asset interni degli agenti search (lookahead/PIMC):
+                    # hanno le stesse shape di una policy MLP ma NON sanno giocare — mai in catalogo.
                     continue
                 if not _has_supported_weights(data.keys()):
                     compatibility_reason_it = (

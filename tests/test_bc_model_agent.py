@@ -236,6 +236,33 @@ def test_bc_model_cache_invalidated_when_file_changes(tmp_path: Path) -> None:
     assert a2.model is not a1.model  # file cambiato => riletto
 
 
+def test_catalog_excludes_belief_and_value_assets(tmp_path: Path) -> None:
+    """
+    Regressione v0.23.0: la belief network (369->128->40) ha le stesse shape di una policy
+    v4 e senza filtro appariva SELEZIONABILE nel catalogo modelli della UI. Value e belief
+    sono asset interni degli agenti search: mai nel menu.
+    """
+    import json
+
+    import numpy as np
+
+    from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
+    from briscola_ai.ai.models.catalog import list_local_models
+
+    rng = np.random.default_rng(0)
+    for fname, fmt in (("belief.npz", "belief_mlp_v1"), ("value.npz", "value_mlp_v1")):
+        np.savez(
+            tmp_path / fname,
+            w1=rng.normal(0, 0.05, size=(int(FEATURE_DIM_2P_V4), 4)).astype(np.float32),
+            b1=np.zeros(4, dtype=np.float32),
+            w2=rng.normal(0, 0.05, size=(4, 40)).astype(np.float32),
+            b2=np.zeros(40, dtype=np.float32),
+            metadata_json=json.dumps({"format": fmt, "encoder_version": "v4"}),
+        )
+
+    assert list_local_models(tmp_path) == []
+
+
 def test_validate_for_ui_accepts_v4_and_v4_belief_models(tmp_path: Path) -> None:
     """
     Regressione promozione v8: il validatore UI deve accettare encoder v4 (369) e
