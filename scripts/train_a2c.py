@@ -1173,12 +1173,14 @@ def main() -> int:
         if rollout_engine == "fast":
             model_mix_names = [item.name for item in items if item.name in {"best_a2c", "bc_model"}]
             value_mix_names = [item.name for item in items if item.name == "bc_model_value_lookahead_8x8"]
+            pimc_mix_names = [item.name for item in items if item.name == "bc_model_pimc_belief"]
             unsupported = [
                 item.name
                 for item in items
                 if item.name not in FAST_EVALUATION_AGENT_NAMES
                 and not (
-                    fast_rollout == "numba" and item.name in {"best_a2c", "bc_model", "bc_model_value_lookahead_8x8"}
+                    fast_rollout == "numba"
+                    and item.name in {"best_a2c", "bc_model", "bc_model_value_lookahead_8x8", "bc_model_pimc_belief"}
                 )
             ]
             if unsupported:
@@ -1208,6 +1210,20 @@ def main() -> int:
                     opponent_value_model_path=str(args.opponent_value_model),
                     max_unknown_cards=int(args.opponent_value_max_unknown_cards),
                 )
+            if fast_rollout == "numba" and pimc_mix_names:
+                # Maestro PIMC belief nel mix: belief obbligatoria; il container condivide i pesi
+                # opponent (se il VL non e' nel mix, value dummy — mode 3 non lo legge).
+                belief_path = str(args.opponent_belief_model).strip()
+                if not belief_path:
+                    raise ValueError("`bc_model_pimc_belief` nel mix richiede `--opponent-belief-model <path.npz>`.")
+                fast_numba_pimc_belief_name = pimc_mix_names[0]
+                fast_numba_opponent_belief = load_belief_model_npz(belief_path)
+                if fast_numba_value_lookahead_opponent is None:
+                    fast_numba_value_lookahead_opponent = _load_fast_numba_pimc_belief_opponent(
+                        opponent_model_path=str(args.opponent_model),
+                        opponent_belief_model_path=belief_path,
+                        max_unknown_cards=int(args.opponent_value_max_unknown_cards),
+                    )
             if fast_rollout == "numba" and model_mix_names:
                 fast_numba_model_mix_name = model_mix_names[0]
                 if fast_numba_value_lookahead_opponent is not None and fast_numba_model_mix_name == "bc_model":
@@ -1228,6 +1244,13 @@ def main() -> int:
                 ):
                     raise ValueError("`bc_model` in `--opponent-mix` richiede fast Numba e `--opponent-model`.")
                 agents_by_name[item.name] = NamedAgentProxy(item.name, fast_numba_model_opponent.agent)
+            elif item.name == "bc_model_pimc_belief":
+                if fast_numba_value_lookahead_opponent is None or fast_numba_opponent_belief is None:
+                    raise ValueError(
+                        "`bc_model_pimc_belief` in `--opponent-mix` richiede fast Numba, "
+                        "`--opponent-model` e `--opponent-belief-model`."
+                    )
+                agents_by_name[item.name] = NamedAgentProxy(item.name, fast_numba_value_lookahead_opponent.agent)
             elif item.name == "bc_model_value_lookahead_8x8":
                 if rollout_engine == "fast":
                     if fast_numba_value_lookahead_opponent is None:
