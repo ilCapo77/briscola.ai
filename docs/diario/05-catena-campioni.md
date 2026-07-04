@@ -2,7 +2,7 @@
 
 **Capitolo del diario:** [Capitolo 6](https://ai.briscola.dev/diario)
 
-## La dinastia
+## La serie dei campioni
 
 (Versione completa e sempre aggiornata: [report Excel scaricabile](https://github.com/ilCapo77/briscola.ai/raw/master/docs/reports/model_progress.xlsx) — dashboard con curva di progressione.)
 
