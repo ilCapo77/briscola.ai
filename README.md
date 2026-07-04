@@ -483,7 +483,7 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-Il modello consigliato è **`data/models/best_a2c_v8.npz`** (encoder v4 con memoria delle prese, hidden 256 via widening Net2Net, guard anti‑overkill ON), promosso perché batte `best_a2c_v7` head‑to‑head sul big holdout appaiato (+0.89, CI95 +0.74..+1.05 su 100k). In UI, quando disponibile, il default è `bc_model`: v8 puro, senza solver/search aggiunti. L'avversario avanzato più forte è `bc_model_pimc_belief_64x10`: search PIMC con 64 determinizzazioni pesate dalla **belief network** (stima del contenuto della mano avversaria dedotta dal comportamento) nella finestra delle ultime 10 carte ignote — batte v8+solver di +3.66 punti/partita (CI +3.32..+4.00 su 4k). Resta selezionabile anche `bc_model_value_lookahead_8x8` (+2.12, più leggero lato CPU). `best_a2c_v7.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v8 è in `PLAN.md` e in `docs/plans/belief-expert-iteration.md`.
+Il modello consigliato è **`data/models/best_a2c_v9.npz`** (encoder v4 con memoria delle prese, hidden 256), nato dal 'super training' da 20M partite contro un cartellone misto (value-lookahead(v8) 65%, specchio 15%, euristiche+random 20%): batte `best_a2c_v8` di +0.97 (CI95 coppie +0.82..+1.12 su 100k) e segna il record contro `heuristic_v1` (+18.78) — primo modello migliore su entrambi i metri. In UI, quando disponibile, il default è `bc_model_pimc_belief_64x10` sul modello consigliato (v9), senza solver/search aggiunti. L'avversario avanzato più forte è `bc_model_pimc_belief_64x10`: search PIMC con 64 determinizzazioni pesate dalla **belief network** (stima del contenuto della mano avversaria dedotta dal comportamento) nella finestra delle ultime 10 carte ignote — batte v8+solver di +3.66 punti/partita (CI +3.32..+4.00 su 4k). Resta selezionabile anche `bc_model_value_lookahead_8x8` (+2.12, più leggero lato CPU). `best_a2c_v8.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v9 è in `PLAN.md` e in `docs/plans/belief-expert-iteration.md`.
 
 Gli agenti search richiedono asset ausiliari in `BRISCOLA_MODELS_DIR`: il value model per
 `bc_model_value_lookahead_8x8` e la belief network per `bc_model_pimc_belief_64x10`. Il catalogo
@@ -491,9 +491,9 @@ modelli UI **non** li mostra come policy selezionabili (sono asset interni, filt
 Il provisioning allo startup scarica policy consigliata, value e belief dalle env dedicate:
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v8.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.22.0/best_a2c_v8.npz
-BRISCOLA_MODEL_SHA256=1d44fd2f817fce93a6e7839f3b1dfad5c85212a2c68201c16fd991ddaf73722c
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v9.npz
+BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.26.0/best_a2c_v9.npz
+BRISCOLA_MODEL_SHA256=2652121effd21a27cbb0da18b94cec9dad56a7e35ed2f706ecfd026661600c14
 BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
 BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
 BRISCOLA_BELIEF_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.23.0/belief_v0_h128_50k_seed20260702.npz

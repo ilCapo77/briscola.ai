@@ -105,7 +105,7 @@ I verdetti, uno per uno. La **memoria delle prese** — dare all'allievo occhi n
 **sussurrare all'allievo le probabilità sulle carte avversarie** mentre gioca: addirittura dannoso, perché quel sussurro non conteneva nulla che l'allievo non potesse già dedurre da solo, e inseguirlo gli faceva perdere l'istinto. Infine il sogno del
 **maestro che ragiona dall'inizio della partita** guidato da un "giudice di posizione": bocciato dalla fisica del gioco stesso — a inizio partita il futuro dipende da carte non ancora pescate, e nessun giudice può prevedere il caso. Il ragionamento paga solo quando l'incertezza si restringe.
 
-Da tutti questi verdetti, un campione: l'**ottava generazione** — memoria delle prese, cervello raddoppiato, due giri di sparring — oggi il modello che affronti quando apri il sito. E una morale, diventata il motto di quei giorni:
+Da tutti questi verdetti, un campione: l'**ottava generazione** — memoria delle prese, cervello raddoppiato, due giri di sparring — che per un giorno fu il modello del sito (il capitolo 11 racconta chi l'ha detronizzata). E una morale, diventata il motto di quei giorni:
 
 > «Il vincolo non è l'allievo. È il maestro.»
 
@@ -126,6 +126,16 @@ umano ne giochi in una vita. Lo trovi nel menu come
 Chiudiamo con la scoperta più affettuosa. Ci siamo chiesti: i precetti che ogni briscolista impara al bar — *non uscire coi carichi, non sprecare briscole per prese povere, non regalare figure* — andrebbero insegnati all'IA? Siamo andati a misurare. Verdetto: li rispetta già, tutti, e su alcuni è perfino più ortodossa del giocatore di regole scritto a mano. Nessuno glieli ha mai detti: li ha riscoperti da sola, in dieci milioni di partite, perché sono semplicemente *veri*. E quel 3–4% di volte in cui esce col carico violando il precetto? Probabilmente non è un errore: è il carico giocato *coperto*, sapendo di controllare le briscole. La saggezza popolare, più l'eccezione che la saggezza popolare non sa spiegare.
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/09-precetti-apertura.md)*</small>
+
+## Capitolo 11 — I due allievi <small>(3–4 luglio 2026)</small>
+
+Chiusi i conti con le grandi teorie, restava una domanda semplice e antica: *si impara di più da un maestro straordinario, o giocando tantissimo con un po' di tutti?* Invece di discuterne, la bottega ha fatto quello che ormai le viene naturale: l'esperimento. Stesso allievo di partenza, due percorsi. Il primo — ricetta proposta dal padrone di casa, va detto — venti milioni di partite contro un cartellone variegato: lo sparring forte, se stesso allo specchio, e un buon 20% di ritorno *al bar*, contro i vecchi giocatori di regole, per non dimenticare come si vince contro chi gioca semplice. Il secondo: un quarto delle partite, ma tutte contro il maestro più forte mai costruito, quello che simula i futuri prima di ogni mossa.
+
+Trenta ore di computer dopo, il verdetto era netto e per certi versi umiliante per il maestro d'élite: **l'allievo del bar ha vinto tutto** — contro il campione in carica, contro il record storico, e nello scontro diretto col suo gemello. Il gemello del gran maestro aveva sì imparato *più in fretta per partita* (segno che un buon insegnante conta), ma la sua dieta raffinata e monotona gli aveva fatto perfino disimparare come si stracciano i principianti. Il vincitore è oggi il campione in carica: **la nona generazione**, la prima della dinastia a migliorare su *tutti* i metri contemporaneamente — più forte dei forti, più spietata coi deboli.
+
+E la morale, stavolta, la scrisse l'esperimento e non il diarista: in questa bottega la saggezza non abita solo nei maestri illustri. Abita anche nel chilometraggio, nella varietà — e in quel 20% di partite al bar che nessun pedagogo raffinato avrebbe prescritto.
+
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/11-due-allievi.md)*</small>
 
 ## Epilogo — La disciplina dei "no"
 

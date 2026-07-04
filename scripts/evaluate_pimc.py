@@ -3,7 +3,7 @@
 Valuta un prototipo PIMC sopra un modello `.npz`.
 
 Esempio:
-  python scripts/evaluate_pimc.py --model data/models/best_a2c_v8.npz --num-games 40 --determinizations 8
+  python scripts/evaluate_pimc.py --model data/models/best_a2c_v9.npz --num-games 40 --determinizations 8
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta PIMC(model) con engine dominio offline.")
     parser.add_argument(
         "--model",
-        default="data/models/best_a2c_v8.npz",
+        default="data/models/best_a2c_v9.npz",
         help="Path del modello `.npz` usato come fallback/rollout e opponent puro.",
     )
     parser.add_argument("--num-games", type=int, default=40, help="Numero partite seat-fair. Default: 40.")

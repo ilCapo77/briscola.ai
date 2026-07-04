@@ -168,6 +168,25 @@ MODEL_SPECS: list[ModelSpec] = [
             "heuristic_v1 relative to v7 (17.61 vs 18.73) reflects style non-transitivity, not regression."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v9",
+        path=_rel("data/models/best_a2c_v9.npz"),
+        role="official best",
+        status="promoted",
+        order=8,
+        progress_source="benchmarks/experiments/fase3/superA_vs_h1_big.json",
+        progress_score=18.78,
+        h2h_source="benchmarks/experiments/fase3/superA_vs_v8_big.json",
+        h2h_score=0.97,
+        decision="Promoted as recommended model for the v0.26.0 release.",
+        notes=(
+            "20M-game 'super training' vs a mixed panel: value-lookahead(v8) 65%, v8 mirror 15%, "
+            "heuristics+random 20% (the 'bar' share, maintainer's recipe). Beats v8 +0.97 head-to-head "
+            "AND sets the heuristic_v1 record (+18.78): first model that improves on BOTH meters. "
+            "Also beats the PIMC-teacher arm (5M vs the strongest master) by +0.63: volume+variety "
+            "won over elite teaching in this regime."
+        ),
+    ),
 ]
 
 
@@ -372,6 +391,27 @@ MILESTONES: list[dict[str, Any]] = [
             "response modeling, not a correctness issue)."
         ),
         "source": "data/models/best_a2c_v8.npz + ExIt iteration-1/2 (docs/plans/belief-expert-iteration.md)",
+    },
+    {
+        "order": 13,
+        "date": "2026-07-04",
+        "model_id": "best_a2c_v9",
+        "type": "promoted",
+        "decision": "Promote v9 (20M mixed-panel super training) as the recommended .npz policy for v0.26.0.",
+        "why": (
+            "Two-arm experiment: 20M games vs mixed panel (VL(v8) 65%, mirror 15%, heuristics+random 20%) "
+            "vs 5M games vs the strongest teacher (PIMC belief 32x10). Volume+variety won on every axis."
+        ),
+        "evidence": (
+            "Arm A vs v8: +0.97 (CI +0.82..+1.12, 100k paired); vs heuristic_v1: +18.78 (all-time record); "
+            "head-to-head vs arm B: +0.63 (CI +0.48..+0.78). Arm B (elite teacher) reached only +0.40 vs v8 "
+            "and regressed vs heuristic_v1 (16.71): monotone diet erodes anti-weak style."
+        ),
+        "impact": (
+            "Default model moves to best_a2c_v9; first promotion that improves BOTH progression meters "
+            "simultaneously (no style non-transitivity to explain). Mix recipe credited to the maintainer."
+        ),
+        "source": "data/models/best_a2c_v9.npz + two-arm super training (data/exit/due_bracci.log)",
     },
 ]
 
@@ -745,6 +785,7 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
         "best_a2c_v6",
         "best_a2c_v7",
         "best_a2c_v8",
+        "best_a2c_v9",
     }
     progress_models = [m for m in models if m["model_id"] in progress_model_ids]
 
@@ -782,9 +823,9 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v8 is the recommended v0.22.0 .npz policy: encoder v4 (trick-history memory) "
-                "plus Net2Net widening to hidden 256, trained via two ExIt sparring generations against "
-                "value-lookahead(v7). It beats best_a2c_v7 head-to-head (+0.89, 100k paired). "
+                "best_a2c_v9 is the recommended v0.26.0 .npz policy: a 20M-game super training vs a mixed "
+                "panel (value-lookahead(v8), mirror, heuristics). It beats v8 head-to-head (+0.97) and sets "
+                "the heuristic_v1 record (+18.78) - the first model improving on both meters. "
                 "The value-lookahead runtime agent remains the stronger advanced option."
             ],
             [],

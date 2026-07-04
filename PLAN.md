@@ -12,9 +12,12 @@
   In v0.25.0: search PIMC su kernel Numba (produzione ~2× più economica per mossa).
 - Produzione: <https://ai.briscola.dev> (FastAPI Cloud, stato su Redis, realtime pub/sub,
   event log Postgres in modalità `dataset` con eventi `ai_action` auditabili).
-- Modello consigliato: `best_a2c_v8.npz` (encoder **v4** con memoria delle prese,
-  `feature_dim=369`, hidden 256 via Net2Net, guard anti-overkill ON). Promosso v0.22.0:
-  +0.89 su v7 (CI coppie +0.74..+1.05, big 100k).
+- Modello consigliato: `best_a2c_v9.npz` (encoder **v4**, hidden 256). Promosso v0.26.0 dal
+  "super training" 20M vs cartellone misto (VL(v8) 65% / specchio 15% / bar 20%, ricetta del
+  maintainer): **+0.97 su v8** (CI coppie +0.82..+1.12) e **+18.78 su heuristic_v1** (record) —
+  primo best migliore su ENTRAMBI i metri. Il braccio di controllo col maestro d'élite
+  (PIMC belief 32×10, 5M) ha reso +0.40 e perso il testa-a-testa (−0.63): in questo regime
+  volume+varietà battono il maestro (dettagli: `data/exit/due_bracci.log`, report modelli).
 - Avversari avanzati selezionabili: **`bc_model_pimc_belief_64x10`** (il più forte: PIMC 64
   determinizzazioni pesate dalla belief, finestra 10 — +3.66 su v8+solver, CI +3.32..+4.00,
   ~37 ms/mossa pensata con la search JIT di v0.25.0; release v0.23.0), `bc_model_value_lookahead_8x8` (+2.12, più

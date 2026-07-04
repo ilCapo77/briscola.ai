@@ -1,4 +1,4 @@
-# Approfondimento — La genealogia dei campioni (v1→v8)
+# Approfondimento — La genealogia dei campioni (v1→v9)
 
 **Capitolo del diario:** [Capitolo 6](https://ai.briscola.dev/diario)
 
@@ -17,6 +17,7 @@
 | v6 | 28 giu | scaling 5M da v5 | +0.46 | +18.40 |
 | v7 | 1 lug | 5M vs opponent value-lookahead(v6) | **+2.27** | +18.73 |
 | v8 | 3 lug | encoder v4 + Net2Net 256, 2× 5M vs VL(v7) | +0.89 | +17.61 |
+| **v9** | 4 lug | super training 20M vs mix (VL(v8) 65% / specchio 15% / bar 20%) | **+0.97** | **+18.78** (record) |
 
 ## La crisi di fine giugno (`5c81eb4`)
 
@@ -25,5 +26,8 @@ paradosso accese il dubbio di **non transitività**: v3 batteva v2 di +0.008 pun
 perdeva nel conteggio vittorie (48.433 vs 48.683 su 100k). Ne nacquero il round-robin con
 intervalli di confidenza e la regola: *non avviare la generazione successiva per inerzia*.
 
-Nota onesta: v8 fa +17.61 su heuristic_v1, MENO del +18.73 di v7 — non transitività di
+Nota storica: v8 faceva +17.61 su heuristic_v1, MENO del +18.73 di v7 — non transitività di
 stile, non regressione (il gate di promozione è l'head-to-head appaiato con CI).
+
+La non-transitività è stata SANATA da v9: il 20% di euristiche nel suo mix di training recupera
+gli exploit di stile (18.78, record) senza costare forza al vertice (+0.97 su v8).
