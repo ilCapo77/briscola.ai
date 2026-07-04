@@ -1,4 +1,4 @@
-# Approfondimento — La genealogia dei campioni (v1→v9)
+# Approfondimento — La serie dei campioni (v1→v9)
 
 **Capitolo del diario:** [Capitolo 6](https://ai.briscola.dev/diario)
 

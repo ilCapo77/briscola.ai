@@ -7,3 +7,14 @@ La **fonte unica è il markdown** `src/briscola_ai/frontend/static/diario.md`: p
 il diario si modifica solo quel file (il server lo renderizza a richiesta dentro
 `diario_template.html`). Da aggiornare ai grandi traguardi, in stile non tecnico; la
 cronologia tecnica completa vive nei messaggi di commit e in `docs/plans/`.
+
+## Convenzioni di stile (dalla revisione del maintainer, luglio 2026)
+
+- Tono discorsivo e naturale: niente morale a effetto a fine capitolo, pochi trattini
+  lunghi, contrasti solo dove reggono.
+- Zero gergo non spiegato; i **termini tecnici corretti si citano tra parentesi accanto
+  alla descrizione discorsiva** (es. "è quello che chiamiamo sparring (il nome tecnico è
+  *apprendimento per rinforzo*)"), così il lettore impara anche il vocabolario.
+- Piccoli dettagli tecnici concreti nei punti dove sono la storia (Python/Numba, seme,
+  sensori della rete), con link esterni per approfondire.
+- I numeri dettagliati vivono negli approfondimenti `docs/diario/*.md`, uno per capitolo.
