@@ -108,3 +108,19 @@ def test_event_log_works_when_api_is_mounted_under_main_app(tmp_path: Path, monk
     event_types = [r[0] for r in rows]
     assert "game_created" in event_types
     assert "action_play_card" in event_types
+
+
+def test_count_games_tracks_registered_games() -> None:
+    """
+    `count_games` alimenta la diagnostica `/api/meta` (event_log_games_recorded):
+    parte da 0, conta le partite registrate ed e' idempotente rispetto a ensure_game
+    ripetute sulla stessa partita.
+    """
+    from briscola_ai.backend.event_log import EventLog, EventLogConfig
+
+    log = EventLog(EventLogConfig(path=":memory:"))
+    assert log.count_games() == 0
+    log.ensure_game("g1", num_players=2, seed=1)
+    log.ensure_game("g2", num_players=2, seed=2)
+    log.ensure_game("g1", num_players=2, seed=1)  # duplicato: non deve contare
+    assert log.count_games() == 2
