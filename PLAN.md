@@ -13,7 +13,7 @@
 - Produzione: <https://ai.briscola.dev> (FastAPI Cloud, stato su Redis, realtime pub/sub,
   event log Postgres in modalità `dataset` con eventi `ai_action` auditabili).
 - Modello consigliato: `best_a2c_v10.npz` (encoder **v4**, hidden 256). Promosso v0.27.0:
-  il "giocatore definitivo" — 30M partite vs cartellone completo (PIMC belief 25% /
+  il "giocatore definitivo" — 30M partite vs rosa completa di avversari (PIMC belief 25% /
   value-lookahead 35% / specchio 15% / bar 25%, dosi del maintainer, base v9): **+0.66 su
   v9** (CI coppie +0.51..+0.81) e **+20.52 su heuristic_v1** (record assoluto, era 18.78).
   Rendimenti decrescenti visibili (+0.97 → +0.66): asintoto vicino.

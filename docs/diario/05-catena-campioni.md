@@ -18,7 +18,7 @@
 | v7 | 1 lug | 5M vs opponent value-lookahead(v6) | **+2.27** | +18.73 |
 | v8 | 3 lug | encoder v4 + Net2Net 256, 2× 5M vs VL(v7) | +0.89 | +17.61 |
 | **v9** | 4 lug | super training 20M vs mix (VL(v8) 65% / specchio 15% / bar 20%) | **+0.97** | **+18.78** (record) |
-| **v10** | 5 lug | 'definitivo' 30M vs cartellone completo (PIMC belief 25% / VL 35% / specchio 15% / bar 25%) | +0.66 | **+20.52** (record) |
+| **v10** | 5 lug | 'definitivo' 30M vs rosa completa di avversari (PIMC belief 25% / VL 35% / specchio 15% / bar 25%) | +0.66 | **+20.52** (record) |
 
 ## La crisi di fine giugno (`5c81eb4`)
 

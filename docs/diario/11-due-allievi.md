@@ -27,7 +27,7 @@ Stesso allievo di partenza (best_a2c_v8), due regimi di allenamento, poi esami i
    diretto incluso.
 2. **Il maestro insegna più in fretta per partita** (+0.08/M contro +0.05/M di A) ma il suo
    costo orario lo condanna (26h per un quarto del progresso di A in 10h).
-3. **La dieta monotona erode lo stile**: B, senza il "bar" nel cartellone, peggiora contro
+3. **La dieta monotona erode lo stile**: B, senza il "bar" tra gli avversari, peggiora contro
    l'euristica. La quota bar del mix di A (20%) recupera e supera il record (18.78 > 18.73
    di v7): prima promozione che migliora ENTRAMBI i metri della progressione.
 

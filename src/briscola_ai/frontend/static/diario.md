@@ -152,15 +152,15 @@ Il vincitore è diventato la nona generazione: il primo modello a migliorare con
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/11-due-allievi.md)*</small>
 
-## Capitolo 12 — Il cartellone completo <small>(4–5 luglio 2026)</small>
+## Capitolo 12 — Tutti gli avversari insieme <small>(4–5 luglio 2026)</small>
 
 L'esperimento dei due allievi lasciava una domanda quasi ovvia, e fu il maintainer a farla: perché scegliere tra il maestro d'élite e la varietà, quando si possono avere entrambi? Nel frattempo era stato risolto anche l'ostacolo tecnico che lo impediva: il maestro che simula i futuri era stato riscritto nella forma veloce (lo stesso trattamento Numba del capitolo 5), abbastanza da poter reggere milioni di partite di allenamento.
 
-Così partì il run più grande della storia del progetto: trenta milioni di partite contro un cartellone che riuniva tutti — il maestro PIMC belief per un quarto del tempo, lo sparring quotidiano per un terzo, lo specchio, e un quarto abbondante di bar, la dose rialzata apposta. Circa ventisette ore di calcolo, sempre sullo stesso computer di casa.
+Così partì il run più grande della storia del progetto: trenta milioni di partite contro una rosa di avversari che riuniva tutti — il maestro PIMC belief per un quarto del tempo, lo sparring quotidiano per un terzo, lo specchio, e un quarto abbondante di bar, la dose rialzata apposta. Circa ventisette ore di calcolo, sempre sullo stesso computer di casa.
 
 Il risultato è il campione attuale, la decima generazione. Batte la nona di +0.66 punti a partita e porta il distacco dall'euristica storica a +20.5, il valore più alto mai misurato nel progetto: quasi due punti sopra il record che la nona aveva appena stabilito. Il merito di quel salto è soprattutto della quota bar: più partite contro i giocatori semplici hanno reso il modello più spietato proprio lì, senza togliergli nulla al vertice.
 
-C'è anche il numero meno comodo, e va detto: la nona generazione aveva guadagnato +0.97 sulla precedente, la decima +0.66 — con più partite e un cartellone migliore. Ogni generazione compra un po' meno della precedente. Non è un fallimento: è la forma che ha il traguardo, in un gioco dove il mazzo decide comunque la sua parte. A un certo punto non resta molto da imparare; resta da giocare.
+C'è anche il numero meno comodo, e va detto: la nona generazione aveva guadagnato +0.97 sulla precedente, la decima +0.66 — con più partite e avversari migliori. Ogni generazione compra un po' meno della precedente. Non è un fallimento: è la forma che ha il traguardo, in un gioco dove il mazzo decide comunque la sua parte. A un certo punto non resta molto da imparare; resta da giocare.
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/12-giocatore-definitivo.md)*</small>
 

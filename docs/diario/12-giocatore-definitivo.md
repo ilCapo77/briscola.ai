@@ -1,4 +1,4 @@
-# Approfondimento — Il cartellone completo (v10)
+# Approfondimento — La rosa completa di avversari (v10)
 
 **Capitolo del diario:** [Capitolo 12](https://ai.briscola.dev/diario) · **Periodo:** 4–5 luglio 2026
 
