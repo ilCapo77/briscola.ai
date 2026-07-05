@@ -4,6 +4,8 @@ version = "0.27.2"
 description = "A Briscola card game with AI capabilities"
 authors = []
 requires-python = ">=3.14"
+license = "MIT"
+license-files = ["LICENSE"]
 dependencies = [
     # `[standard]` include `fastapi-cli`: necessario perche' FastAPI Cloud avvia l'app con `fastapi run`.
     "fastapi[standard]>=0.128.0",
