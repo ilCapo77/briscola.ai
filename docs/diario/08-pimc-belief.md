@@ -27,3 +27,26 @@ informazione pubblica, non sbirciatina.
 Per ogni mossa nella finestra, l'agente simula 64 mani avversarie pesate sul comportamento
 osservato e gioca ogni continuazione fino in fondo: ~670 rollout per partita reale.
 Release: v0.23.0 (asset belief con provisioning `BRISCOLA_BELIEF_MODEL_URL/SHA256`).
+
+## Il porting su Numba (v0.25.0)
+
+Il ciclo caldo (determinizzazione anti-cheat, campionamento pesato senza rimpiazzo,
+rollout a terminale con policy+guard+solver) è stato portato in kernel JIT
+(`ai/numba/pimc.py`): forza equivalente al Python (+3.38 vs +3.83 sullo stesso protocollo,
+CI sovrapposte), costo per mossa pensata **37 ms contro 73** (~2×, non i 20-50× sperati:
+il costo Python era già dominato dalle matmul BLAS di numpy). L'agente di produzione usa
+il kernel, con fallback trasparente al Python sugli stati non determinizzabili; dal
+v0.27.1 il kernel è compilato allo startup (warm-up), non alla prima mossa del giocatore.
+
+## La composizione col modello più forte (misura del 2026-07-05)
+
+Il margine della search NON si riduce al crescere della policy — si compone:
+
+| Base | PIMC belief 64×10 vs base+solver (400 partite, seed 42) |
+|---|---|
+| v8 | +3.66 (conferma 4k) |
+| **v10** | **+4.22** (CI +3.02..+5.43) |
+
+Spiegazione: la search usa la policy stessa come motore dei rollout — una policy più
+forte produce simulazioni più realistiche, quindi valutazioni migliori. I due
+miglioramenti si sommano invece di cannibalizzarsi.

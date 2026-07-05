@@ -12,6 +12,24 @@
 Ogni livello è ancorato al precedente da **test di parità su partite specchiate** (stesso
 seme → stesso mazzo → stesse mosse → encoder e risultati identici).
 
+## Come è protetta la parità
+
+Il metodo dei test è "partite specchiate": stesso seme → stesso mazzo per costruzione
+(entrambe le implementazioni mescolano con `random.Random(seed).shuffle`), stesse mosse
+scelte da un RNG condiviso → a ogni profondità di partita gli encoder devono produrre
+vettori identici e gli stati devono coincidere carta per carta, per entrambi i giocatori.
+Ogni nuova versione dell'encoder (v1→v4) ha ripetuto questo rito su tre motori:
+dominio ↔ fast Python ↔ kernel Numba.
+
+## Dettagli del kernel
+
+- `@njit(cache=True)` su tutte le funzioni calde; batch di partite in `prange`
+  (parallelismo sui core, tipicamente 8-14 worker).
+- Anche il **backprop A2C** è vettorizzato NumPy (nessun framework: i gradienti sono
+  scritti a mano) e il collector di traiettorie è full-JIT.
+- Lezione operativa: la cache Numba locale può mascherare firme rotte tra kernel — la CI
+  (compilazione fredda) è il giudice di verità.
+
 ## I numeri
 
 | Metrica | Prima | Dopo |

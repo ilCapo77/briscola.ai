@@ -30,4 +30,9 @@ Prerequisito tecnico: l'aggancio del kernel PIMC come opponent di training nel m
 - La quota bar alzata da 20% a 25% ha spinto il metro anti-semplici da 18.78 a 20.52:
   la voce del mix col miglior rapporto costo/beneficio del progetto.
 
+- Il margine della search sopra la policy si COMPONE invece di ridursi: PIMC belief
+  64×10 su base v10 rende **+4.22** (CI +3.02..+5.43, 400 partite) contro il +3.66 su v8 —
+  la policy più forte migliora i rollout della search stessa. Il default del sito
+  (v10 + PIMC belief) beneficia di entrambi i progressi.
+
 Promosso **best_a2c_v10** (release v0.27.0).

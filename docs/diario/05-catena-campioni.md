@@ -32,3 +32,5 @@ stile, non regressione (il gate di promozione è l'head-to-head appaiato con CI)
 
 La non-transitività è stata SANATA da v9: il 20% di euristiche nel suo mix di training recupera
 gli exploit di stile (18.78, record) senza costare forza al vertice (+0.97 su v8).
+v10 ha spinto oltre la stessa leva (bar al 25%): +20.52, con entrambe le curve del report
+al massimo storico per la prima volta.
