@@ -83,12 +83,16 @@ def _warm_up_runtime_kernels() -> None:
     """
     Compila best-effort i kernel JIT usati nel runtime.
 
-    Serve soprattutto per `bc_model_value_lookahead_8x8`/PIMC: il solver endgame Numba viene chiamato nel finale,
-    quindi conviene pagare la compilazione allo startup invece che durante una mossa del giocatore.
+    Serve per gli avversari search del sito: il solver endgame Numba e il kernel PIMC
+    (`bc_model_pimc_belief_64x10`, il default UI) si compilano alla prima chiamata —
+    conviene pagare la compilazione allo startup invece che sulla prima mossa pensata
+    del primo giocatore di ogni replica.
     """
     from .ai.endgame import warm_up_numba_endgame_solver
+    from .ai.numba.pimc import warm_up_numba_pimc
 
     warm_up_numba_endgame_solver()
+    warm_up_numba_pimc()
 
 
 @asynccontextmanager
