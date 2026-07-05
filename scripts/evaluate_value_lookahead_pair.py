@@ -54,7 +54,7 @@ def _build_value_agent(
 
 def main() -> int:
     parser = argparse.ArgumentParser(description="Confronta due value model nello stesso V-lookahead harness.")
-    parser.add_argument("--policy-model", default="data/models/best_a2c_v9.npz")
+    parser.add_argument("--policy-model", default="data/models/best_a2c_v10.npz")
     parser.add_argument("--value-model-a", required=True)
     parser.add_argument("--value-model-b", required=True)
     parser.add_argument("--label-a", default="value_lookahead_a")

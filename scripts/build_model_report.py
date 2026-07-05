@@ -187,6 +187,24 @@ MODEL_SPECS: list[ModelSpec] = [
             "won over elite teaching in this regime."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v10",
+        path=_rel("data/models/best_a2c_v10.npz"),
+        role="official best",
+        status="promoted",
+        order=9,
+        progress_source="benchmarks/experiments/fase3/definitivo_vs_h1_big.json",
+        progress_score=20.52,
+        h2h_source="benchmarks/experiments/fase3/definitivo_vs_v9_big.json",
+        h2h_score=0.66,
+        decision="Promoted as recommended model for the v0.27.0 release.",
+        notes=(
+            "The 'definitive' 30M-game run vs the complete panel: PIMC-belief teacher 25%, "
+            "value-lookahead 35%, mirror 15%, heuristics+random 25%, all on v9 base (panel doses by "
+            "the maintainer). Beats v9 +0.66 head-to-head and sets a new all-time heuristic_v1 record "
+            "(+20.52, up from 18.78): both progression meters at their maximum."
+        ),
+    ),
 ]
 
 
@@ -412,6 +430,24 @@ MILESTONES: list[dict[str, Any]] = [
             "simultaneously (no style non-transitivity to explain). Mix recipe credited to the maintainer."
         ),
         "source": "data/models/best_a2c_v9.npz + two-arm super training (data/exit/due_bracci.log)",
+    },
+    {
+        "order": 14,
+        "date": "2026-07-05",
+        "model_id": "best_a2c_v10",
+        "type": "promoted",
+        "decision": "Promote v10 (30M complete-panel run) as the recommended .npz policy for v0.27.0.",
+        "why": (
+            "Combines every lesson from the two-arm experiment: volume, variety, the elite PIMC-belief "
+            "teacher at the per-game-efficient dose (25%), and a 25% heuristics share to keep anti-weak style."
+        ),
+        "evidence": (
+            "Big holdout 100k paired CIs: vs best_a2c_v9 +0.66 (CI +0.51..+0.81); vs heuristic_v1 +20.52 "
+            "(record, previous 18.78). Diminishing returns visible (+0.97 -> +0.66 per generation despite "
+            "more games and a better teacher): the asymptote is near."
+        ),
+        "impact": "Default model moves to best_a2c_v10; both progression meters at all-time highs.",
+        "source": "data/models/best_a2c_v10.npz + 30M complete-panel run (data/exit/definitivo.log)",
     },
 ]
 
@@ -786,6 +822,7 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
         "best_a2c_v7",
         "best_a2c_v8",
         "best_a2c_v9",
+        "best_a2c_v10",
     }
     progress_models = [m for m in models if m["model_id"] in progress_model_ids]
 
@@ -823,9 +860,9 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v9 is the recommended v0.26.0 .npz policy: a 20M-game super training vs a mixed "
-                "panel (value-lookahead(v8), mirror, heuristics). It beats v8 head-to-head (+0.97) and sets "
-                "the heuristic_v1 record (+18.78) - the first model improving on both meters. "
+                "best_a2c_v10 is the recommended v0.27.0 .npz policy: a 30M-game run vs the complete panel "
+                "(PIMC-belief teacher, value-lookahead, mirror, heuristics). It beats v9 (+0.66) and sets the "
+                "all-time heuristic_v1 record (+20.52): both meters at their maximum. "
                 "The value-lookahead runtime agent remains the stronger advanced option."
             ],
             [],

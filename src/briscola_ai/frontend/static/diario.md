@@ -148,9 +148,21 @@ Il primo seguiva una ricetta proposta dal maintainer: venti milioni di partite c
 
 Dopo circa trenta ore complessive di calcolo, il risultato fu netto. Il modello allenato su volume e varietà vinse su tutta la linea: batté il campione precedente, superò il record storico e vinse lo scontro diretto con il gemello allenato dal maestro d'élite. Il secondo aveva imparato più in fretta per partita, quindi il maestro forte insegnava davvero qualcosa. Ma costava molto di più e, soprattutto, la dieta monotona gli aveva fatto perdere forza contro gli avversari semplici.
 
-Il vincitore è diventato la nona generazione, il campione in carica: il primo a migliorare contemporaneamente contro il predecessore e contro il riferimento storico. La lezione qui è meno poetica di quanto sembri: in questo regime, il chilometraggio e la varietà hanno battuto il maestro migliore.
+Il vincitore è diventato la nona generazione: il primo modello a migliorare contemporaneamente contro il predecessore e contro il riferimento storico. La lezione è meno poetica di quanto sembri: in questo regime, il chilometraggio e la varietà hanno battuto il maestro migliore. Il suo regno, però, durò poco.
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/11-due-allievi.md)*</small>
+
+## Capitolo 12 — Il cartellone completo <small>(4–5 luglio 2026)</small>
+
+L'esperimento dei due allievi lasciava una domanda quasi ovvia, e fu il maintainer a farla: perché scegliere tra il maestro d'élite e la varietà, quando si possono avere entrambi? Nel frattempo era stato risolto anche l'ostacolo tecnico che lo impediva: il maestro che simula i futuri era stato riscritto nella forma veloce (lo stesso trattamento Numba del capitolo 5), abbastanza da poter reggere milioni di partite di allenamento.
+
+Così partì il run più grande della storia del progetto: trenta milioni di partite contro un cartellone che riuniva tutti — il maestro PIMC belief per un quarto del tempo, lo sparring quotidiano per un terzo, lo specchio, e un quarto abbondante di bar, la dose rialzata apposta. Circa ventisette ore di calcolo, sempre sullo stesso computer di casa.
+
+Il risultato è il campione attuale, la decima generazione. Batte la nona di +0.66 punti a partita e porta il distacco dall'euristica storica a +20.5, il valore più alto mai misurato nel progetto: quasi due punti sopra il record che la nona aveva appena stabilito. Il merito di quel salto è soprattutto della quota bar: più partite contro i giocatori semplici hanno reso il modello più spietato proprio lì, senza togliergli nulla al vertice.
+
+C'è anche il numero meno comodo, e va detto: la nona generazione aveva guadagnato +0.97 sulla precedente, la decima +0.66 — con più partite e un cartellone migliore. Ogni generazione compra un po' meno della precedente. Non è un fallimento: è la forma che ha il traguardo, in un gioco dove il mazzo decide comunque la sua parte. A un certo punto non resta molto da imparare; resta da giocare.
+
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/12-giocatore-definitivo.md)*</small>
 
 ## Epilogo
 

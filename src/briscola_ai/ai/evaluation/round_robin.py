@@ -194,6 +194,7 @@ def default_round_robin_players(models_dir: str | Path = "data/models") -> list[
         RoundRobinPlayer("best_a2c_v7", "model", str(root / "best_a2c_v7.npz")),
         RoundRobinPlayer("best_a2c_v8", "model", str(root / "best_a2c_v8.npz")),
         RoundRobinPlayer("best_a2c_v9", "model", str(root / "best_a2c_v9.npz")),
+        RoundRobinPlayer("best_a2c_v10", "model", str(root / "best_a2c_v10.npz")),
         RoundRobinPlayer("heuristic_v1", "fast"),
     ]
 
