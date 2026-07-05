@@ -124,3 +124,36 @@ def test_count_games_tracks_registered_games() -> None:
     log.ensure_game("g2", num_players=2, seed=2)
     log.ensure_game("g1", num_players=2, seed=1)  # duplicato: non deve contare
     assert log.count_games() == 2
+
+
+def test_count_games_by_model_reads_game_created_payload() -> None:
+    """
+    `count_games_by_model` alimenta GET /api/stats/games: raggruppa per ai_model_id
+    (fallback ai_agent) letto dal payload di `game_created`, e conta le completate
+    via finished_at. Copre anche lo storico perche' legge gli eventi, non uno schema nuovo.
+    """
+    from briscola_ai.backend.event_log import EventLog, EventLogConfig
+
+    log = EventLog(EventLogConfig(path=":memory:"))
+
+    def created(game_id, model=None, agent="bc_model"):
+        log.ensure_game(game_id, num_players=2, seed=1)
+        log.log_event(
+            game_id,
+            "game_created",
+            {"ai_agent": agent, "ai_model_id": model},
+            server_version=0,
+        )
+
+    created("g1", model="best_a2c_v10.npz")
+    created("g2", model="best_a2c_v10.npz")
+    created("g3", model=None, agent="heuristic_v1")
+    log.try_mark_game_finished("g1")
+
+    rows = log.count_games_by_model()
+    assert rows is not None
+    by = {r["model"]: r for r in rows}
+    assert by["best_a2c_v10.npz"]["total"] == 2
+    assert by["best_a2c_v10.npz"]["completed"] == 1
+    assert by["heuristic_v1"]["total"] == 1
+    assert by["heuristic_v1"]["completed"] == 0

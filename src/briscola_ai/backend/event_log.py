@@ -70,6 +70,8 @@ class EventLogProtocol(Protocol):
 
     def count_games(self) -> int | None: ...
 
+    def count_games_by_model(self) -> list[dict] | None: ...
+
     def close(self) -> None: ...
 
     def ensure_game(
@@ -154,6 +156,34 @@ class EventLog:
             with self._lock:
                 row = self._conn.execute("SELECT count(*) FROM games;").fetchone()
             return int(row[0]) if row else None
+        except Exception:
+            return None
+
+    def count_games_by_model(self) -> list[dict] | None:
+        """
+        Partite (totali e completate) raggruppate per modello/agente avversario.
+
+        Il modello e' letto dal payload dell'evento `game_created` (json), quindi il
+        conteggio copre anche lo storico. `finished_at` marca le completate. Best-effort:
+        None su errore.
+        """
+        sql = """
+            SELECT COALESCE(
+                       json_extract(e.payload_json, '$.ai_model_id'),
+                       json_extract(e.payload_json, '$.ai_agent'),
+                       'sconosciuto'
+                   ) AS model,
+                   count(*) AS total,
+                   count(g.finished_at) AS completed
+            FROM games g
+            JOIN events e ON e.game_id = g.game_id AND e.event_type = 'game_created'
+            GROUP BY model
+            ORDER BY total DESC;
+        """
+        try:
+            with self._lock:
+                rows = self._conn.execute(sql).fetchall()
+            return [{"model": r[0], "total": int(r[1]), "completed": int(r[2])} for r in rows]
         except Exception:
             return None
 
@@ -526,6 +556,30 @@ class PostgresEventLog:
                     cur.execute("SELECT count(*) FROM games;")
                     row = cur.fetchone()
                 return int(row[0]) if row else None
+            except Exception:
+                return None
+
+    def count_games_by_model(self) -> list[dict] | None:
+        """Come per SQLite: raggruppa per modello dal payload di `game_created` (best-effort)."""
+        sql = """
+            SELECT COALESCE(
+                       (e.payload_json)::jsonb->>'ai_model_id',
+                       (e.payload_json)::jsonb->>'ai_agent',
+                       'sconosciuto'
+                   ) AS model,
+                   count(*) AS total,
+                   count(g.finished_at) AS completed
+            FROM games g
+            JOIN events e ON e.game_id = g.game_id AND e.event_type = 'game_created'
+            GROUP BY model
+            ORDER BY total DESC;
+        """
+        with self._lock:
+            try:
+                with self._conn.cursor() as cur:
+                    cur.execute(sql)
+                    rows = cur.fetchall()
+                return [{"model": r[0], "total": int(r[1]), "completed": int(r[2])} for r in rows]
             except Exception:
                 return None
 

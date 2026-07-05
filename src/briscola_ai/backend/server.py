@@ -192,6 +192,24 @@ def event_log_runtime_metadata() -> dict[str, str | bool | None]:
     }
 
 
+def _games_stats_payload() -> dict:
+    """
+    Statistiche aggregate delle partite registrate, per modello/agente avversario.
+
+    Legge l'event log (best-effort): il modello viene dal payload di `game_created`,
+    quindi copre anche lo storico. Aggregati anonimi: nessun dato personale.
+    """
+    log = _get_event_log()
+    if log is None:
+        return {"available": False, "total": None, "by_model": None}
+    count_games = getattr(log, "count_games", None)
+    by_model_fn = getattr(log, "count_games_by_model", None)
+    total = count_games() if callable(count_games) else None
+    by_model = by_model_fn() if callable(by_model_fn) else None
+    completed = sum(row["completed"] for row in by_model) if by_model else None
+    return {"available": True, "total": total, "completed": completed, "by_model": by_model}
+
+
 def _safe_log_event(
     game_id: str,
     event_type: str,
@@ -688,6 +706,16 @@ async def meta() -> dict:
         "debug_state_endpoint_enabled": _debug_state_endpoint_enabled(),
         "cors_allow_origins": cors_allow_origins,
     }
+
+
+@app.get("/stats/games", response_model=dict)
+async def stats_games() -> dict:
+    """
+    Statistiche aggregate e anonime: partite registrate (totali/completate) per
+    modello/agente avversario, lette dall'event log. Best-effort: campi null se
+    l'event log non e' configurato o non risponde.
+    """
+    return _games_stats_payload()
 
 
 # Rate limiting sulla creazione partite: senza tetto, un client può creare partite senza
