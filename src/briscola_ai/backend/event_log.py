@@ -68,6 +68,8 @@ class EventLogProtocol(Protocol):
 
     def health_check(self) -> bool: ...
 
+    def count_games(self) -> int | None: ...
+
     def close(self) -> None: ...
 
     def ensure_game(
@@ -145,6 +147,15 @@ class EventLog:
         except Exception:
             return False
         return True
+
+    def count_games(self) -> int | None:
+        """Numero di partite registrate (None se la query fallisce: diagnostica best-effort)."""
+        try:
+            with self._lock:
+                row = self._conn.execute("SELECT count(*) FROM games;").fetchone()
+            return int(row[0]) if row else None
+        except Exception:
+            return None
 
     def close(self) -> None:
         """Chiude la connessione SQLite."""
@@ -506,6 +517,17 @@ class PostgresEventLog:
                 except Exception:
                     return False
                 return True
+
+    def count_games(self) -> int | None:
+        """Numero di partite registrate (None se la query fallisce: diagnostica best-effort)."""
+        with self._lock:
+            try:
+                with self._conn.cursor() as cur:
+                    cur.execute("SELECT count(*) FROM games;")
+                    row = cur.fetchone()
+                return int(row[0]) if row else None
+            except Exception:
+                return None
 
     def _init_schema(self) -> None:
         """Crea tabelle e indici se non esistono (schema completo: niente migrazioni)."""

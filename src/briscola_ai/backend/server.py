@@ -175,15 +175,20 @@ def event_log_runtime_metadata() -> dict[str, str | bool | None]:
             "event_log_backend": None,
             "event_log_database_name": None,
             "event_log_database_host": None,
+            "event_log_games_recorded": None,
         }
     health_check = getattr(log, "health_check", None)
     healthy = bool(health_check()) if callable(health_check) else None
+    count_games = getattr(log, "count_games", None)
+    games_recorded = count_games() if callable(count_games) else None
     return {
         "event_log_available": True,
         "event_log_healthy": healthy,
         "event_log_backend": getattr(log, "backend_name", "unknown"),
         "event_log_database_name": getattr(log, "database_name", None),
         "event_log_database_host": getattr(log, "database_host", None),
+        # Diagnostica di curiosita'/monitoraggio: quante partite ha registrato l'event log.
+        "event_log_games_recorded": games_recorded,
     }
 
 
