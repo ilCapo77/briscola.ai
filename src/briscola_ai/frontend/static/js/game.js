@@ -658,6 +658,34 @@ document.addEventListener('DOMContentLoaded', () => {
     };
 
     /**
+     * Risincronizza lo stato dalla verita' del server dopo un errore di rete.
+     *
+     * Robustezza: un blip di rete durante un'azione NON deve diventare subito un
+     * errore in faccia al giocatore. Rileggiamo lo snapshot (GET idempotente, 2
+     * tentativi con pausa crescente) e lasciamo decidere alla versione del server
+     * se la mossa era arrivata oppure no.
+     */
+    const _resyncFromServer = async () => {
+        for (const delayMs of [400, 1200]) {
+            await new Promise((resolve) => setTimeout(resolve, delayMs));
+            try {
+                const current = getState();
+                if (!current.gameId) return false;
+                const obs = await API.getGameState(current.gameId, current.playerIndex);
+                _applyObservation(obs);
+                return true;
+            } catch (error) {
+                console.warn('Resync fallito, riprovo:', error?.message);
+            }
+        }
+        return false;
+    };
+
+    /** Heuristica: errore di rete/transporto (fetch fallita) vs errore logico del server. */
+    const _isNetworkError = (error) =>
+        error instanceof TypeError || /fetch|network|load failed|connessione/i.test(error?.message || '');
+
+    /**
      * Play a card
      */
     const playCard = async (cardIndex) => {
@@ -680,6 +708,32 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (error) {
             // In caso di errore, sblocchiamo la UI: lo snapshot potrebbe non arrivare.
             store.setState({ actionInFlight: false });
+
+            // Blip di rete: prima di mostrare un errore, risincronizza col server e
+            // decidi in base alla versione se la mossa era passata (risposta persa)
+            // oppure no (richiesta persa). Solo se anche il resync fallisce mostriamo
+            // l'errore: a quel punto il problema e' reale, non un singhiozzo.
+            const versionBefore = typeof state.observation?.server_version === 'number'
+                ? state.observation.server_version
+                : null;
+            if (_isNetworkError(error)) {
+                UI.showTurnMessage('Connessione instabile: sincronizzo con il server...');
+                const recovered = await _resyncFromServer();
+                if (recovered) {
+                    const obs = getState().observation;
+                    const versionAfter = typeof obs?.server_version === 'number' ? obs.server_version : null;
+                    if (versionBefore !== null && versionAfter !== null && versionAfter > versionBefore) {
+                        // La mossa era arrivata (si e' persa solo la risposta): UI gia' aggiornata.
+                        UI.showTurnMessage('');
+                    } else {
+                        // La mossa non e' arrivata al server: ripristina la mano e invita a riprovare.
+                        if (obs) updateUI(obs);
+                        UI.showTurnMessage('La mossa non è arrivata al server: riprova.');
+                    }
+                    return;
+                }
+            }
+
             // Ripristina la mano "normale" (rimuove highlight/disabled) ri-renderizzando dallo stato corrente.
             if (state.observation) updateUI(state.observation);
             UI.showTurnMessage(`Errore: ${error.message}`);

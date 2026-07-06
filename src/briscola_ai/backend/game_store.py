@@ -169,8 +169,24 @@ class RedisGameSessionStore:
             self._redis = client
         elif url is not None:
             import redis.asyncio as redis_asyncio  # import lazy: solo se si usa Redis
+            from redis.asyncio.retry import Retry
+            from redis.backoff import ExponentialBackoff
+            from redis.exceptions import ConnectionError as RedisConnectionError
+            from redis.exceptions import TimeoutError as RedisTimeoutError
 
-            self._redis = redis_asyncio.from_url(url, decode_responses=True)
+            # Robustezza ai blip (incidente 2026-07-06: "Connection refused" transitori):
+            # - retry con backoff esponenziale DENTRO il comando (3 tentativi, ~50-500ms):
+            #   un singhiozzo di rete si auto-ripara senza mai diventare un errore utente;
+            # - health_check_interval: una connessione rimasta inattiva viene verificata
+            #   (PING) prima dell'uso, cosi' le connessioni morte nel pool non esplodono
+            #   in faccia alla prima richiesta dopo una pausa.
+            self._redis = redis_asyncio.from_url(
+                url,
+                decode_responses=True,
+                retry=Retry(ExponentialBackoff(cap=0.5, base=0.05), retries=3),
+                retry_on_error=[RedisConnectionError, RedisTimeoutError],
+                health_check_interval=30,
+            )
         else:
             raise ValueError("RedisGameSessionStore richiede `url` oppure `client`.")
 
