@@ -192,6 +192,13 @@ def event_log_runtime_metadata() -> dict[str, str | bool | None]:
     }
 
 
+def _error_alerts_configured() -> bool:
+    """True se le notifiche email per gli errori sono configurate (env Mailgun presenti)."""
+    from .alerts import get_alert_config
+
+    return get_alert_config().enabled
+
+
 def _games_stats_payload() -> dict:
     """
     Statistiche aggregate delle partite registrate, per modello/agente avversario.
@@ -687,6 +694,33 @@ async def root():
     return {"message": "Benvenuto nelle API di Briscola AI"}
 
 
+@app.exception_handler(Exception)
+async def _unhandled_exception_handler(request, exc: Exception):
+    """
+    Rete di sicurezza: eccezione non gestita -> 500 pulito al client + notifica email
+    al maintainer (best-effort, con dedup: vedi backend/alerts.py). Il traceback resta
+    comunque nei log della piattaforma.
+    """
+    from fastapi.responses import JSONResponse
+
+    from .alerts import notify_exception
+
+    notify_exception(
+        exc,
+        context={
+            "method": getattr(request, "method", None),
+            "path": str(getattr(getattr(request, "url", None), "path", "")),
+            "client": getattr(getattr(request, "client", None), "host", None),
+        },
+    )
+    import logging
+
+    logging.getLogger("briscola.server").exception(
+        "Eccezione non gestita su %s", getattr(getattr(request, "url", None), "path", "?")
+    )
+    return JSONResponse(status_code=500, content={"detail": "Errore interno del server"})
+
+
 @app.get("/meta", response_model=dict)
 async def meta() -> dict:
     """
@@ -705,6 +739,7 @@ async def meta() -> dict:
         "dataset_requires_consent": mode == "dataset",
         "debug_state_endpoint_enabled": _debug_state_endpoint_enabled(),
         "cors_allow_origins": cors_allow_origins,
+        "error_alerts_configured": _error_alerts_configured(),
     }
 
 
@@ -1427,7 +1462,18 @@ async def _ws_subscriber(websocket: WebSocket, game_id: str, player_index: int) 
 @app.websocket("/ws/{game_id}/{player_index}")
 async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: int):
     """Endpoint WebSocket per aggiornamenti della partita in tempo reale"""
-    session = await game_store.get(game_id)
+    try:
+        session = await game_store.get(game_id)
+    except Exception as exc:
+        # Store (Redis) non raggiungibile: incidente reale visto in produzione il 2026-07-06.
+        # Degrada con grazia: 1013 = "try again later", il backoff del client riprova; e
+        # il maintainer riceve la notifica (con dedup) invece di scoprirlo dai log.
+        from .alerts import notify_exception
+
+        notify_exception(exc, context={"path": f"/ws/{game_id}/{player_index}", "phase": "store.get (open)"})
+        with suppress(Exception):
+            await websocket.close(code=1013, reason="Store non disponibile, riprova")
+        return
     if session is None:
         await websocket.close(code=1000, reason="Partita non trovata")
         return
@@ -1470,8 +1516,13 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
                 pass
 
     except WebSocketDisconnect:
-        # Best-effort: rileggiamo la sessione per loggare una server_version aggiornata (se esiste).
-        current = await game_store.get(game_id)
+        # Best-effort: rileggiamo la sessione per loggare una server_version aggiornata.
+        # La rilettura passa dallo store (Redis): se e' giu' NON deve trasformare una
+        # normale disconnessione in un'eccezione ASGI (incidente del 2026-07-06).
+        try:
+            current = await game_store.get(game_id)
+        except Exception:
+            current = None
         _safe_log_event(
             game_id,
             "ws_disconnected",
@@ -1480,6 +1531,13 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
             player_index=player_index,
             state=current.state if current is not None else None,
         )
+    except Exception as exc:
+        # Errore inatteso nel loop WS (fuori dal contratto disconnect): notifica + chiusura pulita.
+        from .alerts import notify_exception
+
+        notify_exception(exc, context={"path": f"/ws/{game_id}/{player_index}", "phase": "ws loop"})
+        with suppress(Exception):
+            await websocket.close(code=1011, reason="Errore interno")
     finally:
         # Ferma il task subscriber: la connessione non esiste più.
         sub_task.cancel()
