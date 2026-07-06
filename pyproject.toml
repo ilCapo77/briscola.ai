@@ -1,6 +1,6 @@
 [project]
 name = "briscola-ai"
-version = "0.29.1"
+version = "0.29.2"
 description = "A Briscola card game with AI capabilities"
 authors = []
 requires-python = ">=3.14"
@@ -31,6 +31,8 @@ dev = [
     "ruff>=0.9.0",
     "mypy>=1.14.0",
     "fakeredis>=2.21.0",
+    # Load test dell'infrastruttura (scripts/loadtest/): bot che giocano partite vere.
+    "locust>=2.32.0",
     # Solo per ispezione UI in locale (es. verifica layout/overlap). NON usato in prod.
     # Richiede anche `python -m playwright install chromium` per scaricare il browser.
     "playwright>=1.60.0",

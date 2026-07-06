@@ -82,12 +82,28 @@ Opzionale: registrare il sito su Google Search Console e inviare la sitemap.
 ### 3. Hardening Continuo
 
 Aggiungere test solo su casi reali sospetti o quando si toccano regole/observation/search.
+
+**Robustezza ai transitori (2026-07-06, v0.28.1→v0.29.1)**: dopo l'incidente di produzione
+del 2026-07-06 (Redis+Neon irraggiungibili ~12 min), l'app ha retry/degrado a ogni strato:
+riconnessione WS client con backoff+health check (fix zombie handler), riconciliazione
+delle mosse su blip di rete (resync dalla versione server, mai errore crudo al giocatore),
+retry Redis dentro i comandi (3 tentativi, ~0.5s) + health check pool, endpoint WS che
+degrada con 1013 se lo store e' giu'. Notifiche email errori via Mailgun pronte ma NON
+configurate in prod (opt-in via env). Primi test e2e JS (Playwright).
+
+**Load test infrastruttura (2026-07-06, `scripts/loadtest/`)**: bot Locust che giocano
+partite complete via REST. Risultato su prod (free tier): con `bc_model` 10 giocatori
+simultanei = 0 errori ma latenza mossa 2x (692ms medi); con l'avversario di default
+(PIMC belief 64x10) 10 partite simultanee saturano le repliche (3.5% di 502/503 per
+~90s, poi autoscale recupera). **Capacita' reale col default: ~5-8 giocatori simultanei.**
+Leva futura se serve: default a 32x8 (~2x capacita', costo in forza da misurare).
+Le partite bot si escludono dal dataset con `WHERE client_id != 'loadtest-bot'`.
+
 Debito minore residuo (nessuno urgente; prenderlo quando si tocca l'area):
 
 - DX script: `scripts/_common.py` condiviso e `logging` al posto di `print`;
-- backend: test e2e WebSocket attraverso l'app; gestione riconnessione Redis nello store;
 - AI: RNG serial vs parallel non riproducibile cross-`workers` in `decision_quality`;
-- frontend: zero test JS; CSS monolitico (~900 righe).
+- frontend: CSS monolitico (~900 righe).
 
 ### 4. Nuovo Ciclo Di Training Solo Con Nuova Ipotesi
 
