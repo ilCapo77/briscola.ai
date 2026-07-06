@@ -41,6 +41,13 @@ const API = (() => {
     let intentionalDisconnect = false;
     let currentOnMessage = null;
     let currentCallbacks = null;
+    // Liveness: timestamp dell'ultimo messaggio ricevuto (pong inclusi). Se il socket
+    // resta "OPEN" ma muto oltre la soglia (connessione mezza morta: standby, cambio
+    // rete), lo chiudiamo noi per innescare la riconnessione.
+    let lastMessageAtMs = 0;
+    const PING_INTERVAL_MS = 15000;
+    const STALE_CONNECTION_MS = 45000;
+    let lifecycleListenersRegistered = false;
 
     /**
      * Calcola un delay di riconnessione con backoff esponenziale (con jitter).
@@ -73,16 +80,56 @@ const API = (() => {
             pingIntervalId = null;
         }
 
-        if (websocket && websocket.readyState !== WebSocket.CLOSED) {
-            websocket.close(1000, STRINGS.intentionalDisconnect);
+        if (websocket) {
+            // Stacca i gestori PRIMA di chiudere: `close()` scatena `onclose` in modo
+            // asincrono, e un gestore rimasto vivo sul vecchio socket innescherebbe una
+            // seconda catena di riconnessioni in parallelo alla nuova (flapping).
+            websocket.onopen = null;
+            websocket.onmessage = null;
+            websocket.onerror = null;
+            websocket.onclose = null;
+            if (websocket.readyState !== WebSocket.CLOSED) {
+                websocket.close(1000, STRINGS.intentionalDisconnect);
+            }
         }
         websocket = null;
-        reconnectAttempt = 0;
 
         if (resetGameInfo) {
+            // Teardown completo (fine partita): qui sì che il backoff riparte da zero.
+            reconnectAttempt = 0;
             API.gameId = null;
             API.playerIndex = null;
         }
+    };
+
+    /**
+     * Forza un controllo di salute e, se serve, una riconnessione IMMEDIATA.
+     *
+     * Chiamato quando il browser segnala che le condizioni sono cambiate (rete tornata,
+     * tab di nuovo visibile): inutile aspettare il timer di backoff se possiamo già
+     * sapere che il socket è assente, chiuso o muto da troppo tempo.
+     */
+    const _kickReconnect = (reason) => {
+        if (intentionalDisconnect || API.gameId === null || API.playerIndex === null) return;
+        const socketAlive = websocket && websocket.readyState === WebSocket.OPEN;
+        const stale = socketAlive && lastMessageAtMs > 0 && Date.now() - lastMessageAtMs > STALE_CONNECTION_MS;
+        if (socketAlive && !stale) return;
+
+        console.log(`WS health check (${reason}): riconnessione immediata`);
+        if (reconnectTimeoutId) {
+            clearTimeout(reconnectTimeoutId);
+            reconnectTimeoutId = null;
+        }
+        connectWebSocket(API.gameId, API.playerIndex, currentCallbacks || currentOnMessage);
+    };
+
+    const _registerLifecycleListeners = () => {
+        if (lifecycleListenersRegistered) return;
+        lifecycleListenersRegistered = true;
+        window.addEventListener('online', () => _kickReconnect('online'));
+        document.addEventListener('visibilitychange', () => {
+            if (document.visibilityState === 'visible') _kickReconnect('visibilitychange');
+        });
     };
 
     /**
@@ -323,11 +370,16 @@ const API = (() => {
             currentOnMessage = onMessage.onMessage;
         }
 
-        websocket = new WebSocket(wsUrl);
+        _registerLifecycleListeners();
+        const ws = new WebSocket(wsUrl);
+        websocket = ws;
+        lastMessageAtMs = Date.now();
 
-        websocket.onopen = () => {
+        ws.onopen = () => {
+            if (ws !== websocket) return; // istanza rimpiazzata nel frattempo
             console.log(STRINGS.wsEstablished);
             reconnectAttempt = 0;
+            lastMessageAtMs = Date.now();
             // Salva ID partita e indice giocatore per la riconnessione
             API.gameId = gameId;
             API.playerIndex = playerIndex;
@@ -341,19 +393,30 @@ const API = (() => {
                 currentCallbacks.onOpen();
             }
 
-            // Invia un ping ogni 30 secondi per mantenere viva la connessione (evita leak: 1 solo interval).
+            // Heartbeat: ping periodico + rilevazione delle connessioni "mezze morte".
+            // Il server risponde pong, quindi su una connessione sana arriva traffico a ogni
+            // giro; se il silenzio supera la soglia, chiudiamo NOI il socket cosi' `onclose`
+            // innesca la normale catena di riconnessione (senza questo, dopo uno standby o
+            // un cambio rete il socket puo' restare OPEN ma muto per sempre).
             if (pingIntervalId) {
                 clearInterval(pingIntervalId);
                 pingIntervalId = null;
             }
             pingIntervalId = setInterval(() => {
-                if (websocket && websocket.readyState === WebSocket.OPEN) {
-                    websocket.send(JSON.stringify({ type: 'ping' }));
+                if (ws !== websocket) return;
+                if (ws.readyState !== WebSocket.OPEN) return;
+                if (Date.now() - lastMessageAtMs > STALE_CONNECTION_MS) {
+                    console.warn('WS muto oltre soglia: chiusura forzata per riconnettere');
+                    ws.close(4000, 'stale connection');
+                    return;
                 }
-            }, 30000);
+                ws.send(JSON.stringify({ type: 'ping' }));
+            }, PING_INTERVAL_MS);
         };
 
-        websocket.onmessage = (event) => {
+        ws.onmessage = (event) => {
+            if (ws !== websocket) return; // messaggi tardivi di un socket rimpiazzato
+            lastMessageAtMs = Date.now();
             try {
                 const data = JSON.parse(event.data);
 
@@ -373,14 +436,16 @@ const API = (() => {
             }
         };
 
-        websocket.onerror = (error) => {
+        ws.onerror = (error) => {
+            if (ws !== websocket) return;
             console.error(`${STRINGS.wsError}:`, error);
             if (currentCallbacks && typeof currentCallbacks.onError === 'function') {
                 currentCallbacks.onError(error);
             }
         };
 
-        websocket.onclose = (event) => {
+        ws.onclose = (event) => {
+            if (ws !== websocket) return; // chiusura di un socket gia' rimpiazzato: ignora
             console.log(`${STRINGS.wsClosed}:`, event.code, event.reason);
 
             if (pingIntervalId) {
@@ -410,7 +475,7 @@ const API = (() => {
             }
         };
 
-        return websocket;
+        return ws;
     };
 
     /**
