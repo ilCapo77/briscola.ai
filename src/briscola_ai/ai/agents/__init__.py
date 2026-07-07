@@ -28,7 +28,14 @@ from .registry import (
     build_agent,
     list_agent_specs,
 )
-from .rule_based import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent, card_to_short_string
+from .rule_based import (
+    GreedyPointsAgent,
+    HeuristicAgentV1,
+    HeuristicAgentV2,
+    HeuristicTrumpSaverAgent,
+    RandomAgent,
+    card_to_short_string,
+)
 from .value_lookahead import ValueLookaheadAgent, ValueLookaheadStats
 
 __all__ = [
@@ -44,6 +51,7 @@ __all__ = [
     "GreedyPointsAgent",
     "HeuristicAgentV1",
     "HeuristicAgentV2",
+    "HeuristicTrumpSaverAgent",
     "HybridEndgameAgent",
     "PIMCActionValue",
     "PIMCAgent",

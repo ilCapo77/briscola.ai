@@ -485,3 +485,215 @@ class HeuristicAgentV2:
             return (c.rank.points, is_trump, c.rank.trick_strength)
 
         return min(range(len(hand)), key=discard_key)
+
+
+@dataclass(frozen=True)
+class HeuristicTrumpSaverAgent:
+    """
+    Euristica “trump saver”: codifica lo stile dei giocatori umani che hanno battuto
+    `bc_model_pimc_belief_64x10` (base v10) in produzione (audit event log 2026-07-07).
+
+    Origine (importante per capire il PERCHÉ di ogni regola)
+    --------------------------------------------------------
+    L'analisi delle 7 vittorie umane ha mostrato un pattern ricorrente, speculare a un
+    bias di famiglia dei modelli self-play (che nei rollout assumono un avversario che
+    NON conserva briscoline per tagliare):
+
+    1. aprire “liscio” (carte a 0 punti, mai carichi) e sondare senza regalare punti;
+    2. tenere i carichi (assi/tre) e incassarli DA SECONDI: in 2-player chi risponde
+       non può essere tagliato da nessuno, quindi il carico giocato su presa vinta è
+       punti in cassaforte;
+    3. conservare le briscoline per tagliare i carichi che l'avversario prima o poi
+       guida (l'IA v10 ha aperto 9 carichi e ne ha persi 8 così: ~111 punti);
+    4. non sprecare MAI briscole su piatti poveri (≤2 punti) durante le pescate.
+
+    Questa euristica serve come SONDA DI EXPLOITABILITY: se contro v10 rende più di
+    quanto la sua forza generale (vs heuristic_v1/v2) giustifichi, il bias è confermato
+    e diventa un'ipotesi di training (avversari “trump-saver” nel cartellone).
+
+    Come tutti gli agenti del progetto vede solo `PlayerObservation` (anti-cheat);
+    il card counting usa esclusivamente `seen_cards_onehot` (informazione pubblica).
+    Solo dominio: NON è tradotta nel fast path (non usarla nei rollout fast/numba).
+    """
+
+    spec: ClassVar[AgentSpec] = AgentSpec(
+        name="heuristic_trump_saver",
+        label="Euristica trump saver",
+        description_it=(
+            "Euristica 2-player che imita i vincitori umani contro v10: apre liscio, incassa i carichi "
+            "da seconda, conserva le briscoline per tagliare i carichi avversari e non spreca briscole "
+            "su piatti poveri. Nata come sonda di exploitability dall'audit di produzione 2026-07-07."
+        ),
+    )
+    name: str = "heuristic_trump_saver"
+
+    # Soglia “carico”: asso (11) e tre (10) sono le carte da proteggere/tagliare.
+    _CARICO_POINTS: ClassVar[int] = 10
+
+    def choose_card_index(self, observation: PlayerObservation, *, rng: random.Random) -> int:
+        hand = observation.hand
+        if not hand:
+            raise ValueError("Mano vuota: nessuna azione possibile")
+
+        trump_suit: Suit | None = observation.trump_card.suit if observation.trump_card else None
+
+        if observation.num_players != 2 or trump_suit is None:
+            # Come v1/v2: fuori dal caso 2-player (o senza briscola nota) nessuna pretesa di stile.
+            return rng.randrange(len(hand))
+
+        if not observation.table_cards:
+            return self._choose_lead_card_index(
+                hand,
+                trump_suit=trump_suit,
+                cards_remaining_in_deck=observation.deck_size,
+                seen_cards_onehot=observation.seen_cards_onehot,
+            )
+
+        lead_card, lead_player = observation.table_cards[0]
+        return self._choose_response_card_index(
+            hand,
+            player_index=observation.player_index,
+            lead_card=lead_card,
+            lead_player=lead_player,
+            trump_suit=trump_suit,
+            cards_remaining_in_deck=observation.deck_size,
+        )
+
+    @staticmethod
+    def _unseen_cards(hand: tuple[Card, ...], seen_cards_onehot: tuple[int, ...]) -> list[Card]:
+        """
+        Carte “vive e ignote”: non viste pubblicamente e non in mano a noi.
+
+        Sono le uniche carte che l'avversario può avere (mano) o pescare (mazzo):
+        è l'insieme contro cui va verificata la sicurezza di una guida.
+        """
+        my_ids = {card_to_id(c) for c in hand}
+        return [
+            id_to_card(card_id) for card_id, seen in enumerate(seen_cards_onehot) if not seen and card_id not in my_ids
+        ]
+
+    def _is_master(
+        self,
+        card: Card,
+        *,
+        hand: tuple[Card, ...],
+        trump_suit: Suit,
+        seen_cards_onehot: tuple[int, ...],
+    ) -> bool:
+        """
+        True se `card`, guidata da primi, non può essere battuta da NESSUNA carta ignota.
+
+        Riusa `who_wins_trick` del dominio (test-àncora anti-divergenza) invece di
+        duplicare le regole di presa: master = vinciamo contro ogni risposta possibile.
+        """
+        for other in self._unseen_cards(hand, seen_cards_onehot):
+            if who_wins_trick([(card, 0), (other, 1)], trump_suit) != 0:
+                return False
+        return True
+
+    def _choose_lead_card_index(
+        self,
+        hand: tuple[Card, ...],
+        *,
+        trump_suit: Suit,
+        cards_remaining_in_deck: int,
+        seen_cards_onehot: tuple[int, ...],
+    ) -> int:
+        """
+        Scelta quando siamo primi di mano.
+
+        Priorità (dallo stile dei vincitori umani):
+        1. incassare un master conveniente: a mazzo vuoto qualsiasi master (il più ricco);
+           durante le pescate solo un carico NON di briscola divenuto imbattibile
+           (niente briscole ignote in giro): punti in cassaforte senza rischio taglio;
+        2. altrimenti guidare “liscio”: MAI un carico; minimizza (punti, briscola, forza).
+           A differenza di v1/v2 questo vale ANCHE a mazzo vuoto: guidare forte ma non
+           master a fine partita è esattamente il regalo che gli umani puniscono.
+        """
+        masters = [
+            i
+            for i in range(len(hand))
+            if self._is_master(hand[i], hand=hand, trump_suit=trump_suit, seen_cards_onehot=seen_cards_onehot)
+        ]
+        if masters:
+            richest = max(masters, key=lambda i: (hand[i].rank.points, hand[i].rank.trick_strength))
+            card = hand[richest]
+            cashable_now = cards_remaining_in_deck <= 0 or (
+                card.suit != trump_suit and card.rank.points >= self._CARICO_POINTS
+            )
+            if cashable_now:
+                return richest
+
+        def lead_key(i: int) -> tuple[int, int, int, int]:
+            card = hand[i]
+            is_carico = 1 if card.rank.points >= self._CARICO_POINTS else 0
+            is_trump = 1 if card.suit == trump_suit else 0
+            return (is_carico, card.rank.points, is_trump, card.rank.trick_strength)
+
+        return min(range(len(hand)), key=lead_key)
+
+    def _choose_response_card_index(
+        self,
+        hand: tuple[Card, ...],
+        *,
+        player_index: int,
+        lead_card: Card,
+        lead_player: int,
+        trump_suit: Suit,
+        cards_remaining_in_deck: int,
+    ) -> int:
+        """
+        Scelta quando rispondiamo (secondi di mano).
+
+        Priorità (dallo stile dei vincitori umani):
+        1. se vinciamo senza briscola: gioca la vincente col MASSIMO dei punti
+           (il carico incassato da secondi è al sicuro: in 2p nessuno gioca dopo di noi);
+        2. se serve la briscola: taglia SEMPRE un carico avversario (è l'exploit-chiave),
+           taglia un piatto medio (re/cavallo) solo con briscolina a 0 punti, e MAI
+           piatti poveri (≤2 punti) durante le pescate; a mazzo vuoto prendi comunque;
+           in ogni caso briscola vincente minima (anti-overkill);
+        3. altrimenti scarta economico (pochi punti, mai briscole se evitabile).
+        """
+        winning_non_trumps: list[int] = []
+        winning_trumps: list[int] = []
+        for i, card in enumerate(hand):
+            trick_cards = [(lead_card, lead_player), (card, player_index)]
+            if who_wins_trick(trick_cards, trump_suit) == player_index:
+                (winning_trumps if card.suit == trump_suit else winning_non_trumps).append(i)
+
+        if winning_non_trumps:
+            # Incassa: massimo punti; a parità conserva la carta più forte per dopo.
+            def cash_value(idx: int) -> tuple[int, int]:
+                c = hand[idx]
+                return (c.rank.points, -c.rank.trick_strength)
+
+            return max(winning_non_trumps, key=cash_value)
+
+        if winning_trumps:
+
+            def win_cost_trump(idx: int) -> tuple[int, int]:
+                c = hand[idx]
+                return (c.rank.points, c.rank.trick_strength)
+
+            best_trump_idx = min(winning_trumps, key=win_cost_trump)
+            best_trump = hand[best_trump_idx]
+            lead_points = lead_card.rank.points
+
+            if cards_remaining_in_deck <= 0:
+                # Endgame: senza pescate prendere (e guidare la prossima) vale quasi sempre.
+                return best_trump_idx
+            if lead_points >= self._CARICO_POINTS:
+                # Il carico avversario si taglia SEMPRE, anche con l'asso di briscola:
+                # è il trasferimento di punti che ha deciso le partite di produzione.
+                return best_trump_idx
+            if lead_points >= 3 and best_trump.rank.points == 0:
+                # Piatto medio (re/cavallo): solo se il taglio è gratis (briscolina).
+                return best_trump_idx
+            # Piatti poveri durante le pescate: la briscola si conserva, si scarta.
+
+        def discard_key(idx: int) -> tuple[int, int, int]:
+            c = hand[idx]
+            is_trump = 1 if c.suit == trump_suit else 0
+            return (c.rank.points, is_trump, c.rank.trick_strength)
+
+        return min(range(len(hand)), key=discard_key)

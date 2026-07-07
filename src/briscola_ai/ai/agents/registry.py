@@ -19,7 +19,13 @@ from ..models.value_model import load_value_model_npz
 from .base import Agent, AgentSpec
 from .hybrid_endgame import HybridEndgameAgent
 from .pimc import PIMCAgent
-from .rule_based import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
+from .rule_based import (
+    GreedyPointsAgent,
+    HeuristicAgentV1,
+    HeuristicAgentV2,
+    HeuristicTrumpSaverAgent,
+    RandomAgent,
+)
 from .value_lookahead import ValueLookaheadAgent
 
 _AGENT_BUILDERS: dict[str, type[Agent]] = {
@@ -27,6 +33,9 @@ _AGENT_BUILDERS: dict[str, type[Agent]] = {
     "greedy_points": GreedyPointsAgent,
     "heuristic_v1": HeuristicAgentV1,
     "heuristic_v2": HeuristicAgentV2,
+    # Sonda di exploitability (audit produzione 2026-07-07): disponibile per valutazioni
+    # e training, ma NON in `list_agent_specs()` — non è un avversario offerto dalla UI.
+    "heuristic_trump_saver": HeuristicTrumpSaverAgent,
     "hybrid_endgame": HybridEndgameAgent,
 }
 

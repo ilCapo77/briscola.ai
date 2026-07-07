@@ -24,7 +24,7 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from briscola_ai.ai.agents import Agent, build_agent, list_agent_specs
+from briscola_ai.ai.agents import Agent, agent_uses_selected_model, build_agent, list_agent_specs
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 from briscola_ai.ai.evaluation.round_robin import seat_fair_avg_point_diff_ci, seat_fair_score_rate_ci
 from briscola_ai.ai.fast.evaluation import (
@@ -132,7 +132,9 @@ def main() -> int:
             "fast-compatible; `numba` supporta `agent0=bc_model` MLP contro baseline o `agent1=bc_model` MLP."
         ),
     )
-    agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
+    # `heuristic_trump_saver` è nel registry ma non in `list_agent_specs()` (sonda di
+    # exploitability, non offerta dalla UI): qui la aggiungiamo esplicitamente per le valutazioni.
+    agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model", "heuristic_trump_saver"]
     parser.add_argument(
         "--agent0",
         default="random",
@@ -222,12 +224,15 @@ def main() -> int:
             raise ValueError(f"Benchmark non supportato: {args.benchmark!r}")
 
     def _build(*, agent_name: str, model_path: str, agent_flag: str) -> Agent:
-        if agent_name == "bc_model":
+        if agent_uses_selected_model(agent_name):
+            # Vale per `bc_model` e per tutti gli agenti del catalogo che avvolgono un `.npz`
+            # (hybrid endgame, value lookahead, PIMC): il registry sa come costruirli e
+            # risolve da solo gli asset ausiliari (value/belief) dalla directory modelli.
             if not model_path.strip():
-                raise ValueError(f"`--{agent_flag}-model` obbligatorio quando `--{agent_flag} bc_model`.")
-            return BCModelAgent.from_npz(model_path.strip())
+                raise ValueError(f"`--{agent_flag}-model` obbligatorio quando `--{agent_flag} {agent_name}`.")
+            return build_agent(agent_name, model_path=Path(model_path.strip()))
         if model_path.strip():
-            raise ValueError(f"`--{agent_flag}-model` è valido solo quando `--{agent_flag} bc_model`.")
+            raise ValueError(f"`--{agent_flag}-model` è valido solo per gli agenti basati su modello `.npz`.")
         return build_agent(agent_name)
 
     if args.seed_suite_range_start is None and args.seed_suite_range_step != 1:
