@@ -6,21 +6,30 @@
 
 ## Stato Corrente
 
-- Versione: `0.25.0`. Rilasciati in v0.24.x: diario di bordo sul sito (`/diario`, fonte
-  `static/diario.md` + approfondimenti `docs/diario/`), default UI =
-  `bc_model_pimc_belief_64x10`, persistenza selezioni in localStorage, SEO+favicon.
-  In v0.25.0: search PIMC su kernel Numba (produzione ~2× più economica per mossa).
+- Versione: `0.31.0` (2026-07-07). In 0.30.0: sonda trump_saver (dominio+fast/numba),
+  cold start FastAPI Cloud 19s→13.7s (warm-up/provisioning in background, modelli
+  committati nell'immagine). In 0.31.0: promozione v11, default UI =
+  `bc_model_pimc_belief_16x8` con search PYTHON (via il JIT della search dal runtime:
+  −8s di compilazione a ogni cold start; il solver endgame resta numba, ~2s in background,
+  perché vive nel percorso caldo dei rollout dove python costerebbe 2×).
 - Produzione: <https://ai.briscola.dev> (FastAPI Cloud, stato su Redis, realtime pub/sub,
   event log Postgres in modalità `dataset` con eventi `ai_action` auditabili).
-- Modello consigliato: `best_a2c_v10.npz` (encoder **v4**, hidden 256). Promosso v0.27.0:
-  il "giocatore definitivo" — 30M partite vs rosa completa di avversari (PIMC belief 25% /
-  value-lookahead 35% / specchio 15% / bar 25%, dosi del maintainer, base v9): **+0.66 su
-  v9** (CI coppie +0.51..+0.81) e **+20.52 su heuristic_v1** (record assoluto, era 18.78).
-  Rendimenti decrescenti visibili (+0.97 → +0.66): asintoto vicino.
-- Avversari avanzati selezionabili: **`bc_model_pimc_belief_64x10`** (il più forte: PIMC 64
-  determinizzazioni pesate dalla belief, finestra 10 — +3.66 su v8+solver, CI +3.32..+4.00,
-  ~37 ms/mossa pensata con la search JIT di v0.25.0; release v0.23.0), `bc_model_value_lookahead_8x8` (+2.12, più
-  leggero), `bc_model_pimc_16x8`.
+  **Scale-to-zero dopo ~90s di idle** (misurato dai log): il cold start è frequente.
+- Modello consigliato: `best_a2c_v11.npz` (encoder **v4**, hidden 256, SENZA overkill
+  guard: misurato dannoso su v11, −0.5). Promosso v0.31.0 — ipotesi dose-shift: 40% del
+  cartellone al maestro PIMC 16×8 belief (dose tolta al VL), base/maestri v10, **5M
+  partite (6× meno di v10)**: **+0.85 su v10** (CI coppie +0.71..+0.99) e **+20.80 su
+  heuristic_v1** (record assoluto, era 20.52). La curva dei rendimenti (+2.46 → +0.97 →
+  +0.66) si è RIALZATA: conta la dose/qualità del maestro, non il volume.
+- Avversari avanzati selezionabili: **`bc_model_pimc_belief_16x8`** (default: +3.36 su
+  v11+solver, CI +3.05..+3.66, ~15 ms/mossa pensata, search python),
+  `bc_model_pimc_belief_64x10` (il più forte: +3.9, ~73 ms/mossa in python),
+  `bc_model_value_lookahead_8x8`, `bc_model_pimc_16x8`.
+- **PRIMA del prossimo deploy (CRITICO)**: rimuovere dal cloud le env
+  `BRISCOLA_MODEL_URL`/`BRISCOLA_MODEL_SHA256` (+ le coppie VALUE/BELIEF): pinnano la v10
+  e, col nuovo `DEFAULT_MODEL_ID=best_a2c_v11.npz`, il mismatch SHA farebbe riscaricare
+  la v10 SOPRA il file v11 committato. I tre asset sono nell'immagine: il provisioning
+  serve solo come fallback.
 - Anti-cheat: agenti e modelli ricevono solo `PlayerObservation`, mai `GameState` completo.
   La vista full-state di debug è opt-in (`BRISCOLA_DEBUG_STATE_ENDPOINT=1`), 403 di default.
 - CI GitHub Actions: ruff format/check, mypy, pytest+coverage su ogni push/PR. Lezione

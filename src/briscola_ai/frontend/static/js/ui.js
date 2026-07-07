@@ -483,12 +483,14 @@ const UI = (() => {
         });
 
         // Default: l'ultima scelta dell'utente (localStorage) se ancora disponibile;
-        // altrimenti la variante più forte (PIMC belief), con fallback a scendere.
+        // altrimenti il PIMC belief in config agile 16x8 (quasi tutto l'edge della search
+        // a ~1/5 della CPU del 64x10: piu' capacita' per replica), con fallback a scendere.
         const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
         const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
         const stored = _readStoredSelection(AI_AGENT_STORAGE_KEY);
         let defaultAgent;
         if (isAvail(stored)) defaultAgent = stored;
+        else if (isAvail('bc_model_pimc_belief_16x8')) defaultAgent = 'bc_model_pimc_belief_16x8';
         else if (isAvail('bc_model_pimc_belief_64x10')) defaultAgent = 'bc_model_pimc_belief_64x10';
         else if (isAvail('bc_model')) defaultAgent = 'bc_model';
         else if (isAvail('heuristic_v1')) defaultAgent = 'heuristic_v1';

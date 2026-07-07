@@ -205,6 +205,25 @@ MODEL_SPECS: list[ModelSpec] = [
             "(+20.52, up from 18.78): both progression meters at their maximum."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v11",
+        path=_rel("data/models/best_a2c_v11.npz"),
+        role="official best",
+        status="promoted",
+        order=10,
+        progress_source="benchmarks/experiments/fase3/v11_vs_h1_big.json",
+        progress_score=20.80,
+        h2h_source="benchmarks/experiments/fase3/v11_vs_v10_big.json",
+        h2h_score=0.85,
+        decision="Promoted as recommended model for the v0.31.0 release.",
+        notes=(
+            "Dose-shift hypothesis validated: 40% of the panel to the PIMC 16x8 belief teacher "
+            "(dose moved from the fading value-lookahead), base and teachers on v10, only 5M games "
+            "(6x fewer than v10). Beats v10 +0.85 head-to-head (above the +0.3..+0.5 success band: "
+            "the diminishing-returns curve bent UP) and sets a new heuristic_v1 record (+20.80). "
+            "Runs WITHOUT the overkill guard, measured harmful on this model (-0.5 with guard on)."
+        ),
+    ),
 ]
 
 
@@ -813,16 +832,13 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
     models = model_rows()
     promotion = promotion_rows()
     quality = decision_quality_rows()
+    # Derivato da MODEL_SPECS (fonte di verita'), NON hardcodato: la lista fissa aveva
+    # gia' causato una promozione senza riga nel grafico (v11, 2026-07-07). Un nuovo best
+    # promosso con progress_score entra nel Dashboard automaticamente.
     progress_model_ids = {
-        "best_a2c",
-        "best_a2c_v3",
-        "best_a2c_v4",
-        "best_a2c_v5",
-        "best_a2c_v6",
-        "best_a2c_v7",
-        "best_a2c_v8",
-        "best_a2c_v9",
-        "best_a2c_v10",
+        spec.model_id
+        for spec in MODEL_SPECS
+        if spec.role == "official best" and spec.status == "promoted" and spec.progress_score is not None
     }
     progress_models = [m for m in models if m["model_id"] in progress_model_ids]
 
