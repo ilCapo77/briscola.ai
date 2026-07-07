@@ -114,6 +114,10 @@ Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Il b
   - `0.1.x` (patch): fix/refactor/test/doc/performance senza cambiare contratti pubblici.
   - `0.(n+1).0` (minor): nuove feature visibili o cambi rilevanti a componenti/pipeline; anche per cambi **breaking** ai contratti pubblici (API/WS/DTO o schema dataset/export), con nota esplicita.
   - L'agente segnala quando un change merita un bump e propone la versione; la decisione finale resta al maintainer.
+  - **`uv lock` per ogni bump**: il lockfile registra anche la versione di `briscola-ai`; senza
+    rigenerarlo il build di FastAPI Cloud fallisce (`uv sync --locked` rifiuta il mismatch —
+    successo il 2026-07-07 con la 0.30.0). Quindi: bump in `pyproject.toml` → `uv lock` →
+    committa ENTRAMBI i file insieme.
   - **Tag git per ogni bump**: dopo aver bumpato `pyproject.toml`, crea il tag annotato corrispondente e pushalo, così la serie `vX.Y.Z` su GitHub resta completa e allineata alla history:
     ```bash
     git tag -a vX.Y.Z -m "Versione X.Y.Z"
