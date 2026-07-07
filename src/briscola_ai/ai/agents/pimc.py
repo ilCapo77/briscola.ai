@@ -31,7 +31,7 @@ from ...domain.engine import PlayCardAction, step
 from ...domain.observation import PlayerObservation, make_player_observation
 from ...domain.state import GameState, PlayerState
 from ..encoding.observation_encoder import encode_player_observation_2p
-from ..endgame.numba_solver import choose_endgame_card_numba
+from ..endgame.fast_solver import solve_endgame_fast
 from ..models.belief_model import MLPBeliefModel, infer_belief_encoder_version
 from .base import Agent, AgentSpec
 from .hybrid_endgame import reconstruct_endgame_state
@@ -467,12 +467,23 @@ def rollout_to_terminal(
 
         observation = make_player_observation(cursor, cursor.current_turn)
         if use_endgame_solver and len(cursor.deck) == 0:
+            # Endgame a informazione perfetta (lo stato determinizzato è completo): si
+            # risolve UNA volta sola e si segue la principal variation fino al termine,
+            # invece di ri-risolvere a ogni carta come si faceva col kernel numba.
+            # Ogni linea ottima raggiunge lo stesso delta minimax, quindi il valore del
+            # rollout è identico; con ~1/6 delle chiamate il solver PYTHON (~0.8 ms sul
+            # caso peggiore) diventa sostenibile nel percorso caldo — è ciò che rende il
+            # runtime web zero-numba (2026-07-07).
             try:
-                card_index = choose_endgame_card_numba(cursor)
-                if not 0 <= card_index < len(observation.hand):
-                    card_index = _safe_agent_card_index(rollout_agent, observation, rng=rng, metrics=metrics)
+                solution = solve_endgame_fast(cursor)
             except ValueError:
                 card_index = _safe_agent_card_index(rollout_agent, observation, rng=rng, metrics=metrics)
+            else:
+                for mover, move_index in solution.principal_variation:
+                    cursor, result = step(cursor, PlayCardAction(player_index=mover, card_index=move_index))
+                    if result.error:
+                        raise RuntimeError(f"Errore durante rollout PIMC (PV endgame): {result.error}")
+                continue
         else:
             card_index = _safe_agent_card_index(rollout_agent, observation, rng=rng, metrics=metrics)
 
@@ -626,7 +637,7 @@ class PIMCAgent:
 
         if observation.deck_size == 0 and self.use_endgame_solver:
             try:
-                card_index = choose_endgame_card_numba(reconstruct_endgame_state(observation))
+                card_index = solve_endgame_fast(reconstruct_endgame_state(observation)).best_card_index
                 if 0 <= card_index < len(observation.hand):
                     self.metrics.endgame_solver_decisions += 1
                     return card_index

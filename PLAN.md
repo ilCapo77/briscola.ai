@@ -6,12 +6,16 @@
 
 ## Stato Corrente
 
-- Versione: `0.31.0` (2026-07-07). In 0.30.0: sonda trump_saver (dominio+fast/numba),
+- Versione: `0.31.1` (2026-07-07). In 0.30.0: sonda trump_saver (dominio+fast/numba),
   cold start FastAPI Cloud 19s→13.7s (warm-up/provisioning in background, modelli
   committati nell'immagine). In 0.31.0: promozione v11, default UI =
-  `bc_model_pimc_belief_16x8` con search PYTHON (via il JIT della search dal runtime:
-  −8s di compilazione a ogni cold start; il solver endgame resta numba, ~2s in background,
-  perché vive nel percorso caldo dei rollout dove python costerebbe 2×).
+  `bc_model_pimc_belief_16x8` con search PYTHON. In 0.31.1: **runtime web ZERO-NUMBA** —
+  anche il solver endgame è python (`solve_endgame_fast`, 0.09 ms/chiamata) con playout
+  della principal variation nei rollout (una soluzione per rollout invece di una per
+  carta: stesso delta minimax, esiti IDENTICI al bit su 400 partite a parità di seed).
+  Costo: 16.6 vs 17.0 ms/mossa del numba (pari). Guadagni: niente warm-up JIT, −47 MB
+  RSS per replica (116→69), import app 0.23s. I kernel numba restano per training e
+  benchmark (import PIGRO via PEP 562 in `ai/endgame/__init__`).
 - Produzione: <https://ai.briscola.dev> (FastAPI Cloud, stato su Redis, realtime pub/sub,
   event log Postgres in modalità `dataset` con eventi `ai_action` auditabili).
   **Scale-to-zero dopo ~90s di idle** (misurato dai log): il cold start è frequente.

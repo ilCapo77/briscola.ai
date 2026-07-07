@@ -80,42 +80,21 @@ def _provision_startup_models() -> list[str]:
     return messages
 
 
-def _warm_up_runtime_kernels() -> None:
-    """
-    Compila best-effort i kernel JIT usati nel runtime.
-
-    Dal 2026-07-07 il runtime compila SOLO il solver endgame Numba (~0.6s locali, ~2s in
-    cloud): usato nei rollout della search PIMC (percorso caldo: fino a ~6 chiamate per
-    rollout, dove il solver python costerebbe ~2x per mossa pensata) e nelle decisioni a
-    mazzo vuoto. La search PIMC in produzione è tornata alla versione python
-    (`use_numba_search=False` nel registry): stessa forza, e spariscono ~8s di
-    compilazione a ogni cold start delle repliche (misurati il 2026-07-07).
-    """
-    from .ai.endgame import warm_up_numba_endgame_solver
-
-    warm_up_numba_endgame_solver()
-
-
 async def _run_startup_background_work() -> None:
     """
-    Provisioning modelli + warm-up JIT, DOPO che l'app ha iniziato a servire.
+    Provisioning modelli DOPO che l'app ha iniziato a servire.
 
     Perché in background (misurato in produzione il 2026-07-07, log FastAPI Cloud):
-    su scale-to-zero l'idle timeout è ~90s, quindi il cold start è frequentissimo, e il
-    warm-up Numba sincrono nel lifespan costava ~10.2s (55% dei ~18.7s totali al primo
-    `200`). Spostandolo qui l'app risponde subito e la compilazione avviene mentre il
-    visitatore guarda la home.
+    su scale-to-zero l'idle timeout è ~90s, quindi il cold start è frequentissimo; tutto
+    ciò che sta nel lifespan prima dello yield lo paga il primo visitatore. Con i tre
+    asset committati nell'immagine il provisioning degrada a una verifica SHA locale
+    (millisecondi) e resta come fallback/pin di versione.
 
-    È sicuro per costruzione: i kernel servono solo per le mosse "pensate" (search PIMC a
-    finestra <=10 carte ignote e solver a mazzo vuoto), che arrivano MINUTI dopo l'inizio
-    di una partita; il warm-up in background finisce in ~10s. Nel caso patologico di una
-    search richiesta a compilazione in corso, Numba compila alla prima chiamata come
-    faceva prima del warm-up: mossa lenta una tantum, nessun errore.
-
-    L'ordine conta: prima il provisioning (i modelli servono al catalogo UI e alla
-    creazione partita, cioè nei primi secondi), poi il warm-up. I `print` con i tempi per
-    fase finiscono nei log della piattaforma: sono la telemetria per verificare il
-    guadagno al prossimo cold start.
+    Storia utile per chi legge: qui viveva anche il warm-up dei kernel Numba (10.2s per
+    la search JIT, poi 2s per il solo solver). Dal 2026-07-07 il runtime web è
+    ZERO-NUMBA — search PIMC python e solver endgame python con playout della principal
+    variation nei rollout — quindi non c'è più nulla da compilare. Il `print` col tempo
+    resta come telemetria nei log della piattaforma.
     """
     started = time.perf_counter()
     try:
@@ -125,13 +104,6 @@ async def _run_startup_background_work() -> None:
         print(f"Model provisioning: errore inatteso, ignorato ({exc!r}).")
     provisioned = time.perf_counter()
     print(f"Startup background: provisioning modelli completato in {provisioned - started:.1f}s")
-
-    try:
-        await asyncio.to_thread(_warm_up_runtime_kernels)
-    except Exception as exc:  # difesa extra: i kernel JIT non devono abbattere il task
-        print(f"Runtime warm-up: errore inatteso, ignorato ({exc!r}).")
-    warmed = time.perf_counter()
-    print(f"Startup background: warm-up kernel JIT completato in {warmed - provisioned:.1f}s (search pronta)")
 
 
 @asynccontextmanager
@@ -149,7 +121,7 @@ async def lifespan(app: FastAPI):
     # backend, che è quello che i suoi endpoint interrogano.
     event_log, event_log_created_here = backend_server.initialize_event_log_from_env(backend_server.app)
 
-    # Provisioning modelli + warm-up JIT in BACKGROUND: l'app inizia a servire subito
+    # Provisioning modelli in BACKGROUND: l'app inizia a servire subito
     # (cold start ~19s → ~7s misurati) e paga compilazione/download mentre il visitatore
     # carica la home. Dettagli e numeri nel docstring di `_run_startup_background_work`.
     startup_work_task = asyncio.create_task(_run_startup_background_work())
