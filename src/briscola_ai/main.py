@@ -30,7 +30,7 @@ def _provision_startup_models() -> list[str]:
     """
     Provisioning best-effort degli asset `.npz` necessari in cloud.
 
-    La policy consigliata (`best_a2c_v10.npz`, o override `BRISCOLA_DEFAULT_MODEL_ID`) resta il modello principale.
+    La policy consigliata (`best_a2c_v11.npz`, o override `BRISCOLA_DEFAULT_MODEL_ID`) resta il modello principale.
     Il value model e' opzionale ma necessario per rendere disponibile `bc_model_value_lookahead_8x8`: lo scarichiamo
     solo se l'operatore imposta `BRISCOLA_VALUE_MODEL_URL` o un pin `BRISCOLA_VALUE_MODEL_SHA256`.
     """
@@ -84,16 +84,16 @@ def _warm_up_runtime_kernels() -> None:
     """
     Compila best-effort i kernel JIT usati nel runtime.
 
-    Serve per gli avversari search del sito: il solver endgame Numba e il kernel PIMC
-    (`bc_model_pimc_belief_64x10`, il default UI) si compilano alla prima chiamata —
-    conviene pagare la compilazione allo startup invece che sulla prima mossa pensata
-    del primo giocatore di ogni replica.
+    Dal 2026-07-07 il runtime compila SOLO il solver endgame Numba (~0.6s locali, ~2s in
+    cloud): usato nei rollout della search PIMC (percorso caldo: fino a ~6 chiamate per
+    rollout, dove il solver python costerebbe ~2x per mossa pensata) e nelle decisioni a
+    mazzo vuoto. La search PIMC in produzione è tornata alla versione python
+    (`use_numba_search=False` nel registry): stessa forza, e spariscono ~8s di
+    compilazione a ogni cold start delle repliche (misurati il 2026-07-07).
     """
     from .ai.endgame import warm_up_numba_endgame_solver
-    from .ai.numba.pimc import warm_up_numba_pimc
 
     warm_up_numba_endgame_solver()
-    warm_up_numba_pimc()
 
 
 async def _run_startup_background_work() -> None:
