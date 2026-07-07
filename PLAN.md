@@ -112,15 +112,17 @@ retry Redis dentro i comandi (3 tentativi, ~0.5s) + health check pool, endpoint 
 degrada con 1013 se lo store e' giu'. Notifiche email errori via Mailgun pronte ma NON
 configurate in prod (opt-in via env). Primi test e2e JS (Playwright).
 
-**Cold start FastAPI Cloud (2026-07-07)**: misurato dai log di produzione che lo
-scale-to-zero scatta dopo ~90s di inattività e il risveglio costava ~18.7s, di cui 10.2s
-di warm-up Numba SINCRONO nel lifespan. Fix: provisioning modelli + warm-up JIT spostati
-in un task in background dopo lo startup (atteso ~7s al primo `200`; telemetria per fase
-nei log), e i tre `.npz` di runtime (~850 KB) committati nel repo così l'immagine di
-deploy li contiene già (download → verifica SHA locale). Nessuna env da toccare:
-`BRISCOLA_MODELS_DIR` non è settata in cloud e il default usa `./data/models` appena
-esiste (prima ripiegava su `./data` perché la dir non era nell'immagine). Leva ulteriore
-se serve: keep-alive esterno con ping sotto i 90s.
+**Cold start FastAPI Cloud (2026-07-07, CHIUSO con misure)**: scale-to-zero dopo ~90s di
+idle; il risveglio costava ~18.7s (10.2s di warm-up Numba sincrono + download modelli).
+Fix in 0.30.0/0.31.0: provisioning+warm-up in background con telemetria per fase, tre
+`.npz` di runtime committati nell'immagine, search PIMC tornata python (resta solo il
+solver JIT, ~2s in bg). Esito misurato: **TTFB del risveglio 13.7s, IDENTICO prima e dopo
+il de-JIT** → il pavimento è della PIATTAFORMA (scheduling container + boot + cadenza del
+probe di readiness), non dell'app. Il guadagno vero: replica subito operativa al 100%
+(niente 10s di compilazione mentre serve i primi giocatori) e default ~2.4× più capiente.
+Per abbattere i 13.7s restano solo: keep-alive esterno con ping <90s (nota: cron GitHub
+Actions ha minimo 5 min → serve un job che pinga ogni 60s al suo interno), piano a
+pagamento, o messaggio "sto svegliando il server" in UI (cosmetico ma onesto).
 
 **Load test infrastruttura (2026-07-06, `scripts/loadtest/`)**: bot Locust che giocano
 partite complete via REST. Risultato su prod (free tier): con `bc_model` 10 giocatori
