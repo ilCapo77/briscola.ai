@@ -188,6 +188,22 @@ Prerequisito FATTO (commit d2888be): sonda tradotta in fast+numba con parità ES
 motori (il +10.47 vs h1 riprodotto identico campo-a-campo in `--engine fast`), utilizzabile
 in `--opponent-mix` (smoke train verificato); corretto anche un range check hardcoded nel
 collector A2C numba che rifiutava codici agente nuovi.
+**Run v12 LANCIATO dal maintainer (2026-07-07 ~22:38, 10M partite, seed 20260708)**: mix
+`bc_model:0.15, pimc_belief 16x8:0.40, VL_8x8:0.20, trump_saver:0.12, h1:0.04, h2:0.06,
+random:0.03`, base/maestri v11, iperparametri invariati.
+
+**Ipotesi v13 (in coda, scelta dal maintainer 2026-07-07): reward shaping POTENTIAL-BASED
+sull'economia di briscola.** Diagnosi: lo spreco di briscoline è la lezione che l'A2C
+impara peggio — costo ~2-3 punti che arriva molte prese dopo, annegato in ±28 di rumore
+del mazzo (problema di segnale/rumore, non di orizzonte: 20 decisioni). Cura: potenziale
+Φ(stato) = valore pesato delle briscole ancora in mano; reward per-mossa += ΔΦ. La somma
+telescopica non cambia il ritorno totale (Ng 1999, policy-invariant con γ=1 e Φ(terminale)
+=0): non dice COSA fare, avvicina solo il segnale alla mossa. È la versione matematicamente
+corretta delle DUE penalità anti-spreco fallite nella storia del progetto (che alteravano
+l'obiettivo). Trigger: se il contatore comportamentale di v12 (briscole spese su piatti
+≤2 punti; carichi guidati e persi vs conservatori) mostra il buco ancora aperto. Gate:
+i soliti quattro di v12. Caveat: Φ incorpora un giudizio nostro sui pesi → rimisurare a
+ogni generazione come l'overkill guard (utile a v6, dannoso a v11).
 Razionale completo (difesa ≠ imitazione, dosaggio condizionale, leve alternative scartate)
 in `docs/plans/audit-campo-2026-07-07.md` §7.
 
