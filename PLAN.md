@@ -150,6 +150,21 @@ dose dal VL, iperparametri v10, seed 20260707, `--metrics-mode summary`); throug
 osservato ~26k partite/min (checkpoint 1M a +38'). Al termine: gate big seat-fair vs v10
 (successo = +0.3..+0.5; sotto +0.2 il ramo sparring si chiude).
 
+**RISULTATI v11 (2026-07-07, run completato in 3h33m, gate big 100k seat-fair numba,
+artefatti `benchmarks/experiments/fase3/v11_vs_*.json`):**
+- **vs v10: +0.85 (CI +0.71..+0.99)** — SOPRA la banda di successo (+0.3..+0.5) e sopra
+  il +0.66 di v10-su-v9: la curva dei rendimenti decrescenti (+2.46 → +0.97 → +0.66) si è
+  RIALZATA. L'ipotesi dose-shift è validata: spostare dose dal maestro consumato (VL) a
+  quello intatto (PIMC 16×8) rende più di 6× il volume (v11: 5M partite; v10: 30M).
+- **vs heuristic_v1: +20.80 (CI +20.62..+20.97)** — nuovo record assoluto (era +20.52).
+- **vs trump_saver: +14.34** (v10: +13.79, misurato però su medium 10k domain) —
+  miglioramento proporzionale alla forza generale, nessun guadagno differenziale sul
+  fianco "umano": atteso, la sonda non era nel cartellone. Resta l'ipotesi v12.
+- Nota per la promozione: nel gate v11 è girato SENZA `overkill_guard` (il metadata
+  `inference_overkill_guard` non risulta nel `.npz`), v10 CON: prima di promuovere,
+  normalizzare il guard e riconfermare il gate 1. Ramo sparring: APERTO (prossimo giro
+  possibile: maestro PIMC su base v11, e/o trump_saver nel cartellone).
+
 **Ipotesi v12 (dopo il gate v11)**: diversità di stile nel cartellone — `heuristic_trump_saver`
 come avversario di training (dose 10–15% dalla quota bar) per curare il bias di famiglia sui
 carichi guidati. Tre termometri: (1) differenziale vs trump_saver (baseline v10 = −13.79);
