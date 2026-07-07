@@ -79,21 +79,17 @@ Opzionale: registrare il sito su Google Search Console e inviare la sitemap.
 - Non usare dati umani per training finché volume, consenso, qualità e privacy non sono
   riverificati.
 
-**Primo audit dei dati di campo (2026-07-07)**: 427 partite registrate (congruenza
-export↔`/version` verificata), 123 umane complete, 40 vs v10 con 7 vittorie umane (17.5%,
-in linea con l'atteso ~20%). Analisi delle 7 vittorie contro il default PIMC-belief:
-nessun errore interno dell'IA (giudice 128 det × 5 seed + solver esatto: zero disaccordi
-forti su 140 mosse), ma bias di famiglia visibile nel comportamento — 8/9 carichi guidati
-persi (~111 pt) contro umani che aprono liscio, incassano i carichi da secondi e
-conservano le briscoline per tagliare. Lo stile è stato codificato in
-**`heuristic_trump_saver`** (sonda di exploitability, solo dominio, nel registry ma non in
-UI): è la rule-based più forte del repo (+10.47 su heuristic_v1, +7.94 su v2, medium 10k
-seat-fair) ma **NON conferma un exploit differenziale**: vs v10 fa −13.79 (h1: −20.87,
-v2: −18.26) cioè MENO di quanto la forza generale predica per transitività (~−10.4);
-vs PIMC-belief 64×10 su v10 fa −15.90. Lettura: lo stile umano è forte ma v10 lo gestisce;
-il campione delle 7 vittorie era selezionato (non vedevamo le sconfitte con lo stesso
-stile). La sonda resta utile come baseline e come candidato di diversità nel cartellone.
-Artefatti: `benchmarks/experiments/trump_saver/`.
+**Primo audit dei dati di campo (2026-07-07)** — dettaglio completo (metodo, verdetti,
+numeri) in `docs/plans/audit-campo-2026-07-07.md`; in sintesi: 123 partite umane complete,
+40 vs v10 con 7 vittorie umane (17.5%, in linea con l'atteso). Le 7 vittorie: zero errori
+interni dell'IA (giudice 128×5 + solver), ma **bias di famiglia** comportamentale — 8/9
+carichi guidati persi (~111 pt) contro umani che conservano le briscoline per tagliare
+(finestra fallback deck 22→8). Lo stile è codificato in **`heuristic_trump_saver`**
+(sonda di exploitability, solo dominio, registry ma non UI): rule-based più forte del repo
+(+10.47 su h1) ma **exploit differenziale NON confermato** (vs v10 −13.79, peggio della
+transitività ~−10.4: il campione delle 7 vittorie era selezionato). La sonda resta la
+baseline anti-regressione del bias: −13.79 è il numero da battere in differenziale.
+Artefatti: `benchmarks/experiments/trump_saver/`, `data/field_audit_20260707/`.
 
 ### 3. Hardening Continuo
 
@@ -143,6 +139,14 @@ rumore del mazzo). Il ramo PIMC-as-teacher è quindi USCITO dal frigo: **run v11
 dose dal VL, iperparametri v10, seed 20260707, `--metrics-mode summary`); throughput
 osservato ~26k partite/min (checkpoint 1M a +38'). Al termine: gate big seat-fair vs v10
 (successo = +0.3..+0.5; sotto +0.2 il ramo sparring si chiude).
+
+**Ipotesi v12 (dopo il gate v11)**: diversità di stile nel cartellone — `heuristic_trump_saver`
+come avversario di training (dose 10–15% dalla quota bar) per curare il bias di famiglia sui
+carichi guidati. Tre termometri: (1) differenziale vs trump_saver (baseline v10 = −13.79);
+(2) big vs v10/v11 (no regressioni); (3) contatore briscole spese su piatti ≤2 punti.
+Prerequisito: traduzione fast/numba della sonda con parità a tre motori (in corso).
+Razionale completo (difesa ≠ imitazione, dosaggio condizionale, leve alternative scartate)
+in `docs/plans/audit-campo-2026-07-07.md` §7.
 
 ## Comandi Utili
 
