@@ -144,7 +144,10 @@ osservato ~26k partite/min (checkpoint 1M a +38'). Al termine: gate big seat-fai
 come avversario di training (dose 10–15% dalla quota bar) per curare il bias di famiglia sui
 carichi guidati. Tre termometri: (1) differenziale vs trump_saver (baseline v10 = −13.79);
 (2) big vs v10/v11 (no regressioni); (3) contatore briscole spese su piatti ≤2 punti.
-Prerequisito: traduzione fast/numba della sonda con parità a tre motori (in corso).
+Prerequisito FATTO (commit d2888be): sonda tradotta in fast+numba con parità ESATTA a tre
+motori (il +10.47 vs h1 riprodotto identico campo-a-campo in `--engine fast`), utilizzabile
+in `--opponent-mix` (smoke train verificato); corretto anche un range check hardcoded nel
+collector A2C numba che rifiutava codici agente nuovi.
 Razionale completo (difesa ≠ imitazione, dosaggio condizionale, leve alternative scartate)
 in `docs/plans/audit-campo-2026-07-07.md` §7.
 

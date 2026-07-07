@@ -160,7 +160,11 @@ trump_saver come avversario di training. Punti fermi del ragionamento:
 3. contatore comportamentale: briscole spese su piatti ≤2 punti (oggi 8/20 sul campo).
 
 Prerequisito ingegneristico: traduzione fast/numba di trump_saver con parità a tre
-motori (in corso, sessione 2026-07-07) per usarlo in `--opponent-mix`.
+motori — **FATTO** (2026-07-07, commit d2888be): parità esatta (eval fast 10k identica
+al dominio campo-a-campo), agganciata a `--engine fast` e a `--opponent-mix` di
+train_a2c (smoke train ok), 530 test verdi con compilazione numba fredda. Bonus: trovato
+e corretto un range check hardcoded nel collector A2C numba (`codes <= 3`) che avrebbe
+rifiutato qualsiasi nuovo codice agente nel mix.
 
 ## 8. Note operative
 
