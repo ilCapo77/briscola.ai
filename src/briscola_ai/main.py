@@ -13,6 +13,7 @@ Per avviare in locale:
 
 import asyncio
 import os
+import time
 from contextlib import asynccontextmanager, suppress
 from urllib.parse import quote
 
@@ -95,6 +96,44 @@ def _warm_up_runtime_kernels() -> None:
     warm_up_numba_pimc()
 
 
+async def _run_startup_background_work() -> None:
+    """
+    Provisioning modelli + warm-up JIT, DOPO che l'app ha iniziato a servire.
+
+    Perché in background (misurato in produzione il 2026-07-07, log FastAPI Cloud):
+    su scale-to-zero l'idle timeout è ~90s, quindi il cold start è frequentissimo, e il
+    warm-up Numba sincrono nel lifespan costava ~10.2s (55% dei ~18.7s totali al primo
+    `200`). Spostandolo qui l'app risponde subito e la compilazione avviene mentre il
+    visitatore guarda la home.
+
+    È sicuro per costruzione: i kernel servono solo per le mosse "pensate" (search PIMC a
+    finestra <=10 carte ignote e solver a mazzo vuoto), che arrivano MINUTI dopo l'inizio
+    di una partita; il warm-up in background finisce in ~10s. Nel caso patologico di una
+    search richiesta a compilazione in corso, Numba compila alla prima chiamata come
+    faceva prima del warm-up: mossa lenta una tantum, nessun errore.
+
+    L'ordine conta: prima il provisioning (i modelli servono al catalogo UI e alla
+    creazione partita, cioè nei primi secondi), poi il warm-up. I `print` con i tempi per
+    fase finiscono nei log della piattaforma: sono la telemetria per verificare il
+    guadagno al prossimo cold start.
+    """
+    started = time.perf_counter()
+    try:
+        for provisioning_msg in await asyncio.to_thread(_provision_startup_models):
+            print(provisioning_msg)
+    except Exception as exc:  # difesa extra: il provisioning non deve abbattere il task
+        print(f"Model provisioning: errore inatteso, ignorato ({exc!r}).")
+    provisioned = time.perf_counter()
+    print(f"Startup background: provisioning modelli completato in {provisioned - started:.1f}s")
+
+    try:
+        await asyncio.to_thread(_warm_up_runtime_kernels)
+    except Exception as exc:  # difesa extra: i kernel JIT non devono abbattere il task
+        print(f"Runtime warm-up: errore inatteso, ignorato ({exc!r}).")
+    warmed = time.perf_counter()
+    print(f"Startup background: warm-up kernel JIT completato in {warmed - provisioned:.1f}s (search pronta)")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
@@ -110,26 +149,21 @@ async def lifespan(app: FastAPI):
     # backend, che è quello che i suoi endpoint interrogano.
     event_log, event_log_created_here = backend_server.initialize_event_log_from_env(backend_server.app)
 
-    # Provisioning modelli (best-effort): scarica gli asset `.npz` configurati nella directory modelli.
-    # Non blocca l'avvio in caso di errore.
-    try:
-        for provisioning_msg in _provision_startup_models():
-            print(provisioning_msg)
-    except Exception as exc:  # difesa extra: il provisioning non deve impedire l'avvio
-        print(f"Model provisioning: errore inatteso, ignorato ({exc!r}).")
-
-    try:
-        _warm_up_runtime_kernels()
-    except Exception as exc:  # difesa extra: i kernel JIT non devono impedire l'avvio
-        print(f"Runtime warm-up: errore inatteso, ignorato ({exc!r}).")
+    # Provisioning modelli + warm-up JIT in BACKGROUND: l'app inizia a servire subito
+    # (cold start ~19s → ~7s misurati) e paga compilazione/download mentre il visitatore
+    # carica la home. Dettagli e numeri nel docstring di `_run_startup_background_work`.
+    startup_work_task = asyncio.create_task(_run_startup_background_work())
 
     cleanup_task = asyncio.create_task(backend_server.cleanup_inactive_games())
     try:
         yield
     finally:
         cleanup_task.cancel()
+        startup_work_task.cancel()
         with suppress(asyncio.CancelledError):
             await cleanup_task
+        with suppress(asyncio.CancelledError):
+            await startup_work_task
         if event_log is not None and event_log_created_here:
             event_log.close()
             backend_server.app.state.event_log = None

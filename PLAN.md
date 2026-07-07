@@ -103,6 +103,16 @@ retry Redis dentro i comandi (3 tentativi, ~0.5s) + health check pool, endpoint 
 degrada con 1013 se lo store e' giu'. Notifiche email errori via Mailgun pronte ma NON
 configurate in prod (opt-in via env). Primi test e2e JS (Playwright).
 
+**Cold start FastAPI Cloud (2026-07-07)**: misurato dai log di produzione che lo
+scale-to-zero scatta dopo ~90s di inattività e il risveglio costava ~18.7s, di cui 10.2s
+di warm-up Numba SINCRONO nel lifespan. Fix: provisioning modelli + warm-up JIT spostati
+in un task in background dopo lo startup (atteso ~7s al primo `200`; telemetria per fase
+nei log), e i tre `.npz` di runtime (~850 KB) committati nel repo così l'immagine di
+deploy li contiene già (download → verifica SHA locale). Nessuna env da toccare:
+`BRISCOLA_MODELS_DIR` non è settata in cloud e il default usa `./data/models` appena
+esiste (prima ripiegava su `./data` perché la dir non era nell'immagine). Leva ulteriore
+se serve: keep-alive esterno con ping sotto i 90s.
+
 **Load test infrastruttura (2026-07-06, `scripts/loadtest/`)**: bot Locust che giocano
 partite complete via REST. Risultato su prod (free tier): con `bc_model` 10 giocatori
 simultanei = 0 errori ma latenza mossa 2x (692ms medi); con l'avversario di default
