@@ -562,7 +562,8 @@ def _play_one_fast_game_2p_collect(
     Simula una partita A2C usando il fast path 2-player (`ai.fast.state_2p`).
 
     Limitazioni intenzionali:
-    - supporta solo avversari tradotti su card id (`random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`);
+    - supporta solo avversari tradotti su card id (`random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`,
+      `heuristic_trump_saver`);
     - non applica ancora reward shaping anti-overkill, perché quello oggi dipende da `PlayerObservation`.
     """
     if opponent_name not in FAST_EVALUATION_AGENT_NAMES:
@@ -988,7 +989,8 @@ def main() -> int:
         default="domain",
         help=(
             "Motore rollout training. `domain` è canonico e supporta tutti gli agenti; `fast` è sperimentale "
-            "e supporta solo avversari fast-compatible random/greedy_points/heuristic_v1/heuristic_v2."
+            "e supporta solo avversari fast-compatible "
+            "random/greedy_points/heuristic_v1/heuristic_v2/heuristic_trump_saver."
         ),
     )
     parser.add_argument(

@@ -59,6 +59,8 @@ def test_numba_random_evaluation_counts_are_consistent() -> None:
         ("greedy_points", "random"),
         ("heuristic_v1", "random"),
         ("heuristic_v2", "random"),
+        ("heuristic_trump_saver", "random"),
+        ("heuristic_trump_saver", "heuristic_trump_saver"),
     ],
 )
 def test_numba_policy_game_is_deterministic_and_valid(agent0_name: str, agent1_name: str) -> None:

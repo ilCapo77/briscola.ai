@@ -513,7 +513,10 @@ class HeuristicTrumpSaverAgent:
 
     Come tutti gli agenti del progetto vede solo `PlayerObservation` (anti-cheat);
     il card counting usa esclusivamente `seen_cards_onehot` (informazione pubblica).
-    Solo dominio: NON è tradotta nel fast path (non usarla nei rollout fast/numba).
+    È tradotta anche nel fast path (`ai/fast/evaluation.py`) e nei kernel Numba
+    (`ai/numba/core.py`) per essere usabile come avversario nei rollout di training
+    e nelle valutazioni `--engine fast|numba`; la parità è protetta dai test
+    (`tests/test_trump_saver_parity.py`): questa implementazione resta la fonte di verità.
     """
 
     spec: ClassVar[AgentSpec] = AgentSpec(

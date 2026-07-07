@@ -14,7 +14,7 @@ from dataclasses import dataclass
 import numpy as np
 
 from ..encoding.observation_encoder import FEATURE_DIM_2P_V1, FEATURE_DIM_2P_V2, FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
-from .core import ACTION_DIM, numba_agent_code
+from .core import ACTION_DIM, NUMBA_AGENT_CODE_MAX, numba_agent_code
 from .observation import (
     _collect_mlp_policy_batch_numba,
     _collect_mlp_policy_game_numba,
@@ -739,7 +739,7 @@ def collect_a2c_batch_numba_2p(
             raise ValueError(f"opponent_codes deve essere 1D, ottenuto shape={codes_arr.shape}")
         if codes_arr.shape != seeds_arr.shape:
             raise ValueError(f"Shape mismatch: opponent_codes={codes_arr.shape} game_seeds={seeds_arr.shape}")
-        if not np.all((codes_arr >= 0) & (codes_arr <= 3)):
+        if not np.all((codes_arr >= 0) & (codes_arr <= NUMBA_AGENT_CODE_MAX)):
             raise ValueError("opponent_codes contiene codici Numba non supportati")
     if opponent_model_enabled_flags is None:
         model_flags_arr = np.full(seeds_arr.shape, bool(prepared.opponent_model_enabled), dtype=np.bool_)

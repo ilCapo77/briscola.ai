@@ -30,14 +30,24 @@ NUMBA_AGENT_RANDOM = 0
 NUMBA_AGENT_GREEDY_POINTS = 1
 NUMBA_AGENT_HEURISTIC_V1 = 2
 NUMBA_AGENT_HEURISTIC_V2 = 3
+NUMBA_AGENT_HEURISTIC_TRUMP_SAVER = 4
 
-NUMBA_EVALUATION_AGENT_NAMES: frozenset[str] = frozenset({"random", "greedy_points", "heuristic_v1", "heuristic_v2"})
+NUMBA_EVALUATION_AGENT_NAMES: frozenset[str] = frozenset(
+    {"random", "greedy_points", "heuristic_v1", "heuristic_v2", "heuristic_trump_saver"}
+)
 _NUMBA_AGENT_CODES: dict[str, int] = {
     "random": NUMBA_AGENT_RANDOM,
     "greedy_points": NUMBA_AGENT_GREEDY_POINTS,
     "heuristic_v1": NUMBA_AGENT_HEURISTIC_V1,
     "heuristic_v2": NUMBA_AGENT_HEURISTIC_V2,
+    "heuristic_trump_saver": NUMBA_AGENT_HEURISTIC_TRUMP_SAVER,
 }
+# Massimo codice agente valido: derivato dal registry dei codici, così i range check
+# esterni (es. `collect_a2c_batch_numba_2p`) non possono divergere quando si aggiunge un agente.
+NUMBA_AGENT_CODE_MAX: int = max(_NUMBA_AGENT_CODES.values())
+
+# Soglia "carico" di `heuristic_trump_saver`: asso (11) e tre (10) — vedi `HeuristicTrumpSaverAgent`.
+_TRUMP_SAVER_CARICO_POINTS = 10
 # Tabelle numeriche derivate dal dominio canonico: vedi `ai/card_tables.py` (fonte unica).
 # Gli alias locali mantengono i nomi storici usati dai kernel JIT.
 CARD_SUIT_NUMBA = CARD_SUIT_BY_ID_NP
@@ -362,6 +372,184 @@ def _choose_heuristic_v2_response_card_index_numba(
 
 
 @njit(cache=True)
+def _is_master_numba(
+    card_id: int,
+    hands: np.ndarray,
+    hand_size: int,
+    player_index: int,
+    seen_cards: np.ndarray,
+    trump_card: int,
+) -> bool:
+    """
+    Versione JIT di `HeuristicTrumpSaverAgent._is_master`.
+
+    True se `card_id`, guidata da primi, vince contro OGNI carta "viva e ignota"
+    (non vista pubblicamente e non in mano al player). Riusa il kernel condiviso
+    `who_wins_trick_numba_2p` (ancorato al dominio dai test-àncora): niente regole duplicate.
+    """
+    for other in range(ACTION_DIM):
+        if seen_cards[other] != 0:
+            continue
+        if _hand_contains_card_numba(hands, hand_size, player_index, other):
+            continue
+        if _who_wins_trick_numba(card_id, 0, other, 1, trump_card) != 0:
+            return False
+    return True
+
+
+@njit(cache=True)
+def _choose_trump_saver_lead_card_index_numba(
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    player_index: int,
+    deck_size: int,
+    trump_card: int,
+    seen_cards: np.ndarray,
+) -> int:
+    """
+    Versione JIT della scelta lead di `heuristic_trump_saver`.
+
+    Stesse priorità del dominio:
+    1. incassare il master più ricco se conveniente (a mazzo vuoto sempre; durante le pescate
+       solo se è un carico NON di briscola);
+    2. altrimenti guidare "liscio": minimizza (carico, punti, briscola, forza).
+    I tie-break replicano `max`/`min` di Python: a parità di chiave vince il PRIMO indice.
+    """
+    trump_suit = CARD_SUIT_NUMBA[trump_card]
+    hand_size = hand_sizes[player_index]
+
+    # Master più "ricco": max su (punti, forza); si sostituisce solo con chiave strettamente maggiore.
+    richest_idx = -1
+    richest_points = -1
+    richest_strength = -1
+    for i in range(hand_size):
+        card = hands[player_index, i]
+        if not _is_master_numba(card, hands, hand_size, player_index, seen_cards, trump_card):
+            continue
+        points = CARD_POINTS_NUMBA[card]
+        strength = CARD_STRENGTH_NUMBA[card]
+        if points > richest_points or (points == richest_points and strength > richest_strength):
+            richest_idx = i
+            richest_points = points
+            richest_strength = strength
+
+    if richest_idx >= 0:
+        richest_card = hands[player_index, richest_idx]
+        cashable_now = deck_size <= 0 or (
+            CARD_SUIT_NUMBA[richest_card] != trump_suit
+            and CARD_POINTS_NUMBA[richest_card] >= _TRUMP_SAVER_CARICO_POINTS
+        )
+        if cashable_now:
+            return richest_idx
+
+    # Guida "liscia": min lessicografico su (is_carico, punti, is_trump, forza).
+    best_idx = 0
+    best_card = hands[player_index, 0]
+    best_is_carico = 1 if CARD_POINTS_NUMBA[best_card] >= _TRUMP_SAVER_CARICO_POINTS else 0
+    best_points = CARD_POINTS_NUMBA[best_card]
+    best_is_trump = 1 if CARD_SUIT_NUMBA[best_card] == trump_suit else 0
+    best_strength = CARD_STRENGTH_NUMBA[best_card]
+    for i in range(1, hand_size):
+        card = hands[player_index, i]
+        is_carico = 1 if CARD_POINTS_NUMBA[card] >= _TRUMP_SAVER_CARICO_POINTS else 0
+        points = CARD_POINTS_NUMBA[card]
+        is_trump = 1 if CARD_SUIT_NUMBA[card] == trump_suit else 0
+        strength = CARD_STRENGTH_NUMBA[card]
+        if (
+            is_carico < best_is_carico
+            or (is_carico == best_is_carico and points < best_points)
+            or (is_carico == best_is_carico and points == best_points and is_trump < best_is_trump)
+            or (
+                is_carico == best_is_carico
+                and points == best_points
+                and is_trump == best_is_trump
+                and strength < best_strength
+            )
+        ):
+            best_idx = i
+            best_is_carico = is_carico
+            best_points = points
+            best_is_trump = is_trump
+            best_strength = strength
+    return best_idx
+
+
+@njit(cache=True)
+def _choose_trump_saver_response_card_index_numba(
+    hands: np.ndarray,
+    hand_sizes: np.ndarray,
+    player_index: int,
+    table_cards: np.ndarray,
+    table_players: np.ndarray,
+    deck_size: int,
+    trump_card: int,
+) -> int:
+    """
+    Versione JIT della risposta di `heuristic_trump_saver`.
+
+    Stesse priorità del dominio:
+    1. vincere senza briscola -> incassa il massimo dei punti (a parità la forza MINIMA,
+       per conservare la carta più forte);
+    2. con briscola: taglia SEMPRE il carico, piatti medi (>=3 punti) solo con briscolina
+       a 0 punti, mai piatti poveri durante le pescate; a mazzo vuoto prende comunque;
+    3. altrimenti scarto economico.
+    """
+    lead_card = table_cards[0]
+    lead_player = table_players[0]
+    trump_suit = CARD_SUIT_NUMBA[trump_card]
+
+    # Non-briscola vincente con più punti: max su (punti, -forza); si sostituisce solo
+    # con chiave strettamente maggiore (a parità di punti vince la forza più BASSA).
+    best_cash_idx = -1
+    best_cash_points = -1
+    best_cash_strength = 0
+    # Briscola vincente minima: min su (punti, forza).
+    best_trump_idx = -1
+    best_trump_points = 0
+    best_trump_strength = 0
+
+    for i in range(hand_sizes[player_index]):
+        card = hands[player_index, i]
+        winner = _who_wins_trick_numba(lead_card, lead_player, card, player_index, trump_card)
+        if winner != player_index:
+            continue
+
+        points = CARD_POINTS_NUMBA[card]
+        strength = CARD_STRENGTH_NUMBA[card]
+        if CARD_SUIT_NUMBA[card] == trump_suit:
+            if (
+                best_trump_idx < 0
+                or points < best_trump_points
+                or (points == best_trump_points and strength < best_trump_strength)
+            ):
+                best_trump_idx = i
+                best_trump_points = points
+                best_trump_strength = strength
+        elif points > best_cash_points or (points == best_cash_points and strength < best_cash_strength):
+            best_cash_idx = i
+            best_cash_points = points
+            best_cash_strength = strength
+
+    if best_cash_idx >= 0:
+        return best_cash_idx
+
+    if best_trump_idx >= 0:
+        lead_points = CARD_POINTS_NUMBA[lead_card]
+        if deck_size <= 0:
+            # Endgame: senza pescate prendere (e guidare la prossima) vale quasi sempre.
+            return best_trump_idx
+        if lead_points >= _TRUMP_SAVER_CARICO_POINTS:
+            # Il carico avversario si taglia SEMPRE (l'exploit-chiave, anche con l'asso di briscola).
+            return best_trump_idx
+        if lead_points >= 3 and best_trump_points == 0:
+            # Piatto medio (re/cavallo): solo se il taglio è gratis (briscolina a 0 punti).
+            return best_trump_idx
+        # Piatti poveri durante le pescate: la briscola si conserva, si scarta.
+
+    return _choose_discard_card_index_numba(hands, hand_sizes, player_index, trump_suit)
+
+
+@njit(cache=True)
 def _choose_policy_card_index_numba(
     agent_code: int,
     hands: np.ndarray,
@@ -397,6 +585,15 @@ def _choose_policy_card_index_numba(
             return _choose_heuristic_lead_card_index_numba(hands, hand_sizes, player_index, deck_size, trump_card)
         return _choose_heuristic_v2_response_card_index_numba(
             hands, hand_sizes, player_index, table_cards, table_players, deck_size, trump_card, seen_cards
+        )
+
+    if agent_code == NUMBA_AGENT_HEURISTIC_TRUMP_SAVER:
+        if table_size == 0:
+            return _choose_trump_saver_lead_card_index_numba(
+                hands, hand_sizes, player_index, deck_size, trump_card, seen_cards
+            )
+        return _choose_trump_saver_response_card_index_numba(
+            hands, hand_sizes, player_index, table_cards, table_players, deck_size, trump_card
         )
 
     raise ValueError("Codice agente Numba non supportato")
@@ -704,6 +901,7 @@ def warm_up_numba_evaluation() -> None:
     """Compila anche il core JIT con policy euristiche."""
     _evaluate_policy_match_numba(NUMBA_AGENT_HEURISTIC_V2, NUMBA_AGENT_HEURISTIC_V1, 2, 0)
     _evaluate_policy_seat_fair_numba(NUMBA_AGENT_HEURISTIC_V2, NUMBA_AGENT_HEURISTIC_V1, 2, 0)
+    _evaluate_policy_match_numba(NUMBA_AGENT_HEURISTIC_TRUMP_SAVER, NUMBA_AGENT_HEURISTIC_V1, 2, 0)
 
 
 def play_random_game_numba(seed: int) -> tuple[int, int, int]:

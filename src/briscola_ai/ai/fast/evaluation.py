@@ -25,7 +25,12 @@ from .state_2p import (
     step_fast_2p,
 )
 
-FAST_EVALUATION_AGENT_NAMES: frozenset[str] = frozenset({"random", "greedy_points", "heuristic_v1", "heuristic_v2"})
+FAST_EVALUATION_AGENT_NAMES: frozenset[str] = frozenset(
+    {"random", "greedy_points", "heuristic_v1", "heuristic_v2", "heuristic_trump_saver"}
+)
+
+# Soglia "carico" di `heuristic_trump_saver`: asso (11) e tre (10) — vedi `HeuristicTrumpSaverAgent`.
+_TRUMP_SAVER_CARICO_POINTS = 10
 
 
 def _validate_fast_agent_name(agent_name: str) -> None:
@@ -238,6 +243,138 @@ def _choose_fast_heuristic_v2_response_card_index(
     )
 
 
+def _is_master_fast(
+    card_id: int,
+    *,
+    hand: list[int],
+    trump_card: int,
+    seen_cards_onehot: tuple[int, ...],
+) -> bool:
+    """
+    Versione numerica di `HeuristicTrumpSaverAgent._is_master`.
+
+    True se `card_id`, guidata da primi, vince contro OGNI carta "viva e ignota"
+    (non vista pubblicamente e non in mano a noi). Riusa il kernel di presa fast
+    (già ancorato a `domain.rules.who_wins_trick` dai test-àncora) invece di duplicare le regole.
+    """
+    hand_ids = set(hand)
+    for other, seen in enumerate(seen_cards_onehot):
+        if seen or other in hand_ids:
+            continue
+        if _fast_card_wins_trick(
+            lead_card=card_id,
+            lead_player=0,
+            response_card=other,
+            response_player=1,
+            trump_card=trump_card,
+        ):
+            return False
+    return True
+
+
+def _choose_fast_trump_saver_lead_card_index(
+    state: Fast2PState,
+    *,
+    player_index: int,
+    seen_cards_onehot: tuple[int, ...],
+) -> int:
+    """
+    Versione numerica della scelta lead di `heuristic_trump_saver`.
+
+    Stesse priorità del dominio:
+    1. incassare un master conveniente (a mazzo vuoto qualsiasi master; durante le pescate
+       solo un carico NON di briscola divenuto imbattibile);
+    2. altrimenti guidare "liscio": mai un carico; minimizza (carico, punti, briscola, forza).
+    """
+    hand = state.hands[player_index]
+    trump_suit = CARD_SUIT[state.trump_card]
+
+    masters = [
+        i
+        for i in range(len(hand))
+        if _is_master_fast(hand[i], hand=hand, trump_card=state.trump_card, seen_cards_onehot=seen_cards_onehot)
+    ]
+    if masters:
+        richest = max(masters, key=lambda i: (CARD_POINTS[hand[i]], CARD_STRENGTH[hand[i]]))
+        card_id = hand[richest]
+        cashable_now = len(state.deck) <= 0 or (
+            CARD_SUIT[card_id] != trump_suit and CARD_POINTS[card_id] >= _TRUMP_SAVER_CARICO_POINTS
+        )
+        if cashable_now:
+            return richest
+
+    return min(
+        range(len(hand)),
+        key=lambda i: (
+            1 if CARD_POINTS[hand[i]] >= _TRUMP_SAVER_CARICO_POINTS else 0,
+            CARD_POINTS[hand[i]],
+            1 if CARD_SUIT[hand[i]] == trump_suit else 0,
+            CARD_STRENGTH[hand[i]],
+        ),
+    )
+
+
+def _choose_fast_trump_saver_response_card_index(state: Fast2PState, *, player_index: int) -> int:
+    """
+    Versione numerica della risposta di `heuristic_trump_saver`.
+
+    Stesse priorità del dominio:
+    1. vincere senza briscola -> incassa il massimo dei punti (a parità conserva la più forte);
+    2. con briscola: taglia SEMPRE il carico, taglia piatti medi (>=3 punti) solo con briscolina
+       a 0 punti, mai piatti poveri durante le pescate; a mazzo vuoto prende comunque;
+    3. altrimenti scarto economico.
+    """
+    hand = state.hands[player_index]
+    lead_card = state.table_cards[0]
+    lead_player = state.table_players[0]
+    trump_suit = CARD_SUIT[state.trump_card]
+
+    winning_non_trumps: list[int] = []
+    winning_trumps: list[int] = []
+    for i, card_id in enumerate(hand):
+        if not _fast_card_wins_trick(
+            lead_card=lead_card,
+            lead_player=lead_player,
+            response_card=card_id,
+            response_player=player_index,
+            trump_card=state.trump_card,
+        ):
+            continue
+        if CARD_SUIT[card_id] == trump_suit:
+            winning_trumps.append(i)
+        else:
+            winning_non_trumps.append(i)
+
+    if winning_non_trumps:
+        # Incassa: massimo punti; a parità conserva la carta più forte per dopo (strength minima).
+        return max(winning_non_trumps, key=lambda idx: (CARD_POINTS[hand[idx]], -CARD_STRENGTH[hand[idx]]))
+
+    if winning_trumps:
+        best_trump_idx = min(winning_trumps, key=lambda idx: (CARD_POINTS[hand[idx]], CARD_STRENGTH[hand[idx]]))
+        best_trump = hand[best_trump_idx]
+        lead_points = CARD_POINTS[lead_card]
+
+        if len(state.deck) <= 0:
+            # Endgame: senza pescate prendere (e guidare la prossima) vale quasi sempre.
+            return best_trump_idx
+        if lead_points >= _TRUMP_SAVER_CARICO_POINTS:
+            # Il carico avversario si taglia SEMPRE (l'exploit-chiave, anche con l'asso di briscola).
+            return best_trump_idx
+        if lead_points >= 3 and CARD_POINTS[best_trump] == 0:
+            # Piatto medio (re/cavallo): solo se il taglio è gratis (briscolina a 0 punti).
+            return best_trump_idx
+        # Piatti poveri durante le pescate: la briscola si conserva, si scarta.
+
+    return min(
+        range(len(hand)),
+        key=lambda idx: (
+            CARD_POINTS[hand[idx]],
+            1 if CARD_SUIT[hand[idx]] == trump_suit else 0,
+            CARD_STRENGTH[hand[idx]],
+        ),
+    )
+
+
 def choose_fast_card_index(
     agent_name: str,
     state: Fast2PState,
@@ -279,6 +416,18 @@ def choose_fast_card_index(
             player_index=player_index,
             seen_cards_onehot=seen_cards_onehot,
         )
+
+    if agent_name == "heuristic_trump_saver":
+        if not state.table_cards:
+            # Solo la scelta lead usa il card counting (check "master"); la risposta no.
+            if seen_cards_onehot is None:
+                raise ValueError("heuristic_trump_saver fast richiede `seen_cards_onehot`")
+            return _choose_fast_trump_saver_lead_card_index(
+                state,
+                player_index=player_index,
+                seen_cards_onehot=seen_cards_onehot,
+            )
+        return _choose_fast_trump_saver_response_card_index(state, player_index=player_index)
 
     _validate_fast_agent_name(agent_name)
     raise AssertionError("Agente validato ma non implementato nel path fast")

@@ -18,7 +18,13 @@ from pathlib import Path
 import numpy as np
 import pytest
 
-from briscola_ai.ai.agents import GreedyPointsAgent, HeuristicAgentV1, HeuristicAgentV2, RandomAgent
+from briscola_ai.ai.agents import (
+    GreedyPointsAgent,
+    HeuristicAgentV1,
+    HeuristicAgentV2,
+    HeuristicTrumpSaverAgent,
+    RandomAgent,
+)
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V1
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 from briscola_ai.ai.fast.evaluation import evaluate_fast_match_2p, evaluate_fast_seat_fair_match_2p
@@ -107,6 +113,7 @@ def test_evaluate_raises_if_game_seeds_is_insufficient() -> None:
         ("greedy_points", GreedyPointsAgent()),
         ("heuristic_v1", HeuristicAgentV1()),
         ("heuristic_v2", HeuristicAgentV2()),
+        ("heuristic_trump_saver", HeuristicTrumpSaverAgent()),
     ],
 )
 def test_fast_evaluate_match_matches_domain_for_supported_agents(agent0_name, domain_agent0) -> None:
@@ -125,6 +132,7 @@ def test_fast_evaluate_match_matches_domain_for_supported_agents(agent0_name, do
         ("greedy_points", GreedyPointsAgent()),
         ("heuristic_v1", HeuristicAgentV1()),
         ("heuristic_v2", HeuristicAgentV2()),
+        ("heuristic_trump_saver", HeuristicTrumpSaverAgent()),
     ],
 )
 def test_fast_seat_fair_matches_domain_for_supported_agents(agent0_name, domain_agent0) -> None:
