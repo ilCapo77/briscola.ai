@@ -1,4 +1,4 @@
-# Approfondimento — Cold start e runtime zero-numba
+# Approfondimento — Perché il sito era lento al risveglio e come il web è diventato Python puro
 
 **Capitolo del diario:** [Capitolo 15](https://ai.briscola.dev/diario) · **Periodo:** 7 luglio 2026
 
@@ -24,7 +24,7 @@ risveglio costava **~18.8 s al primo 200**, così composti:
    li contiene già e il provisioning degrada a verifica SHA locale (resta come
    fallback/pin di versione). Verificato in locale: primo 200 dopo 0.5 s dall'avvio.
 
-## Il pavimento è della piattaforma, non dell'app
+## I 13,7 secondi rimasti dipendono dalla piattaforma
 
 Esito misurato in produzione: **TTFB del risveglio 13.7 s — identico prima e dopo il
 de-JIT completo** del passo successivo. Tolto tutto il costo applicativo, resta il prezzo
@@ -36,7 +36,7 @@ ping sotto i 90 s (nota pratica: il cron di GitHub Actions ha minimo 5 minuti, s
 un job che pinga ogni 60 s al proprio interno), il piano a pagamento, o un messaggio
 "sto svegliando il server" in UI — cosmetico ma onesto.
 
-## Via Numba dalla search (`660e251`, v0.31.0)
+## Tolto Numba dalla search di produzione (`660e251`, v0.31.0)
 
 Con la promozione della v11 il default UI è diventato `bc_model_pimc_belief_16x8`:
 **+3.36 su v11+solver** (CI +3.05..+3.66, 4k seat-fair) a **~15 ms/mossa pensata** in
@@ -46,7 +46,7 @@ valeva ~2× di CPU ma costava ~8 s di compilazione a ogni risveglio — un pessi
 con lo scale-to-zero a 90 s. Restava un solo kernel compilato nel runtime: il solver
 endgame (~2 s di warm-up in background).
 
-## Il solver: un fallimento certificato, poi il trucco della principal variation (`a0e29d8`, v0.31.1)
+## Tolto Numba anche dal solver: primo tentativo fallito, poi principal variation (`a0e29d8`, v0.31.1)
 
 La sera stessa, la stima diceva che il solver in Python sarebbe costato ~2× per mossa
 (0.82 ms/chiamata misurati sul solver di dominio). Il primo tentativo la smentì: il

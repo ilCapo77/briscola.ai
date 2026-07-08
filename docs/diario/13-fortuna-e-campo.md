@@ -1,4 +1,4 @@
-# Approfondimento — La fortuna quantificata e il primo audit di campo
+# Approfondimento — Quanto pesa il mazzo e cosa mostrano le prime vittorie umane
 
 **Capitolo del diario:** [Capitolo 13](https://ai.briscola.dev/diario) · **Periodo:** 7 luglio 2026
 

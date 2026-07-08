@@ -1,8 +1,8 @@
-# Approfondimento — La sonda trump-saver e il dose-shift della v11
+# Approfondimento — Dal test sullo stile umano alla v11: più maestro, meno volume
 
 **Capitolo del diario:** [Capitolo 14](https://ai.briscola.dev/diario) · **Periodo:** 7–8 luglio 2026
 
-## La sonda: quattro regole (`75da196`)
+## Le quattro regole del conservatore di briscole (`75da196`)
 
 Lo stile dei 7 vincitori umani, codificato in `heuristic_trump_saver` (nel registry, non
 esposta in UI — non è un avversario offerto ai giocatori, è uno strumento di misura):
@@ -16,7 +16,7 @@ esposta in UI — non è un avversario offerto ai giocatori, è uno strumento di
 Come tutti gli agenti vede solo `PlayerObservation` (il card counting usa
 `seen_cards_onehot`, informazione pubblica).
 
-## L'exploit che non c'era
+## Il presunto exploit umano non regge il test completo
 
 Risultati (medium 10k seat-fair, `benchmarks/experiments/trump_saver/`):
 
@@ -39,7 +39,7 @@ avversario. La perdita sui carichi guidati è reale, ma v10 compensa altrove. La
 resta in squadra con un mestiere nuovo: **−13.79 è la baseline anti-regressione**, il
 numero da battere *in differenziale* per dire che una generazione futura ha chiuso il buco.
 
-## La sonda edge-maestro: il vantaggio della search non si consuma
+## Il maestro con search ha ancora qualcosa da insegnare
 
 Seconda misura della giornata: PIMC belief su BASE v10 contro v10+solver, 4.000 seat-fair
 (ricetta identica alla conferma v0.23.0):
@@ -54,7 +54,7 @@ assorbito, perché il vantaggio è strutturale (la search media sul rumore del m
 che una rete reattiva non può replicare). E la config agile 16×8 tiene l'**87%
 dell'edge a 1/6 del costo**. Il ramo PIMC-as-teacher esce dal frigo.
 
-## Il run v11: più maestro, non più partite
+## Il training v11: più maestro, non più partite
 
 Ipotesi dose-shift: spostare dose dal maestro consumato (value-lookahead: +1.80 su v8 e
 in calo) a quello intatto. A2C **5M partite** (6× meno di v10), base e maestri su v10,
@@ -73,9 +73,9 @@ Gate dichiarato prima del lancio: big seat-fair vs v10, successo = +0.3..+0.5, s
 La curva dei rendimenti generazionali (+2.46 → +0.97 → +0.66) si è **rialzata** a +0.85:
 conta la dose e la qualità del maestro, non il volume. Contro la sonda il guadagno è
 proporzionale alla forza generale — nessun progresso differenziale sul fianco "umano",
-atteso: la sonda non era nel cartellone. Promosso `best_a2c_v11` (release v0.31.0).
+atteso: la sonda non era nel mix di training. Promosso `best_a2c_v11` (release v0.31.0).
 
-## L'overkill guard è scaduto
+## La vecchia protezione anti-spreco ora fa perdere punti
 
 Il gate era girato con v11 senza `overkill_guard` e v10 col guard: prima di promuovere,
 la variabile andava isolata. Rifatto il gate con v11+guard: **+0.32** contro il +0.85
@@ -84,10 +84,10 @@ utile alla v6, è diventata una stampella su una gamba guarita: gli "overkill" d
 scelte deliberate. Promosso senza guard; ogni aiuto scritto a mano va rimisurato a ogni
 generazione.
 
-## v12: l'esito negativo del mattino dopo
+## v12: aggiungere il conservatore al training non cambia lo stile
 
 Prerequisito fatto in giornata (`d2888be`): la sonda tradotta nel fast path e nei kernel
-Numba con parità ESATTA a tre motori (il +10.47 su h1 riprodotto identico
+Numba con parità ESATTA a tre motori (il +10.47 su `heuristic_v1` riprodotto identico
 campo-a-campo con `--engine fast`), quindi usabile in `--opponent-mix`. Bonus della
 traduzione: trovato e corretto un range check hardcoded nel collector A2C numba
 (`codes <= 3`) che avrebbe rifiutato in silenzio qualsiasi nuovo agente nel mix.
@@ -113,7 +113,7 @@ nella stessa proporzione. Due diagnosi da tenere:
 1. **il maestro non si consuma, ma l'allievo si satura**: da +0.85 a +0.11 con edge
    maestro identico (+3.36 confermato su base v11);
 2. **la punizione diluita non sposta un comportamento che paga in media**: guidare un
-   carico costa ~−11 punti attesi contro il saver (12% del cartellone) ma paga contro il
+   carico costa ~−11 punti attesi contro il saver (12% del mix di training) ma paga contro il
    restante 88% — una policy *incondizionale* fa la media e resta ferma. Il vizio n.1
    (carichi contro i conservatori di briscole) è intrinsecamente **condizionale**:
    richiede il riconoscimento dello stile avversario dalla storia della partita (Fase 4),
