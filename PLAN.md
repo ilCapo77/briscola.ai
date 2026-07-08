@@ -188,9 +188,21 @@ Prerequisito FATTO (commit d2888be): sonda tradotta in fast+numba con parità ES
 motori (il +10.47 vs h1 riprodotto identico campo-a-campo in `--engine fast`), utilizzabile
 in `--opponent-mix` (smoke train verificato); corretto anche un range check hardcoded nel
 collector A2C numba che rifiutava codici agente nuovi.
-**Run v12 LANCIATO dal maintainer (2026-07-07 ~22:38, 10M partite, seed 20260708)**: mix
+**Run v12 COMPLETATO (2026-07-08, 10M partite, seed 20260708)**: mix
 `bc_model:0.15, pimc_belief 16x8:0.40, VL_8x8:0.20, trump_saver:0.12, h1:0.04, h2:0.06,
-random:0.03`, base/maestri v11, iperparametri invariati.
+random:0.03`, base/maestri v11. **ESITO NEGATIVO, niente promozione** (artefatti
+`benchmarks/experiments/fase3/v12_vs_*.json`): vs v11 +0.11 (CI −0.03..+0.25, n.s.);
+vs trump_saver +14.80 (vs 14.34 di v11: +0.46 differenziale, in parte familiarità col
+partner deterministico); vs h1 +20.74 (record invariato). Contatore comportamentale
+(2k partite strumentate vs saver): carichi guidati 11.1% vs 10.4%, persi 71.3% vs 71.4%,
+briscole su piatti poveri 6.7% vs 6.8% — **comportamento IDENTICO a v11**. Due diagnosi
+da tenere: (a) il maestro non si consuma ma l'ALLIEVO SI SATURA (+0.85 → +0.11 con edge
+maestro identico a +3.36); (b) la punizione diluita non sposta un comportamento che paga
+in media — guidare carichi costa ~−11 attesi contro il saver (12%) ma paga contro il
+resto del cartellone (88%): una policy incondizionale fa la media e resta ferma. Il vizio
+n.1 (carichi vs conservatori) è intrinsecamente CONDIZIONALE → richiede riconoscimento
+dello stile avversario dalla storia (Fase 4) o resta coperto dalla search a runtime.
+v12 resta come artefatto locale non promosso.
 
 **Ipotesi v13 (in coda, scelta dal maintainer 2026-07-07): reward shaping POTENTIAL-BASED
 sull'economia di briscola.** Diagnosi: lo spreco di briscoline è la lezione che l'A2C
