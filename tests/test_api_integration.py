@@ -788,6 +788,10 @@ def test_dataset_mode_logs_ai_action_for_audit(
     assert "ai_card_reveal" not in by_type  # dataset mode resta minimale: niente evento realtime nel DB.
     assert "action_play_card" not in by_type
 
+    human_payload = by_type["human_action"]
+    assert isinstance(human_payload["result"], dict)
+    assert isinstance(human_payload["result"]["played_card"], dict)
+
     ai_payload = by_type["ai_action"]
     assert ai_payload["is_ai"] is True
     assert ai_payload["ai_agent"] == "random"

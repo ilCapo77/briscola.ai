@@ -136,6 +136,10 @@ def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
                         {"index": 1, "name": "Giocatore AI", "points": 0, "hand_size": 3},
                     ],
                 },
+                "result": {
+                    "played_card": {"suit": "coins", "rank": "ACE", "number": 1, "points": 11},
+                    "trick_completed": False,
+                },
                 "client_observed_server_version": 0,
                 "client_decision_time_ms": 1234,
             },
@@ -164,6 +168,7 @@ def test_export_only_completed_games_human_action(tmp_path: Path) -> None:
     assert rec["player_index"] == 0
     assert rec["is_ai"] is False
     assert rec["action"] == {"card_index": 1}
+    assert rec["result"]["played_card"]["rank"] == "ACE"
     assert rec["observation"]["my_turn"] is True
     assert rec["observation"]["players"][0]["name"] == "player_0"
     assert rec["observation"]["players"][1]["name"] == "player_1"

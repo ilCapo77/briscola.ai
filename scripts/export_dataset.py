@@ -261,6 +261,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
                 reward = payload.get("reward", 0)
                 done = payload.get("done")
                 next_obs = payload.get("next_observation")
+                result = payload.get("result")
                 decision_time_ms = payload.get("client_decision_time_ms")
                 observed_server_version = payload.get("client_observed_server_version")
 
@@ -282,7 +283,7 @@ def export_dataset(config: ExportConfig) -> dict[str, int]:
                     "observation": observation if isinstance(observation, dict) else None,
                     "action": {"card_index": card_index},
                     "reward": int(reward) if isinstance(reward, int) else 0,
-                    "result": None,
+                    "result": result if isinstance(result, dict) else None,
                     "next_observation": next_obs
                     if (config.include_next_state and isinstance(next_obs, dict))
                     else None,

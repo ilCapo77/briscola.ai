@@ -1071,6 +1071,7 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
                         "reward": reward,
                         "done": bool(new_state.game_over is True),
                         "next_observation": next_observation,
+                        "result": action_result_dto.model_dump(exclude_none=True),
                         "client_observed_server_version": action.client_observed_server_version,
                         "client_decision_time_ms": action.client_decision_time_ms,
                     }
