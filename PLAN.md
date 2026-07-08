@@ -77,6 +77,41 @@ Ogni riga è una decisione con evidenza; numeri e diagnosi in
 
 ## Prossime Azioni
 
+### 0. Postura corrente (2026-07-08): ASCOLTO, non training
+
+v12 ha dimostrato che la policy reattiva è **satura** (+0.11 su v11 con 10M partite ed edge
+maestro intatto): il prossimo punto NON si compra con più partite/più maestro. Decisione:
+nessun run finché non c'è una nuova ipotesi con un bersaglio misurato. La sorgente di
+ipotesi è il **campo** — v11 è in produzione col default nuovo e l'event log registra.
+Quando ci saranno ~50-100 partite umane complete contro v11, ripetere l'audit (script
+pronti) e misurare il contatore carichi-guidati/persi SUGLI UMANI: decide se il buco vale
+un ciclo o è marginale.
+
+**Pagella della nonna (2026-07-08, `scripts/behavior_profile.py`, profilo v11 in
+`data/behavior_profile_v11_20260708.json`)**: profilo comportamentale di v11 su 2k partite
+strumentate × 3 avversari (saver/specchio/h1). Risultati: apertura liscia ~39% (mediocre),
+carichi guidati ~10-13% (71% persi vs conservatori — il vizio noto), briscola su piatti
+poveri ~6% (spreco noto), punti regalati per presa persa **0.97 (ottimo)**, scarto dal seme
+corto ~75% (**"sbianchirsi" appreso da solo, sorpresa positiva**), asso di briscola tenuto
+fino alla presa ~17 (rispettata). **Scoperta forte: "cavare le briscole" con mano lunga
+(≥4) = 0.0% ASSOLUTO su tutti e tre gli avversari** (vs 18% con mano corta): condizionamento
+INVERTITO rispetto alla regola della nonna, secondo vizio sistematico dopo i carichi. Il
+profilo è quasi identico sui 3 avversari → conferma che la policy è INCONDIZIONALE (non
+cambia stile con l'avversario), che è la radice del problema.
+
+**Ipotesi evolutiva principale (in progettazione): encoder v5 con "feature di stile".**
+4-6 contatori da informazione pubblica (frequenza taglio carichi dell'avversario, % aperture
+lisce, briscole spese su piatti poveri, punti rifiutati…) appesi alle feature: danno alla
+policy la materia prima per comportarsi diversamente con avversari diversi — oggi
+matematicamente impossibile. Stesso schema validato con le feature v4 (+0.27). Gate con
+firma inequivocabile: il contatore carichi deve scendere **contro il saver ma non contro lo
+specchio** (adattamento, non media). Scavalca in priorità il potential-shaping (v13), che
+cura solo il vizio piccolo (spreco); tenere entrambi.
+
+**Due sonde da arbitrare** (giudice = PIMC, come le altre): (a) la cavata delle briscole con
+mano lunga — la nonna ha ragione o v11 ha scoperto che in 1v1 non paga? (b) l'asso di
+briscola giocato prima (giudice-search) vs tenuto fino in fondo (umani vincenti).
+
 ### 1. Post-Deploy 0.25.0
 
 Monitorare la CPU delle repliche nei primi giorni: il default PIMC-belief costa
