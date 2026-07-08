@@ -66,6 +66,21 @@ _V4_TRICK_FEATURES = 12
 _V4_BEHAVIOR_FEATURES = 11
 _V4_EXTRA_DIM = _V4_BEHAVIOR_FEATURES + _V4_LAST_TRICKS * _V4_TRICK_FEATURES
 
+# --- Indici PUBBLICI per diagnostica (usati da scripts/style_feature_probe.py) ---
+# Esposti apposta: permettono di isolare/perturbare blocchi dell'encoder senza toccare i
+# simboli privati. Gli offset seguono i layout documentati in `_compute_v3_extra_features`
+# (blocco v3, base = FEATURE_DIM_2P_V2) e `_compute_v4_extra_features` (blocco v4, base = V3).
+#
+# Blocco extra v4 (opponent modeling + storia prese): [FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4).
+V4_EXTRA_SLICE = slice(FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4)
+# Contatori aggregati di STILE dentro il blocco v4:
+V4_IDX_OPP_TRUMP_RESPONSE = FEATURE_DIM_2P_V3 + 5  # "tagli": risposte di briscola a lead non-briscola
+V4_IDX_OPP_LEAD_LOAD = FEATURE_DIM_2P_V3 + 9  # aperture di carico (asso/tre) dell'avversario
+# Feature di FASE dentro il blocco v3:
+V3_IDX_DECK_SIZE = FEATURE_DIM_2P_V2 + 16
+V3_IDX_HAND_SIZE = FEATURE_DIM_2P_V2 + 17
+V3_IDX_IS_ENDGAME = FEATURE_DIM_2P_V2 + 18
+
 
 def _one_hot_suit(suit: str | None) -> list[float]:
     """One-hot sui 4 semi (clubs, cups, coins, swords)."""

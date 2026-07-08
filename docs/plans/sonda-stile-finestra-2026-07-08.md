@@ -22,8 +22,9 @@
   Controllo positivo: swap del blocco fase (inizio↔finale) — deve muoversi.
 - **Analisi temporale**: distribuzione di `trick_index`, `deck_size`, contatori di stile
   e categoria dell'argmax live sugli stessi stati.
-- Sonde in scratchpad (non ancora nel repo): `style_sensitivity3.py` (controfattuale),
-  `style_temporal.py` (temporale). n≈11.6k stati (1000 partite/avversario).
+- Strumento riproducibile: `scripts/style_feature_probe.py --mode counterfactual|temporal|both`
+  (solo API pubbliche + costanti-indice pubbliche dell'encoder). n≈11.4k stati (1000
+  partite/avversario × mirror/saver/heuristic_v1).
 
 ## Risultati
 
@@ -41,24 +42,24 @@ conservatore):
 
 | contrasto (saver − mirror) | ΔP_carico_nb | bootstrap CI95 | argmax-flip | massa → |
 |---|---|---|---|---|
-| profili empirici — media | **−0.0083** | [−0.0090, −0.0075] | 1.1% | liscio_nb +0.0065 |
-| profili empirici — mediana | **−0.0244** | [−0.0266, −0.0225] | 3.5% | liscio_nb +0.0184 |
-| controllo positivo (fase) | +0.0563 | — | 19.6% | (sonda discrimina ✓) |
+| profili empirici — media | **−0.0084** | [−0.0092, −0.0077] | 1.1% | liscio_nb +0.0061 |
+| profili empirici — mediana | **−0.0081** | [−0.0088, −0.0074] | ~1% | liscio_nb (coerente con la media) |
+| controllo positivo (fase) | +0.067 | — | 19.6% | (sonda discrimina ✓) |
 
 → La policy usa lo stile nel **verso giusto** (carico_nb → liscio_nb contro il tagliatore),
-ma **debolissimamente**: ~1–2.4 pp di massa, 1–3.5% di flip, contro 5.6 pp / 19.6% del cambio
-di fase.
+ma **debolissimamente**: ~0.8 pp di massa, ~1% di flip, contro ~6.7 pp / 19.6% del cambio
+di fase. Media e mediana dei profili concordano.
 
 **R3 — Perché è debole: segnale raro, non timing (ipotesi "stati precoci" falsificata).**
 
 | | trick_index (med) | deck_size (med) | cuts /10 (med) | aperture_carico /10 (med) |
 |---|---|---|---|---|
-| pool completo (n=11607) | 8 | 18 | 0.1 | 0.0 |
-| argmax live = carico_nb (17.7%) | **14** | **6** | 0.1 | 0.0 |
-| argmax live = liscio_nb (77.9%) | 7 | 20 | 0.0 | 0.0 |
+| pool completo (n≈11.4k) | 8 | 18 | 0.1 | 0.0 |
+| argmax live = carico_nb (16.8%) | **14** | **6** | 0.1 | 0.0 |
+| argmax live = liscio_nb (78.7%) | 7 | 20 | 0.0 | 0.0 |
 
-- Il modello, quando ha carico + liscia, **guida la liscia nel 77.9%** dei casi; guida il
-  carico solo nel **17.7%**, e **quasi solo in endgame** (deck≤6), dove è spesso legittimo.
+- Il modello, quando ha carico + liscia, **guida la liscia nel ~79%** dei casi; guida il
+  carico solo nel **~17%**, e **quasi solo in endgame** (deck≤6), dove è spesso legittimo.
 - I contatori di stile restano **≈0 in tutta la partita**: tagli e aperture-di-carico sono
   **eventi rari**, quindi normalizzati /10 restano vicini a zero anche a metà-fine partita.
   Il segnale discriminante disponibile è genuinamente magro — meccanismo = rarità
@@ -76,8 +77,11 @@ di fase.
 
 ## Caveat
 
-- I numeri R2/R3 vengono da sonde in scratchpad, non da artefatti stabili del repo: il metodo
-  qui è sufficiente a ricomputarli; se servono ricomputabili, promuovere le sonde a `scripts/`.
+- Numeri R2/R3 **ricomputabili**: `uv run python scripts/style_feature_probe.py --mode both
+  --num-games 1000` (artefatto in `benchmarks/experiments/style_feature_probe/v11_both.json`,
+  gitignored). La prima stesura citava una mediana −0.0244 da una sonda scratchpad **non
+  riproducibile** (usava `hash()` + seed diversi); il valore stabile è ~−0.008, coerente con
+  la media. I numeri qui sono quelli del tool (commit di riferimento nel campo `meta.git_commit`).
 - La sonda controfattuale congela il resto dello stato e scambia un blocco che nella realtà
   co-varia con esso: anche il risultato R2 (segno corretto, CI sotto zero) resta un
   **controfattuale empirico**, non una prova causale pulita.
