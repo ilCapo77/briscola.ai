@@ -281,6 +281,7 @@ Report/event log:
 uv run python scripts/report_event_log.py --db path/to/events.sqlite3
 uv run python scripts/audit_event_log_games.py --db path/to/events.sqlite3 --json
 uv run python scripts/export_ai_actions.py --db path/to/events.sqlite3 --out data/ai_actions.jsonl
+uv run python scripts/export_live_actions.py --db path/to/events.sqlite3 --out data/live_actions.jsonl
 ```
 
 Report modelli:

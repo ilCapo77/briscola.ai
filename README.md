@@ -305,6 +305,16 @@ DATABASE_URL=... python scripts/export_ai_actions.py \
   --out ./data/prod_pimc_ai_actions.jsonl
 ```
 
+Export unico action-by-action per audit di campo (mosse umane + IA nello stesso JSONL, partite complete di default,
+`client_id` escluso dall'output salvo opt-in):
+
+```bash
+DATABASE_URL=... python scripts/export_live_actions.py \
+  --ai-agent bc_model_pimc_belief_16x8 \
+  --exclude-client-id loadtest-bot \
+  --out ./data/prod_live_actions.jsonl
+```
+
 **Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://ai.briscola.dev>.
 
 ### Simulazioni e self‑play (headless)
