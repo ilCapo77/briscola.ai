@@ -6,7 +6,10 @@
 
 ## Stato Corrente
 
-- Versione: `0.31.1` (2026-07-07). In 0.30.0: sonda trump_saver (dominio+fast/numba),
+- Versione: `0.32.0` (2026-07-08). In 0.32.0: avviso UI "server che si sveglia" sulle
+  richieste lente (cold start cloud, riusa il badge di stato), pagella della nonna
+  (`scripts/behavior_profile.py`), diario capitoli 13-16. In 0.31.1: sotto.
+- Storico 0.30.x–0.31.x: in 0.30.0: sonda trump_saver (dominio+fast/numba),
   cold start FastAPI Cloud 19s→13.7s (warm-up/provisioning in background, modelli
   committati nell'immagine). In 0.31.0: promozione v11, default UI =
   `bc_model_pimc_belief_16x8` con search PYTHON. In 0.31.1: **runtime web ZERO-NUMBA** —
