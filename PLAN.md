@@ -19,10 +19,13 @@
   e consenso. `export_live_actions.py` produce un JSONL unico umano+IA; per i log vecchi
   inferisce la carta umana da `observation.my_hand[card_index]`, mentre le prossime partite
   avranno anche `result` esplicito su `human_action`.
-- Audit finestra PIMC live 2026-07-08: variante eval-only `bc_model_pimc_belief_16x10`
-  testata seat-fair medium contro `16x8` e `heuristic_trump_saver`; 8→10 secco è chiuso
-  negativo (`-0.25`, CI `-0.45..-0.05` vs 16x8; anche peggio vs trump_saver).
-  v11 è già encoder v4 (`feature_dim=369`): non aprire encoder v5 solo per "feature di stile".
+- Audit finestra PIMC + sensibilità allo stile (2026-07-08, nota
+  `docs/plans/sonda-stile-finestra-2026-07-08.md`): 8→10 secco chiuso negativo
+  (`-0.25`, CI `-0.45..-0.05` vs 16x8; peggio anche vs trump_saver). v11 è già encoder v4
+  (`feature_dim=369`) e usa le feature di stile nel **verso giusto ma debolmente** (il
+  "segno sbagliato" iniziale era artefatto OOD dei profili manuali); il segnale di stile è
+  raro (tagli/aperture-carico ≈0 per tutta la partita). Encoder v5 chiuso; v13 solo come
+  esercizio didattico a payoff basso.
 - Diario: capitoli 13-16 pubblicati; approfondimenti tecnici 13-16 presenti in `docs/diario/`.
 - Test rapidi: `pytest -m "not slow and not numba"` (~4s). Gate completo locale recente:
   ruff, mypy, pytest (`533 passed`).
@@ -40,13 +43,13 @@ Quando ci sono ~50-100 partite umane complete contro il default v11:
 3. Misura anche cavata delle briscole con mano lunga, sprechi di briscola su piatti poveri
    e timing dell'asso di briscola.
 4. Decidi il ramo:
-   - **training/adattamento allo stile** solo se un test mostra che le feature v4 non vengono
-     sfruttate abbastanza; il problema non è aggiungere informazione all'encoder;
-   - **potential-shaping v13** se domina lo spreco di briscole;
+   - **adattamento allo stile**: chiuso come pista forte (nota
+     `docs/plans/sonda-stile-finestra-2026-07-08.md`). v11 usa già le feature v4 nel verso
+     giusto ma debolmente, e il segnale di stile è raro. Non encoder v5, non opponent-modeling
+     via feature;
+   - **potential-shaping v13** se domina lo spreco di briscole; sul solo bias dei carichi
+     guidati ha payoff basso (comportamento piccolo e per lo più endgame);
    - **sonda PIMC mirata** se restano dubbi su cavata delle briscole o asso di briscola.
-
-Gate minimo per encoder v5: meno carichi regalati contro il conservatore di briscole, ma
-non prudenza generica contro lo specchio. Serve adattamento, non una regola rigida.
 
 ## Vincoli Operativi
 
