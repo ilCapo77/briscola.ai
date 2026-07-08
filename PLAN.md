@@ -6,7 +6,9 @@
 
 ## Stato Corrente
 
-- Versione live: `0.32.0` (2026-07-08), produzione su <https://ai.briscola.dev>.
+- Versione live: `0.33.0` (2026-07-08), produzione su <https://ai.briscola.dev>. In 0.33.0:
+  `human_action` salva il `result` (audit di campo) + `export_live_actions.py` (export unico
+  mosse umane+IA).
 - Runtime web: tutto Python, niente import Numba nel processo web. I kernel Numba restano
   per training, valutazioni e benchmark.
 - Default UI: `bc_model_pimc_belief_16x8` su `best_a2c_v11.npz`, senza `overkill_guard`.
