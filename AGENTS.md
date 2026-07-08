@@ -52,6 +52,8 @@ Deps di runtime per il cloud: `redis` (game store) e `psycopg` (event log Postgr
 
 Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-replica) servono Redis + i provisioning. Il sito è live su `https://ai.briscola.dev`; l'entrypoint per `fastapi run` è lo shim `main:app` nella root.
 
+> **Deploy automatico al push**: FastAPI Cloud è collegato al repo GitHub e ridistribuisce **da solo** a ogni push su `master` (il build gira `uv sync --locked` → ricordarsi `uv lock` a ogni bump di versione). NON serve — e non va lanciato — `fastapi deploy` manualmente dall'agente. Dopo il push, verificare l'esito da `GET /version` (versione live) e dai log della piattaforma; il build impiega ~1-3 min. Nota **scale-to-zero**: idle ~90s, il cold start è frequente (mitigato da un keep-alive esterno se configurato).
+
 - `REDIS_URL` (o `BRISCOLA_REDIS_URL`): attiva `RedisGameSessionStore` + pub/sub realtime. Se assente → in-memory + WebSocket diretto.
 - `DATABASE_URL` (o `BRISCOLA_DATABASE_URL`): attiva l'event log su Postgres. Se assente → SQLite (`BRISCOLA_EVENT_DB_PATH`) o disabilitato.
 - `BRISCOLA_EVENT_LOG_MODE`: `debug` (default) | `dataset` (minimale, richiede consenso) | `off`.
