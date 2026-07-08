@@ -34,7 +34,13 @@ Briscola end-to-end: motore di regole puro → backend HTTP/WS → UI → pipeli
 > metadata essenziali o `--metrics-mode summary`. La dimensione del file non indica capacità del modello né quantità
 > di training.
 
-**Pipeline ML** (vedi `README.md` e `PLAN.md` per il dettaglio): dominio testabile → backend/UI → event log (SQLite in locale, **Postgres** in cloud) → export JSONL versionato (`export_dataset.py`, oggi legge da SQLite) → self-play → valutazione offline riproducibile → training (BC/PG/A2C). `PLAN.md` è la **fonte di verità su cosa fare dopo**: è volutamente breve (stato corrente + prossime azioni), leggilo per intero prima di pianificare.
+**Pipeline ML** (vedi `README.md` e `PLAN.md` per il dettaglio): dominio testabile → backend/UI → event log (SQLite in locale, **Postgres** in cloud) → export JSONL versionato (`export_dataset.py` / `export_live_actions.py`, SQLite o Postgres) → self-play → valutazione offline riproducibile → training (BC/PG/A2C). `PLAN.md` è la **fonte di verità su cosa fare dopo**: è volutamente breve (stato corrente + prossime azioni), leggilo per intero prima di pianificare.
+
+**Regola di manutenzione di `PLAN.md`**: se una riga non cambia cosa facciamo domani e ha già
+un riferimento stabile nel diario o in `docs/plans/`, toglila dal piano e lascia al massimo
+un rimando breve. Il piano deve restare operativo: stato reale, prossima decisione, vincoli
+che impediscono errori futuri e comandi utili. La cronaca degli esperimenti, una volta
+raccontata nel diario/approfondimento, non va duplicata lì.
 
 ## Setup, Build, and Run
 
