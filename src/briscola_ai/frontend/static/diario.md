@@ -174,7 +174,7 @@ A Briscola non c'è obbligo di seme: quando l'avversario apre una presa puoi ris
 
 Ecco cosa raccontavano le sette partite. Abbiamo rigiocato ogni mossa dell'IA facendola giudicare da una versione potenziata di lei stessa: verdetto, nessun errore. Ma il comportamento diceva altro: in quelle partite l'IA ha aperto la presa con un carico nove volte, e otto volte ha trovato la briscolina ad aspettarlo — centoundici punti trasferiti con questo solo meccanismo. Il giudice approvava quelle aperture perché è cieco al problema: nelle sue simulazioni l'avversario gioca come la sua famiglia, e nessuno in famiglia conserva le briscoline per tagliare. Nei suoi trenta milioni di partite di allenamento, aprire un asso a metà partita era ragionevolmente sicuro. I vincitori umani facevano l'opposto: aprivano con carte che non valgono niente, incassavano i carichi quando rispondevano — chi risponde, in due, non può essere tagliato da nessuno — e tenevano l'asso di briscola in mano oltre ogni consiglio del modello. Una partita su tutte lo dimostra: vinta 61 a 59 da un giocatore che aveva pescato un mazzo nettamente peggiore, con asso e tre di briscola dall'altra parte. Quella non era fortuna. Era tecnica.
 
-<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/plans/audit-campo-2026-07-07.md)*</small>
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/13-fortuna-e-campo.md)*</small>
 
 ## Capitolo 14 — La sonda che smentì sé stessa, e l'undicesima generazione <small>(7 luglio 2026)</small>
 
@@ -186,7 +186,7 @@ Da lì l'ipotesi dell'undicesima generazione, semplice da dire: non più partite
 
 Una sorpresa di contorno merita il suo paragrafo, perché chiude un cerchio aperto al capitolo 3. Ricordate la protesi anti-spreco, quella che impedisce al modello di buttare briscole alte su prese povere? Sull'undicesima generazione l'abbiamo misurata di nuovo: oggi è **dannosa** — mezzo punto a partita. Dopo milioni di partite contro maestri di ricerca, quelli che sembravano sprechi sono diventati scelte deliberate, e la stampella intralcia la gamba guarita. Il campione nuovo gioca senza. È la parabola di questo progetto in miniatura: ogni aiuto scritto a mano ha una scadenza, e la scopri solo misurando.
 
-<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/plans/audit-campo-2026-07-07.md)*</small>
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/14-sonda-e-dose-shift.md)*</small>
 
 ## Capitolo 15 — Il sito che dormiva <small>(7 luglio 2026)</small>
 
@@ -194,7 +194,9 @@ La stessa giornata aveva un secondo filone, molto più terra terra: perché il s
 
 Le prime due mosse furono di buon senso: spostare la compilazione in secondo piano, dietro alle richieste invece che davanti, e cuocere i modelli dentro l'immagine del server invece di riscaricarli a ogni risveglio. Il risveglio scese a 13.7 secondi — e lì si fermò, perché il resto è il prezzo della piattaforma, non nostro. Fu il maintainer ad alzare la posta: e se il sito facesse a meno di Numba del tutto? Il primo tentativo fu un disastro certificato: il solver del finale, richiamato migliaia di volte dentro le simulazioni della ricerca, in Python puro costava quattro volte tanto. Il secondo tentativo cambiò la domanda invece della risposta: perché risolvere lo stesso finale a ogni carta, quando si può risolverlo una volta sola e seguire la linea ottima fino in fondo? Con quel trucco — e con un solver compatto che era già in repo da settimane — il Python puro chiuse alla pari col kernel compilato: 16.6 millisecondi a mossa contro 17.0, esiti identici al bit, quarantasette megabyte di memoria in meno per replica, e più niente da compilare al risveglio. Oggi il tavolo online è Python puro da cima a fondo; i kernel veloci restano in palestra, dove i miliardi di calcoli servono davvero.
 
-E mentre questo capitolo va in stampa, la dodicesima generazione sta correndo nella notte: dieci milioni di partite, e per la prima volta nella rosa c'è anche il castigatore — l'euristica nata dai vincitori umani, promossa da sonda ad avversario di allenamento. Domattina i numeri diranno se ha insegnato quello che le sette partite avevano mostrato.
+E mentre questo capitolo va in stampa, la dodicesima generazione sta correndo nella notte: dieci milioni di partite, e per la prima volta nella rosa c'è anche il castigatore — l'euristica nata dai vincitori umani, promossa da sonda ad avversario di allenamento. I numeri del mattino dopo furono una lezione doppia: il castigatore non insegnò quasi nulla — la dodicesima generazione giocava forte quanto l'undicesima e guidava i carichi esattamente come prima. Non per testardaggine: perché contro nove avversari su dieci quella mossa paga ancora, e una rete che non sa chi ha di fronte fa la media. Capire con chi si sta giocando: è questo il prossimo gradino, ed è il più alto.
+
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/15-zero-numba.md)*</small>
 
 ## Epilogo
 
