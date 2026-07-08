@@ -12,6 +12,11 @@ const UI = (() => {
     const AI_MODEL_STORAGE_KEY = 'briscola_last_ai_model';
     const DEFAULT_PLAYER_NAME = 'Giocatore';
 
+    // Avviso non bloccante per il cold start del server cloud (scale-to-zero).
+    // Il testo del dettaglio overlay deve combaciare con quello in index.html.
+    const SERVER_WAKE_MESSAGE = 'Il server si sta svegliando, un attimo…';
+    const STARTUP_LOADING_DETAIL_DEFAULT = 'Caricamento tavolo e IA';
+
     // Map rank names to numbers for image paths
     const RANK_TO_NUMBER = {
         ACE: 1, TWO: 2, THREE: 3, FOUR: 4, FIVE: 5,
@@ -23,6 +28,7 @@ const UI = (() => {
         homeHero: document.getElementById('home-hero'),
         homeAbout: document.getElementById('home-about'),
         startupLoading: document.getElementById('startup-loading'),
+        startupLoadingDetail: document.getElementById('startup-loading-detail'),
         gameSetup: document.getElementById('game-setup'),
         gameBoard: document.getElementById('game-board'),
         gameResult: document.getElementById('game-result'),
@@ -69,6 +75,14 @@ const UI = (() => {
     // Se true, richiediamo una checkbox esplicita prima di avviare la partita.
     let dataConsentRequired = false;
     let gameStartupInProgress = false;
+
+    // Avviso "server che si sveglia": quando è attivo, il badge di stato nell'header
+    // mostra il messaggio di cortesia AL POSTO dello stato connessione corrente.
+    // Ricordiamo l'ultimo stato "base" (quello richiesto da game.js) per poterlo
+    // ripristinare fedelmente quando l'avviso si spegne, anche se nel frattempo lo
+    // stato è cambiato (es. una riconnessione WS conclusa mentre l'avviso era su).
+    let serverWakeNoticeActive = false;
+    let lastGameStatusRender = { text: 'Non connesso', className: '' };
 
     const _readStoredDataConsent = () => {
         try {
@@ -622,19 +636,57 @@ const UI = (() => {
      * - `connected` è utile come boolean base.
      * - `statusText`/`statusClass` permettono uno stato più granulare (es. "Riconnessione...").
      */
+    const _renderGameStatus = (text, className) => {
+        elements.gameStatus.textContent = text;
+        elements.gameStatus.className = className;
+    };
+
     const updateGameInfo = ({ gameId, connected, statusText, statusClass }) => {
         if (gameId) {
             elements.gameId.textContent = `ID: ${gameId.substring(0, 8)}...`;
         }
         if (connected !== undefined || statusText !== undefined || statusClass !== undefined) {
             const text = statusText !== undefined ? statusText : (connected ? 'Connesso' : 'Non connesso');
-            elements.gameStatus.textContent = text;
 
             // Manteniamo l'id `game-status` e usiamo classi "stateful" per i colori.
             const classes = [];
             if (statusClass) classes.push(statusClass);
             else if (connected) classes.push('connected');
-            elements.gameStatus.className = classes.join(' ');
+
+            // Memorizziamo sempre lo stato base; il render è rinviato se l'avviso
+            // "server che si sveglia" sta temporaneamente occupando il badge.
+            lastGameStatusRender = { text, className: classes.join(' ') };
+            if (!serverWakeNoticeActive) {
+                _renderGameStatus(lastGameStatusRender.text, lastGameStatusRender.className);
+            }
+        }
+    };
+
+    /**
+     * Mostra/nasconde l'avviso non bloccante "il server si sta svegliando".
+     *
+     * Chi lo pilota: il layer API (via game.js) quando una richiesta REST supera la
+     * soglia di lentezza — tipicamente il cold start del deploy cloud (scale-to-zero).
+     *
+     * Riusa i canali di stato già esistenti (nessun sistema di toast separato):
+     * - il badge `#game-status` nell'header, lo stesso dei messaggi di riconnessione WS;
+     * - la riga di dettaglio dell'overlay di avvio partita, perché durante la
+     *   creazione della partita (il caso lento più frequente) l'overlay copre l'header.
+     */
+    const setServerWakeNotice = (active) => {
+        const next = active === true;
+        if (serverWakeNoticeActive === next) return;
+        serverWakeNoticeActive = next;
+
+        if (next) {
+            // Stessa classe "warning" usata per i tentativi di riconnessione WS.
+            _renderGameStatus(SERVER_WAKE_MESSAGE, 'reconnecting');
+        } else {
+            _renderGameStatus(lastGameStatusRender.text, lastGameStatusRender.className);
+        }
+
+        if (elements.startupLoadingDetail) {
+            elements.startupLoadingDetail.textContent = next ? SERVER_WAKE_MESSAGE : STARTUP_LOADING_DETAIL_DEFAULT;
         }
     };
 
@@ -903,6 +955,7 @@ const UI = (() => {
         showGameBoard,
         showGameResult,
         updateGameInfo,
+        setServerWakeNotice,
         renderPlayerHand,
         renderOpponentHand,
         revealOpponentCard,

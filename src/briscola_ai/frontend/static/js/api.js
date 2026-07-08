@@ -32,6 +32,73 @@ const API = (() => {
     // Usa sempre la stessa origin da cui è servita la UI.
     const API_URL = new URL('/api', window.location.origin).toString().replace(/\/$/, '');
 
+    // --- Avviso "server che si sveglia" (cold start cloud) ---------------------------
+    //
+    // Il deploy pubblico (FastAPI Cloud) usa lo scale-to-zero: dopo ~90s di inattività
+    // la replica viene spenta e la prima richiesta successiva paga il risveglio
+    // (~10-15s lato piattaforma). Senza feedback l'utente vede solo un bottone che
+    // "non fa nulla" e pensa che il sito sia rotto.
+    //
+    // Strategia: ogni fetch REST parte con un timer; se la risposta non arriva entro
+    // SLOW_REQUEST_NOTICE_MS notifichiamo il listener registrato (la UI mostra un
+    // avviso non bloccante) e lo spegniamo appena la richiesta si conclude — sia in
+    // caso di successo che di errore.
+    //
+    // Limite noto (documentato di proposito): il PRIMO caricamento assoluto della
+    // pagina NON è coprebile da qui — il browser sta ancora aspettando l'HTML dal
+    // server addormentato e questo JS non è ancora stato scaricato/eseguito. L'avviso
+    // copre i casi reali successivi: creazione partita, azioni e fetch che colpiscono
+    // una replica appena sveglia o in scale-up.
+    //
+    // Concorrenza: più richieste possono essere lente nello stesso momento (es. i
+    // fetch di metadati all'avvio della home). Usiamo un CONTATORE, non un booleano:
+    // l'avviso appare quando la prima richiesta sfora la soglia e sparisce solo
+    // quando l'ULTIMA richiesta lenta si conclude.
+    const SLOW_REQUEST_NOTICE_MS = 2500;
+    let slowRequestListener = null;
+    let slowRequestsActive = 0;
+
+    /**
+     * Registra il callback chiamato con `true` quando almeno una richiesta REST
+     * supera la soglia di lentezza e con `false` quando non ce ne sono più.
+     * Il layer API non conosce la UI: è game.js a collegare il listener.
+     */
+    const setSlowRequestListener = (listener) => {
+        slowRequestListener = typeof listener === 'function' ? listener : null;
+    };
+
+    const _notifySlowRequests = (active) => {
+        if (!slowRequestListener) return;
+        try {
+            slowRequestListener(active);
+        } catch (error) {
+            // Un bug nel listener UI non deve mai rompere la richiesta in corso.
+            console.error('Errore nel listener slow-request:', error);
+        }
+    };
+
+    /**
+     * Wrapper di `fetch` (stessa firma) che segnala le richieste lente.
+     * Da usare al posto di `fetch` per TUTTE le chiamate REST di questo modulo.
+     */
+    const _fetchWithWakeNotice = async (input, init) => {
+        let countedAsSlow = false;
+        const timerId = setTimeout(() => {
+            countedAsSlow = true;
+            slowRequestsActive += 1;
+            if (slowRequestsActive === 1) _notifySlowRequests(true);
+        }, SLOW_REQUEST_NOTICE_MS);
+        try {
+            return await fetch(input, init);
+        } finally {
+            clearTimeout(timerId);
+            if (countedAsSlow) {
+                slowRequestsActive -= 1;
+                if (slowRequestsActive === 0) _notifySlowRequests(false);
+            }
+        }
+    };
+
     let gameId = null;
     let playerIndex = null;
     let websocket = null;
@@ -140,7 +207,7 @@ const API = (() => {
     const createGame = async (config) => {
         _requireServedOverHttp();
         try {
-            const response = await fetch(`${API_URL}/games`, {
+            const response = await _fetchWithWakeNotice(`${API_URL}/games`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -175,7 +242,7 @@ const API = (() => {
     const getAiAgents = async () => {
         _requireServedOverHttp();
         try {
-            const response = await fetch(`${API_URL}/ai/agents`);
+            const response = await _fetchWithWakeNotice(`${API_URL}/ai/agents`);
 
             if (!response.ok) {
                 const error = await response.json();
@@ -205,7 +272,7 @@ const API = (() => {
     const getAiModels = async () => {
         _requireServedOverHttp();
         try {
-            const response = await fetch(`${API_URL}/ai/models`);
+            const response = await _fetchWithWakeNotice(`${API_URL}/ai/models`);
 
             if (!response.ok) {
                 const error = await response.json();
@@ -234,7 +301,7 @@ const API = (() => {
     const getServerMeta = async () => {
         _requireServedOverHttp();
         try {
-            const response = await fetch(`${API_URL}/meta`);
+            const response = await _fetchWithWakeNotice(`${API_URL}/meta`);
 
             if (!response.ok) {
                 const error = await response.json();
@@ -262,7 +329,7 @@ const API = (() => {
                 url.searchParams.append('player_index', playerIndex);
             }
 
-            const response = await fetch(url);
+            const response = await _fetchWithWakeNotice(url);
 
             if (!response.ok) {
                 const error = await response.json();
@@ -300,7 +367,7 @@ const API = (() => {
                 }
             }
 
-            const response = await fetch(`${API_URL}/games/${gameId}/actions`, {
+            const response = await _fetchWithWakeNotice(`${API_URL}/games/${gameId}/actions`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -328,7 +395,7 @@ const API = (() => {
     const getGameResult = async (gameId) => {
         _requireServedOverHttp();
         try {
-            const response = await fetch(`${API_URL}/games/${gameId}/result`);
+            const response = await _fetchWithWakeNotice(`${API_URL}/games/${gameId}/result`);
 
             if (!response.ok) {
                 const error = await response.json();
@@ -489,6 +556,7 @@ const API = (() => {
     return {
         gameId,
         playerIndex,
+        setSlowRequestListener,
         createGame,
         getAiAgents,
         getAiModels,

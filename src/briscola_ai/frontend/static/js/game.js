@@ -798,6 +798,12 @@ document.addEventListener('DOMContentLoaded', () => {
         onNewGame: resetGame
     });
 
+    // Avviso cold start cloud: quando una richiesta REST resta appesa oltre la soglia
+    // (replica che si sveglia dallo scale-to-zero o scale-up in corso), la UI mostra
+    // un messaggio di cortesia non bloccante; il layer API lo spegne alla risposta.
+    // Registrato PRIMA dei fetch di metadati, così copre anche il primissimo giro.
+    API.setSlowRequestListener((active) => UI.setServerWakeNotice(active));
+
     loadAiAgentMetadata();
 
     // Precarica le immagini delle carte in background mentre l'utente è sulla home:
