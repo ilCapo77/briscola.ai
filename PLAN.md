@@ -19,6 +19,10 @@
   e consenso. `export_live_actions.py` produce un JSONL unico umano+IA; per i log vecchi
   inferisce la carta umana da `observation.my_hand[card_index]`, mentre le prossime partite
   avranno anche `result` esplicito su `human_action`.
+- Audit finestra PIMC live 2026-07-08: variante eval-only `bc_model_pimc_belief_16x10`
+  testata seat-fair medium contro `16x8` e `heuristic_trump_saver`; 8→10 secco è chiuso
+  negativo (`-0.25`, CI `-0.45..-0.05` vs 16x8; anche peggio vs trump_saver).
+  v11 è già encoder v4 (`feature_dim=369`): non aprire encoder v5 solo per "feature di stile".
 - Diario: capitoli 13-16 pubblicati; approfondimenti tecnici 13-16 presenti in `docs/diario/`.
 - Test rapidi: `pytest -m "not slow and not numba"` (~4s). Gate completo locale recente:
   ruff, mypy, pytest (`533 passed`).
@@ -36,7 +40,8 @@ Quando ci sono ~50-100 partite umane complete contro il default v11:
 3. Misura anche cavata delle briscole con mano lunga, sprechi di briscola su piatti poveri
    e timing dell'asso di briscola.
 4. Decidi il ramo:
-   - **encoder v5 con feature di stile** se il problema è riconoscere il tipo di avversario;
+   - **training/adattamento allo stile** solo se un test mostra che le feature v4 non vengono
+     sfruttate abbastanza; il problema non è aggiungere informazione all'encoder;
    - **potential-shaping v13** se domina lo spreco di briscole;
    - **sonda PIMC mirata** se restano dubbi su cavata delle briscole o asso di briscola.
 

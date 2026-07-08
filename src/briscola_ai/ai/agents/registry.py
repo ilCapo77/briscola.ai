@@ -124,6 +124,9 @@ _PIMC_BELIEF_64X10_DETERMINIZATIONS = 64
 _PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS = 10
 _PIMC_BELIEF_16X8_DETERMINIZATIONS = 16
 _PIMC_BELIEF_16X8_MAX_UNKNOWN_CARDS = 8
+# Variante eval-only per testare il confine della finestra PIMC senza esporre un'altra
+# scelta in UI: stessa dose agile della 16x8, ma search attiva fino a 10 carte vive ignote.
+BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME = "bc_model_pimc_belief_16x10"
 _SELECTED_MODEL_AGENT_NAMES = frozenset(
     {
         BC_MODEL_SPEC.name,
@@ -132,6 +135,7 @@ _SELECTED_MODEL_AGENT_NAMES = frozenset(
         BC_MODEL_PIMC_16X8_SPEC.name,
         BC_MODEL_PIMC_BELIEF_64X10_SPEC.name,
         BC_MODEL_PIMC_BELIEF_16X8_SPEC.name,
+        BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME,
     }
 )
 
@@ -275,7 +279,7 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
             name="bc_model_pimc_16x8",
         )
 
-    if name in ("bc_model_pimc_belief_64x10", "bc_model_pimc_belief_16x8"):
+    if name in ("bc_model_pimc_belief_64x10", "bc_model_pimc_belief_16x8", BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME):
         if model_path is None:
             raise ValueError(f"Agente {name!r} richiede `model_path` (file .npz)")
         models_dir = get_models_dir_from_env()
@@ -289,13 +293,17 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
         belief_model = load_belief_model_npz(belief_model_path)
         model_agent = BCModelAgent.from_npz(model_path)
         is_max = name == "bc_model_pimc_belief_64x10"
+        is_eval_16x10 = name == BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME
+        max_unknown_cards = (
+            _PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS if is_max or is_eval_16x10 else _PIMC_BELIEF_16X8_MAX_UNKNOWN_CARDS
+        )
         return PIMCAgent(
             rollout_agent=model_agent,
             fallback=model_agent,
             num_determinizations=(
                 _PIMC_BELIEF_64X10_DETERMINIZATIONS if is_max else _PIMC_BELIEF_16X8_DETERMINIZATIONS
             ),
-            max_unknown_cards=(_PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS if is_max else _PIMC_BELIEF_16X8_MAX_UNKNOWN_CARDS),
+            max_unknown_cards=max_unknown_cards,
             use_endgame_solver=True,
             belief_model=belief_model,
             # Search PYTHON per entrambe le config (2026-07-07): la search JIT valeva ~2x di CPU

@@ -132,9 +132,13 @@ def main() -> int:
             "fast-compatible; `numba` supporta `agent0=bc_model` MLP contro baseline o `agent1=bc_model` MLP."
         ),
     )
-    # `heuristic_trump_saver` è nel registry ma non in `list_agent_specs()` (sonda di
-    # exploitability, non offerta dalla UI): qui la aggiungiamo esplicitamente per le valutazioni.
-    agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model", "heuristic_trump_saver"]
+    # Alcune sonde sono costruibili dal registry ma non compaiono in `list_agent_specs()`
+    # perché non sono avversari offerti dalla UI: le abilitiamo solo per valutazioni CLI.
+    agent_names = [spec.name for spec in list_agent_specs()] + [
+        "bc_model",
+        "heuristic_trump_saver",
+        "bc_model_pimc_belief_16x10",
+    ]
     parser.add_argument(
         "--agent0",
         default="random",
