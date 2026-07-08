@@ -21,7 +21,7 @@
   **Scale-to-zero dopo ~90s di idle** (misurato dai log): il cold start è frequente.
 - Modello consigliato: `best_a2c_v11.npz` (encoder **v4**, hidden 256, SENZA overkill
   guard: misurato dannoso su v11, −0.5). Promosso v0.31.0 — ipotesi dose-shift: 40% del
-  cartellone al maestro PIMC 16×8 belief (dose tolta al VL), base/maestri v10, **5M
+  training al maestro PIMC 16×8 belief (dose tolta al VL), base/maestri v10, **5M
   partite (6× meno di v10)**: **+0.85 su v10** (CI coppie +0.71..+0.99) e **+20.80 su
   heuristic_v1** (record assoluto, era 20.52). La curva dei rendimenti (+2.46 → +0.97 →
   +0.66) si è RIALZATA: conta la dose/qualità del maestro, non il volume.
@@ -77,40 +77,46 @@ Ogni riga è una decisione con evidenza; numeri e diagnosi in
 
 ## Prossime Azioni
 
-### 0. Postura corrente (2026-07-08): ASCOLTO, non training
+### 0. Perché ci fermiamo dopo v12: servono dati umani e feature di stile (2026-07-08)
 
-v12 ha dimostrato che la policy reattiva è **satura** (+0.11 su v11 con 10M partite ed edge
-maestro intatto): il prossimo punto NON si compra con più partite/più maestro. Decisione:
-nessun run finché non c'è una nuova ipotesi con un bersaglio misurato. La sorgente di
-ipotesi è il **campo** — v11 è in produzione col default nuovo e l'event log registra.
-Quando ci saranno ~50-100 partite umane complete contro v11, ripetere l'audit (script
-pronti) e misurare il contatore carichi-guidati/persi SUGLI UMANI: decide se il buco vale
-un ciclo o è marginale.
+v12 ha tolto una scorciatoia comoda: con 10M partite e un maestro ancora forte ha fatto
+solo **+0.11 su v11** (compatibile con zero). Quindi il prossimo punto non sembra comprarsi
+aggiungendo altre partite o rimescolando le stesse dosi del gruppo di avversari. Decisione pratica:
+non lanciare un altro training finché non c'è un'ipotesi nuova con un bersaglio misurabile.
+Per ora la fonte migliore è il campo: v11 è in produzione con il nuovo default e l'event log
+registra le partite. Appena ci saranno ~50-100 partite umane complete contro v11, rifare
+l'audit e misurare, sugli umani, quante volte guida carichi e quante volte li perde. Quel
+numero decide se il problema merita un ciclo di training o resta rumore marginale.
 
 **Pagella della nonna (2026-07-08, `scripts/behavior_profile.py`, profilo v11 in
-`data/behavior_profile_v11_20260708.json`)**: profilo comportamentale di v11 su 2k partite
-strumentate × 3 avversari (saver/specchio/h1). Risultati: apertura liscia ~39% (mediocre),
-carichi guidati ~10-13% (71% persi vs conservatori — il vizio noto), briscola su piatti
-poveri ~6% (spreco noto), punti regalati per presa persa **0.97 (ottimo)**, scarto dal seme
-corto ~75% (**"sbianchirsi" appreso da solo, sorpresa positiva**), asso di briscola tenuto
-fino alla presa ~17 (rispettata). **Scoperta forte: "cavare le briscole" con mano lunga
-(≥4) = 0.0% ASSOLUTO su tutti e tre gli avversari** (vs 18% con mano corta): condizionamento
-INVERTITO rispetto alla regola della nonna, secondo vizio sistematico dopo i carichi. Il
-profilo è quasi identico sui 3 avversari → conferma che la policy è INCONDIZIONALE (non
-cambia stile con l'avversario), che è la radice del problema.
+`data/behavior_profile_v11_20260708.json`)**: non è una valutazione di forza, ma una
+fotografia delle abitudini. v11 è stata osservata su 2k partite strumentate contro tre
+avversari (saver, specchio, `heuristic_v1`). Alcune cose sono buone: quando perde una presa regala in
+media appena **0.97 punti**, scarta dal seme corto ~75% delle volte (si "sbianca" per
+prepararsi a tagliare) e tende a tenere l'asso di briscola fino alle ultime prese. Altre
+restano scoperte: apre liscio solo ~39%, guida carichi ~10-13% delle volte e contro i
+conservatori ne perde ~71%; taglia ancora piatti poveri ~6%.
 
-**Ipotesi evolutiva principale (in progettazione): encoder v5 con "feature di stile".**
-4-6 contatori da informazione pubblica (frequenza taglio carichi dell'avversario, % aperture
-lisce, briscole spese su piatti poveri, punti rifiutati…) appesi alle feature: danno alla
-policy la materia prima per comportarsi diversamente con avversari diversi — oggi
-matematicamente impossibile. Stesso schema validato con le feature v4 (+0.27). Gate con
-firma inequivocabile: il contatore carichi deve scendere **contro il saver ma non contro lo
-specchio** (adattamento, non media). Scavalca in priorità il potential-shaping (v13), che
-cura solo il vizio piccolo (spreco); tenere entrambi.
+La scoperta più utile riguarda la regola "cavare le briscole": quando ha una mano lunga di
+briscole (≥4) v11 **non esce mai** a briscola bassa, 0.0% su tutti e tre gli avversari. Con
+mano corta lo fa ~18%. È il contrario della regola tradizionale, quindi va trattato con
+cautela: può essere un vizio sistematico, oppure una buona eccezione del 1v1. Il profilo,
+però, cambia pochissimo da un avversario all'altro. Questa è la diagnosi più solida: la
+policy gioca quasi sempre "di media" e non riconosce davvero lo stile che ha davanti.
 
-**Due sonde da arbitrare** (giudice = PIMC, come le altre): (a) la cavata delle briscole con
-mano lunga — la nonna ha ragione o v11 ha scoperto che in 1v1 non paga? (b) l'asso di
-briscola giocato prima (giudice-search) vs tenuto fino in fondo (umani vincenti).
+**Ipotesi evolutiva principale (in progettazione): encoder v5 con feature di stile.**
+Se il difetto è condizionale, serve dare alla rete indizi pubblici sul tipo di avversario:
+4-6 contatori come frequenza con cui taglia i carichi, percentuale di aperture lisce,
+briscole spese su piatti poveri, punti rifiutati. Non sono informazioni nascoste: sono
+riassunti della storia già visibile della partita. Lo stesso schema generale ha funzionato
+con le feature v4 (+0.27). Gate richiesto: i carichi guidati devono scendere **contro il
+saver ma non contro lo specchio**; se scendono ovunque è solo una media più prudente, non
+adattamento. Questa ipotesi passa davanti al potential-shaping v13, che resta utile ma
+cura soprattutto lo spreco di briscole, non il problema dei carichi contro i conservatori.
+
+**Due sonde da arbitrare** con il giudice PIMC: (a) cavare le briscole con mano lunga —
+la regola della nonna vale anche nel 1v1, o v11 ha scoperto una buona eccezione? (b) asso
+di briscola giocato prima secondo la search vs tenuto fino in fondo dagli umani vincenti.
 
 ### 1. Post-Deploy 0.25.0
 
@@ -134,7 +140,7 @@ interni dell'IA (giudice 128×5 + solver), ma **bias di famiglia** comportamenta
 carichi guidati persi (~111 pt) contro umani che conservano le briscoline per tagliare
 (finestra fallback deck 22→8). Lo stile è codificato in **`heuristic_trump_saver`**
 (sonda di exploitability, solo dominio, registry ma non UI): rule-based più forte del repo
-(+10.47 su h1) ma **exploit differenziale NON confermato** (vs v10 −13.79, peggio della
+(+10.47 su `heuristic_v1`) ma **exploit differenziale NON confermato** (vs v10 −13.79, peggio della
 transitività ~−10.4: il campione delle 7 vittorie era selezionato). La sonda resta la
 baseline anti-regressione del bias: −13.79 è il numero da battere in differenziale.
 Artefatti: `benchmarks/experiments/trump_saver/`, `data/field_audit_20260707/`.
@@ -195,7 +201,7 @@ seat-fair (stessa ricetta della conferma v0.23.0): 16×8 **+3.37** (CI +3.06..+3
 6.2 ms/mossa pensata), 64×10 **+3.87** (CI +3.51..+4.23, 36.7 ms). Edge INVARIATO rispetto
 a base v8 (+3.66): lo sparring non assorbe il vantaggio strutturale della search (media sul
 rumore del mazzo). Il ramo PIMC-as-teacher è quindi USCITO dal frigo: **run v11 lanciato
-2026-07-07** (A2C 5M, base/maestri v10, PIMC 16×8 belief al 40% del cartellone spostando
+2026-07-07** (A2C 5M, base/maestri v10, PIMC 16×8 belief al 40% del training spostando
 dose dal VL, iperparametri v10, seed 20260707, `--metrics-mode summary`); throughput
 osservato ~26k partite/min (checkpoint 1M a +38'). Al termine: gate big seat-fair vs v10
 (successo = +0.3..+0.5; sotto +0.2 il ramo sparring si chiude).
@@ -209,32 +215,33 @@ artefatti `benchmarks/experiments/fase3/v11_vs_*.json`):**
 - **vs heuristic_v1: +20.80 (CI +20.62..+20.97)** — nuovo record assoluto (era +20.52).
 - **vs trump_saver: +14.34** (v10: +13.79, misurato però su medium 10k domain) —
   miglioramento proporzionale alla forza generale, nessun guadagno differenziale sul
-  fianco "umano": atteso, la sonda non era nel cartellone. Resta l'ipotesi v12.
+  fianco "umano": atteso, la sonda non era nel mix di training. Resta l'ipotesi v12.
 - Nota per la promozione: nel gate v11 è girato SENZA `overkill_guard` (il metadata
   `inference_overkill_guard` non risulta nel `.npz`), v10 CON: prima di promuovere,
   normalizzare il guard e riconfermare il gate 1. Ramo sparring: APERTO (prossimo giro
-  possibile: maestro PIMC su base v11, e/o trump_saver nel cartellone).
+  possibile: maestro PIMC su base v11, e/o trump_saver nel mix di training).
 
-**Ipotesi v12 (dopo il gate v11)**: diversità di stile nel cartellone — `heuristic_trump_saver`
+**Ipotesi v12 (dopo il gate v11)**: diversità di stile nel mix di training — `heuristic_trump_saver`
 come avversario di training (dose 10–15% dalla quota bar) per curare il bias di famiglia sui
 carichi guidati. Tre termometri: (1) differenziale vs trump_saver (baseline v10 = −13.79);
 (2) big vs v10/v11 (no regressioni); (3) contatore briscole spese su piatti ≤2 punti.
 Prerequisito FATTO (commit d2888be): sonda tradotta in fast+numba con parità ESATTA a tre
-motori (il +10.47 vs h1 riprodotto identico campo-a-campo in `--engine fast`), utilizzabile
-in `--opponent-mix` (smoke train verificato); corretto anche un range check hardcoded nel
-collector A2C numba che rifiutava codici agente nuovi.
+motori (il +10.47 vs `heuristic_v1` riprodotto identico campo-a-campo in `--engine fast`),
+utilizzabile in `--opponent-mix` (smoke train verificato); corretto anche un range check
+hardcoded nel collector A2C numba che rifiutava codici agente nuovi.
 **Run v12 COMPLETATO (2026-07-08, 10M partite, seed 20260708)**: mix
-`bc_model:0.15, pimc_belief 16x8:0.40, VL_8x8:0.20, trump_saver:0.12, h1:0.04, h2:0.06,
-random:0.03`, base/maestri v11. **ESITO NEGATIVO, niente promozione** (artefatti
+bc_model 15%, PIMC belief 16×8 40%, value-lookahead 8×8 20%, trump_saver 12%,
+heuristic_v1 4%, heuristic_v2 6%, random 3%; base/maestri v11. **ESITO NEGATIVO,
+niente promozione** (artefatti
 `benchmarks/experiments/fase3/v12_vs_*.json`): vs v11 +0.11 (CI −0.03..+0.25, n.s.);
 vs trump_saver +14.80 (vs 14.34 di v11: +0.46 differenziale, in parte familiarità col
-partner deterministico); vs h1 +20.74 (record invariato). Contatore comportamentale
+partner deterministico); vs `heuristic_v1` +20.74 (record invariato). Contatore comportamentale
 (2k partite strumentate vs saver): carichi guidati 11.1% vs 10.4%, persi 71.3% vs 71.4%,
 briscole su piatti poveri 6.7% vs 6.8% — **comportamento IDENTICO a v11**. Due diagnosi
 da tenere: (a) il maestro non si consuma ma l'ALLIEVO SI SATURA (+0.85 → +0.11 con edge
 maestro identico a +3.36); (b) la punizione diluita non sposta un comportamento che paga
 in media — guidare carichi costa ~−11 attesi contro il saver (12%) ma paga contro il
-resto del cartellone (88%): una policy incondizionale fa la media e resta ferma. Il vizio
+resto del mix di training (88%): una policy incondizionale fa la media e resta ferma. Il vizio
 n.1 (carichi vs conservatori) è intrinsecamente CONDIZIONALE → richiede riconoscimento
 dello stile avversario dalla storia (Fase 4) o resta coperto dalla search a runtime.
 v12 resta come artefatto locale non promosso.
