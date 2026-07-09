@@ -26,6 +26,12 @@
   "segno sbagliato" iniziale era artefatto OOD dei profili manuali); il segnale di stile è
   raro (tagli/aperture-carico ≈0 per tutta la partita). Encoder v5 chiuso; v13 solo come
   esercizio didattico a payoff basso.
+- v13 overkill shaping: `beta=0.005` a 5M e `0.01/0.02/0.03` a 1M sono troppo morbidi.
+  Stress 100k: `0.1/0.2/0.3` restano point-neutral vs v11 e riducono l'overkill in modo
+  monotono; `1.0` prova che la leva funziona ma è troppo dura per una candidata. Se si
+  prosegue, il ramo sensato è un run lungo su `beta=0.3` (o `0.2` più conservativo), non
+  `1.0`. **Run lungo `beta=0.3` in corso** (2026-07-09, sotto `caffeinate`): in attesa di
+  log/artefatti per decidere se diventa candidata o si chiude.
 - Diario: capitoli 13-16 pubblicati; approfondimenti tecnici 13-16 presenti in `docs/diario/`.
 - Test rapidi: `pytest -m "not slow and not numba"` (~4s). Gate completo locale recente:
   ruff, mypy, pytest (`533 passed`).
@@ -34,6 +40,13 @@
 
 Non lanciare altro training finché non c'è una nuova ipotesi misurata. v12 è chiusa:
 forza quasi invariata su v11 e comportamento sui carichi praticamente identico.
+
+**Le tre piste "comportamento sospetto vs umani" sono chiuse con evidenza**: carichi
+guidati (sonda `lead_load_guard_probe.py`), timing dell'asso di briscola e cavata con mano
+lunga (sonda `trump_play_probe.py`). Su questi assi v11 è già forte: nessun guard/shaping
+migliora seat-fair. **Prossimo passo azionabile: attendere l'esito del run lungo `beta=0.3`**
+(vedi Stato Corrente) e leggerne log/artefatti; l'audit di campo resta gated dal volume di
+partite umane.
 
 Quando ci sono ~50-100 partite umane complete contro il default v11:
 
@@ -49,7 +62,56 @@ Quando ci sono ~50-100 partite umane complete contro il default v11:
      via feature;
    - **potential-shaping v13** se domina lo spreco di briscole; sul solo bias dei carichi
      guidati ha payoff basso (comportamento piccolo e per lo più endgame);
-   - **sonda PIMC mirata** se restano dubbi su cavata delle briscole o asso di briscola.
+   - **lead-load guard / v13-bis** solo dopo una Fase 0 strumentata sui lead di carico v11:
+     misurare volume, carichi persi/tagliati, fase, point_diff, presenza di liscia alternativa
+     e rischio pubblico (`not_master`: esiste una carta ignota che potrebbe battere il carico).
+     Nota: in Briscola non c'è obbligo di rispondere al seme, quindi "vuoto mostrato" non è
+     una prova causale forte. Non usare trigger quasi vacui come `unknown_trumps_count >= 1`;
+     se si testa un guard, deve essere eval-only, diagnostico, con sostituzione base via
+     `card_conservation_cost`. Prime ablation 1000x/opponente: `not_master`,
+     `thin_and_not_master` e variante `deck<=6 + avanti` riducono un po' i tagli ma perdono
+     punti contro mirror/trump_saver; il guard runtime è improbabile, resta utile come sonda.
+     Evidenza `by_deck_size` (v11 vs trump_saver, 1000 partite) che chiude anche l'ipotesi
+     "intervenire a inizio partita": il modello **quasi non guida carichi presto**
+     (lead_load_pct 4.35% con deck>16 vs 15.6% mid e 19.3% con deck<=6), quindi a inizio
+     partita non c'è nulla da guardare. Il `cut_pct` è ~costante (63-66%) in tutte le fasi:
+     è una scelta sistematica (aprire un carico per stanare la briscola), non un blunder
+     localizzato — e il modello resta +14 pt vs il punitore *nonostante* i tagli. L'ablation
+     `not_master` fa 201 interventi (scarta 2128 pt di carichi per lisce da 0) ma `cut_pct`
+     scende solo -1.9 e il punteggio -1.08: il guard **rimanda** il taglio, non lo evita, e
+     rimuove i sacrifici buoni (late il 28% dei carichi è già master e viene giustamente
+     risparmiato). Conclusione: non è questione di *quando* far scattare il guard; nessun
+     trigger lecito isola una perdita reale.
+     **Cross-check su dati di campo** (`scripts/field_load_cut_base_rate.py`, default
+     `bc_model_pimc_belief_16x8`): il "carico guidato tardi tagliato dall'umano" è un evento di
+     *base rate*, non un marcatore di sconfitta. Attenzione al filtro data: l'export raw da 66
+     partite mischiava 2026-07-08 (47) e 2026-07-09 (19) — separandole (deck<=8, load>=10):
+     *07-09* (giorno degli aneddoti) perse 50% vs non-perse 46% → lift 1.08, **Fisher p=1.0**
+     (nessun segnale); *07-08* perse 69% vs 41% → lift 1.68, p=0.11 (il debole segnale veniva
+     quasi solo da qui); *mischiato* lift 1.48, p=0.18. In tutti i tagli, nelle partite dove
+     l'evento capita **l'IA NON perde ~60-67% delle volte**. Gli aneddoti sulle singole partite
+     perse sono reali ma è bias di selezione + probabile causazione inversa (l'IA in ritardo
+     dumpa più carichi tardi): sintomo, non causa. Coerente con l'ablation controfattuale che
+     *toglie* punti.
+     **Barra per riaprire la pista** (decisione 2026-07-09): NON basta che con più partite il
+     lift diventi statisticamente significativo — "evento più frequente nelle sconfitte" non
+     implica "rimuoverlo migliora" (resta plausibile sintomo di partita già difficile). Serve
+     un risultato più forte: una variante controfattuale che riduce l'evento **senza perdere
+     punti** seat-fair. Quel test è già stato fatto e dice no. Rilanciare il base-rate solo
+     con campione molto più grande (≥ qualche centinaio di partite live) o casi umani
+     qualitativamente nuovi.
+   - **cavata briscole / timing asso di briscola**: chiuso con `scripts/trump_play_probe.py`
+     (Tier A descrittivo + ablation controfattuale seat-fair + cross-check regret endgame).
+     v11, 1000 partite/avversario. *Asso*: il modello **non guida l'asso di briscola presto**
+     (ace_led_early ≈4-9 su 1000; l'asso guidato è quasi solo in endgame `deck<=6`) e lo
+     valorizza (avg_capture ~16-18, 43-63% delle prese ≥17 pt); il trattamento `ace_hold`
+     fa 4-9 interventi/1000 → delta nullo, il fenomeno non esiste. *Cavata*: con ≥2 briscole
+     il modello apre in briscola ~81% (≥3: 100%) e vince ~85%; `pull_more` è neutro
+     (delta ±0.2), `pull_less` **crolla** (-6.7 vs trump_saver, -3.0 mirror, -5.3 v1). La
+     cavata aggressiva con mano lunga è quindi una scelta buona *appresa*, non un bias.
+     Tier C: esecuzione endgame quasi ottima (suboptimal 1.6-6.9%, regret media <0.6 pt).
+     Conclusione: niente guard e niente shaping su asso/cavata (criterio Tier B fallito da
+     tutti e tre i trattamenti).
 
 ## Vincoli Operativi
 
@@ -71,9 +133,14 @@ Quando ci sono ~50-100 partite umane complete contro il default v11:
 
 ## Debito Aperto
 
-- Audit campo v11: in attesa di abbastanza partite umane complete.
-- Sonde da arbitrare con giudice PIMC: cavata delle briscole con mano lunga; asso di
-  briscola giocato prima vs tenuto fino al finale.
+- Audit campo v11: primo campione reale (66 partite live 2026-07-08+09; su 07-09: 19 partite,
+  6 sconfitte IA). Base-rate confermato: il "carico guidato tardi tagliato" non è causa di
+  sconfitta (vedi nota lead-load in Prossima Decisione, con numeri per-data). Metodo pronto in
+  `scripts/field_load_cut_base_rate.py` (`--date`/`--timezone`). Raccogliere di più per assi
+  non ancora coperti.
+- Sonde cavata-briscole / asso di briscola: **arbitrate e chiuse** (2026-07-09,
+  `scripts/trump_play_probe.py`) — il modello non guida l'asso presto e la cavata con mano
+  lunga è corretta; niente guard/shaping. Dettaglio nella nota "Prossima Decisione".
 - Infra: cold start residuo ~13.7s è piattaforma. Le uniche leve vere sono keep-alive <90s,
   piano a pagamento o ulteriore UX.
 - Capacità default: free tier prudente ~5-8 giocatori simultanei. Se il traffico cresce,
@@ -120,6 +187,15 @@ uv run python scripts/behavior_profile.py \
   --model data/models/best_a2c_v11.npz \
   --opponents heuristic_trump_saver,mirror,heuristic_v1 \
   --num-games 2000
+```
+
+Sonde diagnostiche comportamentali (chiuse, riproducibili):
+
+```bash
+# Carichi guidati: Fase 0 + ablation guard eval-only
+uv run python scripts/lead_load_guard_probe.py --mode guard --num-games 1000
+# Asso di briscola + cavata con mano lunga: Fase 0 + ablation controfattuale + regret endgame
+uv run python scripts/trump_play_probe.py --mode both --num-games 1000 --treatment all
 ```
 
 Report modelli:
