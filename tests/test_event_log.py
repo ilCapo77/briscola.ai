@@ -14,6 +14,7 @@ almeno alcuni eventi base (creazione partita e azione giocata).
 from __future__ import annotations
 
 import sqlite3
+import time
 from pathlib import Path
 
 import pytest
@@ -22,6 +23,17 @@ from fastapi.testclient import TestClient
 from briscola_ai.backend import server
 from briscola_ai.backend.game_store import InMemoryGameSessionStore
 from briscola_ai.main import app as main_app
+
+
+def _wait_for_human_turn(client: TestClient, game_id: str, *, prefix: str = "") -> dict:
+    """Legge lo stato finché il player 0 è di mano: con avvio casuale può partire l'IA."""
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        obs = client.get(f"{prefix}/games/{game_id}", params={"player_index": 0}).json()
+        if obs.get("my_turn"):
+            return obs
+        time.sleep(0.05)
+    raise AssertionError("il turno umano non è arrivato dopo l'avvio automatico IA")
 
 
 def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -47,7 +59,7 @@ def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.Monke
         assert create.status_code == 200
         game_id = create.json()["game_id"]
 
-        obs = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
+        obs = _wait_for_human_turn(client, game_id)
         action = client.post(
             f"/games/{game_id}/actions",
             json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},
@@ -67,6 +79,40 @@ def test_event_log_writes_basic_events(tmp_path: Path, monkeypatch: pytest.Monke
     event_types = [r[0] for r in rows]
     assert "game_created" in event_types
     assert "action_play_card" in event_types
+
+
+def test_event_log_marks_user_abandoned_games(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """L'abbandono volontario deve restare distinguibile dai timeout automatici nei dati."""
+    db_path = tmp_path / "events.sqlite3"
+    monkeypatch.setenv("BRISCOLA_EVENT_DB_PATH", str(db_path))
+
+    server.game_store = InMemoryGameSessionStore()
+    server.game_timestamps.clear()
+    server.game_data.clear()
+
+    with TestClient(server.app) as client:
+        create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+        assert create.status_code == 200
+        game_id = create.json()["game_id"]
+
+        abandon = client.post(f"/games/{game_id}/abandon", json={"player_index": 0})
+        assert abandon.status_code == 200
+
+    conn = sqlite3.connect(db_path)
+    try:
+        game_row = conn.execute(
+            "SELECT aborted_reason FROM games WHERE game_id = ?;",
+            (game_id,),
+        ).fetchone()
+        event_rows = conn.execute(
+            "SELECT event_type FROM events WHERE game_id = ? ORDER BY id ASC;",
+            (game_id,),
+        ).fetchall()
+    finally:
+        conn.close()
+
+    assert game_row == ("user_abandoned",)
+    assert "game_aborted" in [row[0] for row in event_rows]
 
 
 def test_event_log_works_when_api_is_mounted_under_main_app(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -89,7 +135,7 @@ def test_event_log_works_when_api_is_mounted_under_main_app(tmp_path: Path, monk
         assert create.status_code == 200
         game_id = create.json()["game_id"]
 
-        obs = client.get(f"/api/games/{game_id}", params={"player_index": 0}).json()
+        obs = _wait_for_human_turn(client, game_id, prefix="/api")
         action = client.post(
             f"/api/games/{game_id}/actions",
             json={"game_id": game_id, "player_index": 0, "card_index": obs["valid_actions"][0]},

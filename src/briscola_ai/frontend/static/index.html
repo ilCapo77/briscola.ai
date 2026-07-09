@@ -43,24 +43,13 @@
             <h2>Inizia una nuova partita</h2>
             <form id="game-form">
                 <div class="form-group">
-                    <label for="player-name-input">Il tuo nome:</label>
+                    <label for="player-name-input">Il tuo nome, se vuoi cambiarlo:</label>
                     <input type="text" id="player-name-input" placeholder="Inserisci il tuo nome" value="Giocatore" required>
                 </div>
-                <div class="form-group">
-                    <label for="ai-agent-select">Avversario (IA):</label>
-                    <select id="ai-agent-select">
-                        <option value="random">Random</option>
-                        <option value="greedy_points">Greedy (punti)</option>
-                        <option value="heuristic_v1" selected>Euristica v1</option>
-                    </select>
-                    <div id="ai-agent-description" class="help-text"></div>
+                <div class="default-opponent-summary" id="default-opponent-summary">
+                    Avversario: IA consigliata, il modello più aggiornato del progetto. Puoi cambiarlo nelle opzioni avanzate.
                 </div>
-                <div class="form-group hidden" id="ai-model-group">
-                    <label for="ai-model-select">Modello (file .npz):</label>
-                    <select id="ai-model-select"></select>
-                    <div id="ai-model-description" class="help-text"></div>
-                </div>
-                <div class="form-group hidden" id="data-consent-group">
+                <div class="form-group" id="data-consent-group">
                     <label>Raccolta dati (anonima)</label>
                     <div class="consent-row">
                         <input type="checkbox" id="data-consent-checkbox">
@@ -70,13 +59,45 @@
                     </div>
                     <div id="data-consent-description" class="help-text"></div>
                 </div>
-                <div class="form-group">
-                    <button type="submit" id="start-game">Avvia partita</button>
+                <div class="form-actions">
+                    <button type="submit" id="start-game" disabled>Avvia partita</button>
+                    <button
+                        type="button"
+                        id="advanced-options-toggle"
+                        class="secondary-button"
+                        aria-expanded="false"
+                        aria-controls="advanced-options"
+                    >
+                        Opzioni avanzate
+                    </button>
                 </div>
-                <!-- Nota anti-cheat: sotto il pulsante, ma in alto nella pagina (sopra l'about). -->
-                <div id="ai-agent-common-note" class="anti-cheat-callout hidden">
+                <div id="setup-error" class="setup-error hidden" role="alert"></div>
+
+                <div id="ai-agent-common-note" class="anti-cheat-callout">
                     <div class="anti-cheat-title">Nota anti-cheat</div>
-                    <div id="ai-agent-common-note-text" class="anti-cheat-body"></div>
+                    <div id="ai-agent-common-note-text" class="anti-cheat-body">
+                        L'IA non bara: non conosce le tue carte e non sa quali carte usciranno dal mazzo.
+                        Gioca con le stesse informazioni che avrebbe una persona seduta al tavolo.
+                        <a href="/diario#patto-anti-cheat">Leggi il patto anti-cheat nel diario</a>.
+                    </div>
+                </div>
+
+                <div id="advanced-options" class="advanced-options hidden">
+                    <div class="form-group">
+                        <label for="ai-agent-select">Avversario (IA):</label>
+                        <select id="ai-agent-select">
+                            <option value="bc_model_pimc_belief_16x8" selected>IA consigliata</option>
+                            <option value="heuristic_v1">Euristica v1</option>
+                            <option value="random">Random</option>
+                        </select>
+                        <div id="ai-agent-description" class="help-text"></div>
+                    </div>
+                    <div class="form-group hidden" id="ai-model-group">
+                        <label for="ai-model-select">Modello (file .npz):</label>
+                        <select id="ai-model-select"></select>
+                        <div id="ai-model-description" class="help-text"></div>
+                    </div>
+                    <div id="advanced-options-loading" class="help-text hidden">Caricamento opzioni...</div>
                 </div>
             </form>
         </div>
@@ -113,6 +134,15 @@
                 <div class="player-info">
                     <span class="player-name" id="opponent-name">Avversario IA</span>
                     <span class="player-points" id="opponent-points">0 punti</span>
+                    <button
+                        type="button"
+                        id="abandon-game"
+                        class="abandon-game-button"
+                        aria-label="Abbandona partita"
+                        title="Abbandona partita"
+                    >
+                        ×
+                    </button>
                 </div>
                 <div class="hand" id="opponent-hand"></div>
             </div>
@@ -178,6 +208,33 @@
             <div class="startup-spinner" aria-hidden="true"></div>
             <div class="startup-loading-title">Preparazione partita...</div>
             <div class="startup-loading-detail" id="startup-loading-detail">Caricamento tavolo e IA</div>
+            <div class="startup-tip">
+                <div class="startup-tip-label">Regola della nonna</div>
+                <div class="startup-tip-text" id="startup-tip-text">
+                    Non inseguire tutti i punti: alcune prese si lasciano andare per vincerne una migliore dopo.
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div
+        id="abandon-modal"
+        class="modal-backdrop hidden"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="abandon-modal-title"
+        aria-describedby="abandon-modal-body"
+        aria-hidden="true"
+    >
+        <div class="confirm-dialog">
+            <h2 id="abandon-modal-title">Abbandonare la partita?</h2>
+            <p id="abandon-modal-body">
+                La partita corrente verrà chiusa e tornerai alla schermata iniziale.
+            </p>
+            <div class="confirm-actions">
+                <button type="button" id="abandon-cancel" class="secondary-button">Continua a giocare</button>
+                <button type="button" id="abandon-confirm" class="danger-button">Abbandona</button>
+            </div>
         </div>
     </div>
 

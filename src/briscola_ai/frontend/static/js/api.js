@@ -9,10 +9,12 @@ const API = (() => {
         failedToGetGameState: 'Impossibile ottenere lo stato della partita',
         failedToPlayCard: 'Impossibile giocare la carta',
         failedToGetGameResult: 'Impossibile ottenere il risultato della partita',
+        failedToAbandonGame: 'Impossibile abbandonare la partita',
         errorCreatingGame: 'Errore durante la creazione della partita',
         errorGettingGameState: 'Errore nel recupero dello stato della partita',
         errorPlayingCard: 'Errore durante la giocata della carta',
         errorGettingGameResult: 'Errore nel recupero del risultato della partita',
+        errorAbandoningGame: 'Errore durante l’abbandono della partita',
         wsEstablished: 'Connessione WebSocket stabilita',
         wsErrorParsing: 'Errore nel parsing del messaggio WebSocket',
         wsError: 'Errore WebSocket',
@@ -280,7 +282,10 @@ const API = (() => {
             }
 
             const payload = await response.json();
-            return { models: Array.isArray(payload?.models) ? payload.models : [] };
+            return {
+                recommended_model: payload?.recommended_model || '',
+                models: Array.isArray(payload?.models) ? payload.models : []
+            };
         } catch (error) {
             console.error('Errore caricando modelli IA:', error);
             throw error;
@@ -405,6 +410,38 @@ const API = (() => {
             return await response.json();
         } catch (error) {
             console.error(`${STRINGS.errorGettingGameResult}:`, error);
+            throw error;
+        }
+    };
+
+    /**
+     * Abbandona una partita in corso.
+     *
+     * Il backend rimuove la sessione e, se l'event log è attivo, la marca come abortita.
+     * La UI tratta l'operazione come best-effort: anche se la rete cade, il giocatore può
+     * comunque tornare alla schermata iniziale dopo la conferma.
+     */
+    const abandonGame = async (gameId, playerIndex) => {
+        _requireServedOverHttp();
+        try {
+            const payload = {};
+            if (Number.isInteger(playerIndex)) payload.player_index = playerIndex;
+            const response = await _fetchWithWakeNotice(`${API_URL}/games/${gameId}/abandon`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json'
+                },
+                body: JSON.stringify(payload)
+            });
+
+            if (!response.ok) {
+                const error = await response.json();
+                throw new Error(error.detail || STRINGS.failedToAbandonGame);
+            }
+
+            return await response.json();
+        } catch (error) {
+            console.error(`${STRINGS.errorAbandoningGame}:`, error);
             throw error;
         }
     };
@@ -564,6 +601,7 @@ const API = (() => {
         getGameState,
         playCard,
         getGameResult,
+        abandonGame,
         connectWebSocket,
         disconnectWebSocket
     };

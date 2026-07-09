@@ -21,6 +21,8 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const REVEAL_DURATION_MS = 1400;
     const AI_PLAYER_DISPLAY_NAME = 'Giocatore AI';
+    const STARTUP_MIN_VISIBLE_MS = 1800;
+    const INITIAL_AI_START_MESSAGE_HOLD_MS = 1400;
 
     /**
      * Durata (ms) di visualizzazione del risultato della mano (chi vince + punti).
@@ -72,7 +74,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Metadati runtime del server (es. modalità raccolta dati e debug full-state).
     let serverMeta = { dataset_requires_consent: false, debug_state_endpoint_enabled: false };
 
-    const loadAiAgentMetadata = async () => {
+    let aiCatalogsPromise = null;
+    let aiCatalogsLoaded = false;
+    let initialBoardReadyResolve = null;
+    let initialBoardReadyTimeoutId = null;
+
+    const loadRuntimeMetadata = async () => {
         try {
             const meta = await API.getServerMeta();
             serverMeta = meta && typeof meta === 'object' ? meta : serverMeta;
@@ -88,20 +95,43 @@ document.addEventListener('DOMContentLoaded', () => {
             serverMeta = { dataset_requires_consent: false, debug_state_endpoint_enabled: false };
             UI.setDataCollectionConsent({ required: false, description_it: '' });
         }
+    };
+
+    const loadAiCatalogs = async () => {
+        if (aiCatalogsLoaded) return;
+        if (aiCatalogsPromise) return aiCatalogsPromise;
+
+        UI.setAdvancedOptionsLoading(true);
+        aiCatalogsPromise = (async () => {
+            const [agentsResult, modelsResult] = await Promise.allSettled([
+                API.getAiAgents(),
+                API.getAiModels(),
+            ]);
+
+            if (agentsResult.status === 'fulfilled') {
+                UI.setAiAgents(agentsResult.value);
+            } else {
+                console.warn('Impossibile caricare metadati agenti IA:', agentsResult.reason);
+            }
+
+            if (modelsResult.status === 'fulfilled') {
+                UI.setAiModels(modelsResult.value);
+            } else {
+                console.warn('Impossibile caricare lista modelli IA (.npz):', modelsResult.reason);
+                UI.setAiModels({ models: [] });
+            }
+
+            if (agentsResult.status === 'rejected' || modelsResult.status === 'rejected') {
+                throw new Error('Impossibile caricare le opzioni IA. Riprova tra qualche secondo.');
+            }
+            aiCatalogsLoaded = true;
+        })();
 
         try {
-            const agents = await API.getAiAgents();
-            UI.setAiAgents(agents);
-        } catch (error) {
-            console.warn('Impossibile caricare metadati agenti IA:', error);
-        }
-
-        try {
-            const models = await API.getAiModels();
-            UI.setAiModels(models);
-        } catch (error) {
-            console.warn('Impossibile caricare lista modelli IA (.npz):', error);
-            UI.setAiModels({ models: [] });
+            await aiCatalogsPromise;
+        } finally {
+            aiCatalogsPromise = null;
+            UI.setAdvancedOptionsLoading(false);
         }
     };
 
@@ -127,6 +157,8 @@ document.addEventListener('DOMContentLoaded', () => {
     // finché non è passato il tempo di reveal (evita che la carta appaia sul tavolo
     // mentre è ancora "in mano").
     let uiHoldUntilMs = 0;
+    let startupOverlayReleaseAtMs = 0;
+    let startupEventsHoldUntilMs = 0;
     /**
      * Coda di eventi UI provenienti dal backend.
      *
@@ -146,6 +178,7 @@ document.addEventListener('DOMContentLoaded', () => {
     let debugPeekActive = false;
     let debugPeekRequestId = 0;
     let activeOpponentReveal = null;
+    let startingPlayerAnnounced = false;
 
     const _displayNameForPlayer = (playerIndex, fallbackName = null) => {
         if (playerIndex === getState().playerIndex) return 'Tu';
@@ -248,12 +281,14 @@ document.addEventListener('DOMContentLoaded', () => {
         pollingIntervalId = setTimeout(pollOnce, 0);
     };
 
+    const _currentUiHoldUntilMs = () => Math.max(uiHoldUntilMs, startupEventsHoldUntilMs);
+
     const _scheduleFlush = () => {
         if (flushTimeoutId) {
             clearTimeout(flushTimeoutId);
             flushTimeoutId = null;
         }
-        const delay = Math.max(0, uiHoldUntilMs - Date.now());
+        const delay = Math.max(0, _currentUiHoldUntilMs() - Date.now());
         flushTimeoutId = setTimeout(_flushPending, delay);
     };
 
@@ -340,6 +375,20 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    const _startingPlayerMessage = (obs) => {
+        if (startingPlayerAnnounced) return null;
+        if (typeof obs?.first_player !== 'number') return null;
+
+        const state = getState();
+        if (obs.first_player === state.playerIndex) {
+            return obs.my_turn ? 'Cominci tu - scegli una carta' : 'Hai cominciato tu';
+        }
+        if (obs.first_player === state.opponentIndex) {
+            return obs.my_turn ? 'Ha cominciato l’IA - tocca a te' : 'Comincia l’IA...';
+        }
+        return `Comincia il giocatore ${obs.first_player + 1}`;
+    };
+
     /**
      * Accoda un evento, collassando snapshot consecutivi.
      *
@@ -390,6 +439,31 @@ document.addEventListener('DOMContentLoaded', () => {
 
         updateUI(obs);
 
+        if (
+            initialBoardReadyResolve &&
+            !obs.game_over &&
+            obs.my_turn === false &&
+            typeof obs.first_player === 'number' &&
+            obs.first_player === getState().opponentIndex
+        ) {
+            const overlayReleaseAt = Math.max(Date.now(), startupOverlayReleaseAtMs);
+            startupEventsHoldUntilMs = Math.max(
+                startupEventsHoldUntilMs,
+                overlayReleaseAt + INITIAL_AI_START_MESSAGE_HOLD_MS
+            );
+        }
+
+        if (initialBoardReadyResolve) {
+            UI.showGameBoard();
+            const resolve = initialBoardReadyResolve;
+            initialBoardReadyResolve = null;
+            if (initialBoardReadyTimeoutId) {
+                clearTimeout(initialBoardReadyTimeoutId);
+                initialBoardReadyTimeoutId = null;
+            }
+            resolve(true);
+        }
+
         if (obs.game_over) {
             handleGameOver();
         }
@@ -401,13 +475,13 @@ document.addEventListener('DOMContentLoaded', () => {
             flushTimeoutId = null;
         }
 
-        if (Date.now() < uiHoldUntilMs) {
+        if (Date.now() < _currentUiHoldUntilMs()) {
             _scheduleFlush();
             return;
         }
 
         // Consuma quanti più eventi possibili finché non entriamo in un nuovo hold.
-        while (pendingEvents.length > 0 && Date.now() >= uiHoldUntilMs) {
+        while (pendingEvents.length > 0 && Date.now() >= _currentUiHoldUntilMs()) {
             const next = pendingEvents.shift();
 
             if (next.type === 'ai_card_reveal') {
@@ -474,8 +548,13 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         // Turn message
+        const startingMessage = _startingPlayerMessage(obs);
+        if (startingMessage) startingPlayerAnnounced = true;
+
         if (obs.game_over) {
             UI.showTurnMessage('Partita terminata');
+        } else if (startingMessage) {
+            UI.showTurnMessage(startingMessage, !obs.my_turn);
         } else if (obs.my_turn) {
             UI.showTurnMessage('Tocca a te - scegli una carta');
         } else {
@@ -587,6 +666,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 createPayload.ai_model_id = aiModelId;
             }
 
+            startupOverlayReleaseAtMs = Date.now() + STARTUP_MIN_VISIBLE_MS;
+            startupEventsHoldUntilMs = 0;
+            const startupMinimumVisible = new Promise((resolve) => setTimeout(resolve, STARTUP_MIN_VISIBLE_MS));
             const result = await API.createGame(createPayload);
 
             store.setState({
@@ -614,7 +696,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 UI.preloadCardAssets(),
                 new Promise((resolve) => setTimeout(resolve, 3000)),
             ]);
-            UI.showGameBoard();
+
+            const firstRenderPromise = new Promise((resolve) => {
+                initialBoardReadyResolve = resolve;
+                initialBoardReadyTimeoutId = setTimeout(() => {
+                    initialBoardReadyTimeoutId = null;
+                    if (!initialBoardReadyResolve) return;
+                    const resolveInitial = initialBoardReadyResolve;
+                    initialBoardReadyResolve = null;
+                    resolveInitial(false);
+                }, 10000);
+            });
 
             if (_shouldUsePolling()) {
                 // Niente WS: solo polling (default in cloud multi-replica, o forzato via ?polling=1).
@@ -652,8 +744,17 @@ document.addEventListener('DOMContentLoaded', () => {
                 });
             }
 
+            const renderedFromStream = await firstRenderPromise;
+            if (!renderedFromStream) {
+                const obs = await API.getGameState(result.game_id, 0);
+                _applyObservation(obs);
+                UI.showGameBoard();
+            }
+
+            await startupMinimumVisible;
+
         } catch (error) {
-            UI.showTurnMessage(`Errore: ${error.message}`);
+            UI.showSetupError(`Errore: ${error.message}`);
         }
     };
 
@@ -770,6 +871,12 @@ document.addEventListener('DOMContentLoaded', () => {
         API.disconnectWebSocket();
         _stopPolling();
 
+        if (initialBoardReadyTimeoutId) {
+            clearTimeout(initialBoardReadyTimeoutId);
+            initialBoardReadyTimeoutId = null;
+        }
+        initialBoardReadyResolve = null;
+
         store.setState({
             gameId: null,
             playerName: null,
@@ -783,18 +890,39 @@ document.addEventListener('DOMContentLoaded', () => {
         lastAppliedServerVersion = -1;
         pendingEvents = [];
         uiHoldUntilMs = 0;
+        startupOverlayReleaseAtMs = 0;
+        startupEventsHoldUntilMs = 0;
         debugPeekActive = false;
         debugPeekRequestId += 1;
         activeOpponentReveal = null;
+        startingPlayerAnnounced = false;
         my_turn_started_at_ms = null;
         my_turn_observation_server_version = null;
         was_my_turn = false;
         UI.showGameSetup();
     };
 
+    const abandonGame = async () => {
+        const state = getState();
+        if (!state.gameId || state.gameOver) return;
+
+        const gameId = state.gameId;
+        const playerIndex = state.playerIndex;
+        try {
+            await API.abandonGame(gameId, playerIndex);
+        } catch (error) {
+            console.warn('Abbandono partita non confermato dal server:', error?.message || error);
+        } finally {
+            resetGame();
+        }
+    };
+
     // Initialize
     UI.init({
+        onPrepareStart: loadAiCatalogs,
         onStartGame: startGame,
+        onAdvancedOptionsOpen: loadAiCatalogs,
+        onAbandonGame: abandonGame,
         onNewGame: resetGame
     });
 
@@ -804,7 +932,7 @@ document.addEventListener('DOMContentLoaded', () => {
     // Registrato PRIMA dei fetch di metadati, così copre anche il primissimo giro.
     API.setSlowRequestListener((active) => UI.setServerWakeNotice(active));
 
-    loadAiAgentMetadata();
+    loadRuntimeMetadata();
 
     // Precarica le immagini delle carte in background mentre l'utente è sulla home:
     // quando avvia la partita sono già in cache (niente flicker al primo render).

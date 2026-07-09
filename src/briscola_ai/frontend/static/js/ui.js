@@ -10,12 +10,26 @@ const UI = (() => {
     const PLAYER_NAME_STORAGE_KEY = 'briscola_player_name';
     const AI_AGENT_STORAGE_KEY = 'briscola_last_ai_agent';
     const AI_MODEL_STORAGE_KEY = 'briscola_last_ai_model';
+    const ADVANCED_OPTIONS_STORAGE_KEY = 'briscola_advanced_options_open';
     const DEFAULT_PLAYER_NAME = 'Giocatore';
+    const DEFAULT_AI_AGENT_NAME = 'bc_model_pimc_belief_16x8';
 
     // Avviso non bloccante per il cold start del server cloud (scale-to-zero).
     // Il testo del dettaglio overlay deve combaciare con quello in index.html.
     const SERVER_WAKE_MESSAGE = 'Il server si sta svegliando, un attimo…';
     const STARTUP_LOADING_DETAIL_DEFAULT = 'Caricamento tavolo e IA';
+    const STARTUP_TIPS = [
+        'Non regalare Assi e Tre se l’avversario può ancora tagliare.',
+        'Una briscola piccola può valere più di una carta alta se ti fa prendere il momento giusto.',
+        'Se il piatto vale poco, non sprecare una briscola grossa.',
+        'Quando sei secondo di mano, guarda prima quanto vale la presa: non tutto merita di essere vinto.',
+        'Tenere una briscola per il finale spesso conta più che vincere una presa subito.',
+        'Se guidi un carico, chiediti sempre: “e se l’altro taglia?”',
+        'Le carte lisce non sono inutili: a volte servono proprio per non scoprire il gioco.',
+        'Quando il mazzo sta finendo, ogni briscola rimasta pesa di più.',
+        'Non inseguire tutti i punti: alcune prese si lasciano andare per vincerne una migliore dopo.',
+        'La Briscola non premia solo chi prende tanto, ma chi prende al momento giusto.',
+    ];
 
     // Map rank names to numbers for image paths
     const RANK_TO_NUMBER = {
@@ -29,12 +43,18 @@ const UI = (() => {
         homeAbout: document.getElementById('home-about'),
         startupLoading: document.getElementById('startup-loading'),
         startupLoadingDetail: document.getElementById('startup-loading-detail'),
+        startupTipText: document.getElementById('startup-tip-text'),
         gameSetup: document.getElementById('game-setup'),
         gameBoard: document.getElementById('game-board'),
         gameResult: document.getElementById('game-result'),
         gameForm: document.getElementById('game-form'),
         startGameButton: document.getElementById('start-game'),
+        setupError: document.getElementById('setup-error'),
         playerNameInput: document.getElementById('player-name-input'),
+        defaultOpponentSummary: document.getElementById('default-opponent-summary'),
+        advancedOptionsToggle: document.getElementById('advanced-options-toggle'),
+        advancedOptions: document.getElementById('advanced-options'),
+        advancedOptionsLoading: document.getElementById('advanced-options-loading'),
         aiAgentSelect: document.getElementById('ai-agent-select'),
         aiAgentDescription: document.getElementById('ai-agent-description'),
         aiAgentCommonNote: document.getElementById('ai-agent-common-note'),
@@ -61,12 +81,15 @@ const UI = (() => {
         turnMessage: document.getElementById('turn-message'),
         trickResult: document.getElementById('trick-result'),
         resultContent: document.getElementById('result-content'),
-        newGame: document.getElementById('new-game')
+        newGame: document.getElementById('new-game'),
+        abandonGame: document.getElementById('abandon-game'),
+        abandonModal: document.getElementById('abandon-modal'),
+        abandonCancel: document.getElementById('abandon-cancel'),
+        abandonConfirm: document.getElementById('abandon-confirm')
     };
 
     // Metadati agenti IA caricati dal backend (source of truth: modulo Python).
     let aiAgentMetaByName = {};
-    let aiAgentCommonNoteIt = '';
 
     // Modelli locali selezionabili dagli agenti che richiedono un `.npz`.
     let aiModelMetaById = {};
@@ -75,6 +98,9 @@ const UI = (() => {
     // Se true, richiediamo una checkbox esplicita prima di avviare la partita.
     let dataConsentRequired = false;
     let gameStartupInProgress = false;
+    let advancedOptionsOpen = false;
+    let abandonModalOpen = false;
+    let uiCallbacks = {};
 
     // Avviso "server che si sveglia": quando è attivo, il badge di stato nell'header
     // mostra il messaggio di cortesia AL POSTO dello stato connessione corrente.
@@ -112,6 +138,22 @@ const UI = (() => {
         } catch (e) {
             // Privacy mode o storage disabilitato: si usa il default.
             return '';
+        }
+    };
+
+    const _readStoredAdvancedOptions = () => {
+        try {
+            return window.localStorage.getItem(ADVANCED_OPTIONS_STORAGE_KEY) === 'true';
+        } catch (e) {
+            return false;
+        }
+    };
+
+    const _writeStoredAdvancedOptions = (open) => {
+        try {
+            window.localStorage.setItem(ADVANCED_OPTIONS_STORAGE_KEY, open ? 'true' : 'false');
+        } catch (e) {
+            // Storage disabilitato: il toggle resta valido per la sessione corrente.
         }
     };
 
@@ -166,7 +208,7 @@ const UI = (() => {
 
     const _restoreDataConsentCheckbox = () => {
         if (!elements.dataConsentCheckbox) return;
-        elements.dataConsentCheckbox.checked = dataConsentRequired && _readStoredDataConsent();
+        elements.dataConsentCheckbox.checked = _readStoredDataConsent();
     };
 
     const _handleDataConsentChange = () => {
@@ -174,18 +216,26 @@ const UI = (() => {
         _updateConsentUi();
     };
 
+    const _selectedOptionText = (selectEl, fallback) => {
+        const text = selectEl?.selectedOptions?.[0]?.textContent || fallback;
+        return text.replace(/\s+/g, ' ').trim();
+    };
+
+    const _updateDefaultOpponentSummary = () => {
+        if (!elements.defaultOpponentSummary) return;
+        const agentName = elements.aiAgentSelect?.value || DEFAULT_AI_AGENT_NAME;
+        const label = _selectedOptionText(elements.aiAgentSelect, 'IA consigliata');
+        const isDefault = agentName === DEFAULT_AI_AGENT_NAME;
+        elements.defaultOpponentSummary.textContent = isDefault
+            ? 'Avversario: IA consigliata, il modello più aggiornato del progetto. Puoi cambiarlo nelle opzioni avanzate.'
+            : `Avversario: ${label}. Puoi cambiarlo nelle opzioni avanzate.`;
+    };
+
     const _updateAiAgentDescription = () => {
         const name = elements.aiAgentSelect?.value;
         const meta = name ? aiAgentMetaByName[name] : null;
         if (elements.aiAgentDescription) elements.aiAgentDescription.textContent = meta?.description_it || '';
-        if (elements.aiAgentCommonNote && elements.aiAgentCommonNoteText) {
-            const raw = (aiAgentCommonNoteIt || '').trim();
-            const cleaned = raw.toLowerCase().startsWith('nota anti-cheat:')
-                ? raw.slice('nota anti-cheat:'.length).trim()
-                : raw;
-            elements.aiAgentCommonNoteText.textContent = cleaned;
-            elements.aiAgentCommonNote.classList.toggle('hidden', cleaned.length === 0);
-        }
+        _updateDefaultOpponentSummary();
     };
 
     const _isBestAiModel = (model) => {
@@ -251,10 +301,6 @@ const UI = (() => {
             elements.startGameButton.disabled = true;
             return;
         }
-        if (!dataConsentRequired) {
-            elements.startGameButton.disabled = false;
-            return;
-        }
         const checked = elements.dataConsentCheckbox?.checked === true;
         elements.startGameButton.disabled = !checked;
     };
@@ -284,10 +330,20 @@ const UI = (() => {
                 elements.aiModelDescription.textContent = desc;
             }
         }
+        _updateDefaultOpponentSummary();
+    };
+
+    const _updateStartupTip = () => {
+        if (!elements.startupTipText || STARTUP_TIPS.length === 0) return;
+        const index = Math.floor(Math.random() * STARTUP_TIPS.length);
+        elements.startupTipText.textContent = STARTUP_TIPS[index];
     };
 
     const _setGameStartupLoading = (isLoading) => {
         gameStartupInProgress = isLoading === true;
+        if (gameStartupInProgress) {
+            _updateStartupTip();
+        }
         if (elements.startupLoading) {
             elements.startupLoading.classList.toggle('hidden', !gameStartupInProgress);
             elements.startupLoading.setAttribute('aria-hidden', String(!gameStartupInProgress));
@@ -297,6 +353,46 @@ const UI = (() => {
             elements.startGameButton.setAttribute('aria-busy', String(gameStartupInProgress));
         }
         _updateConsentUi();
+    };
+
+    const _setAdvancedOptionsOpen = (open, { persist = true } = {}) => {
+        advancedOptionsOpen = open === true;
+        elements.advancedOptions?.classList.toggle('hidden', !advancedOptionsOpen);
+        if (elements.advancedOptionsToggle) {
+            elements.advancedOptionsToggle.setAttribute('aria-expanded', String(advancedOptionsOpen));
+            elements.advancedOptionsToggle.textContent = advancedOptionsOpen ? 'Nascondi opzioni' : 'Opzioni avanzate';
+        }
+        if (persist) _writeStoredAdvancedOptions(advancedOptionsOpen);
+        if (advancedOptionsOpen) {
+            Promise.resolve(uiCallbacks.onAdvancedOptionsOpen?.()).catch((error) => {
+                showSetupError(error?.message || 'Impossibile caricare le opzioni avanzate.');
+            });
+        }
+    };
+
+    const _clearSetupError = () => {
+        if (!elements.setupError) return;
+        elements.setupError.textContent = '';
+        elements.setupError.classList.add('hidden');
+    };
+
+    const _setAbandonModalOpen = (open) => {
+        const wasOpen = abandonModalOpen;
+        abandonModalOpen = open === true;
+        if (elements.abandonModal) {
+            elements.abandonModal.classList.toggle('hidden', !abandonModalOpen);
+            elements.abandonModal.setAttribute('aria-hidden', String(!abandonModalOpen));
+        }
+        document.body.classList.toggle('modal-open', abandonModalOpen);
+        if (abandonModalOpen) {
+            elements.abandonCancel?.focus();
+        } else if (wasOpen && elements.abandonGame?.offsetParent !== null) {
+            elements.abandonGame?.focus();
+        }
+    };
+
+    const _requestAbandonConfirmation = () => {
+        _setAbandonModalOpen(true);
     };
 
     /**
@@ -420,25 +516,30 @@ const UI = (() => {
     // --- Public API ---
 
     const init = (callbacks) => {
+        uiCallbacks = callbacks || {};
         _restorePlayerNameInput();
+        _setAdvancedOptionsOpen(_readStoredAdvancedOptions(), { persist: false });
+        _updateDefaultOpponentSummary();
 
         elements.gameForm.addEventListener('submit', async (e) => {
             e.preventDefault();
             if (gameStartupInProgress || !callbacks.onStartGame) return;
-            const modelId = elements.aiModelSelect?.value || null;
-            const modelMeta = modelId ? aiModelMetaById[modelId] : null;
-            const playerName = _currentPlayerName();
-            const aiAgent = elements.aiAgentSelect?.value || 'random';
-            _writeStoredPlayerName(playerName);
+            _clearSetupError();
             _setGameStartupLoading(true);
             try {
+                await callbacks.onPrepareStart?.();
+                const modelId = elements.aiModelSelect?.value || null;
+                const modelMeta = modelId ? aiModelMetaById[modelId] : null;
+                const playerName = _currentPlayerName();
+                const aiAgent = elements.aiAgentSelect?.value || DEFAULT_AI_AGENT_NAME;
+                _writeStoredPlayerName(playerName);
                 await callbacks.onStartGame({
                     playerName,
                     aiAgent,
-                    aiAgentLabel: elements.aiAgentSelect?.selectedOptions?.[0]?.textContent || 'Random',
+                    aiAgentLabel: _selectedOptionText(elements.aiAgentSelect, 'IA consigliata'),
                     aiAgentRequiresModelSelection: _agentRequiresModelSelection(aiAgent),
                     aiModelId: modelId,
-                    aiModelLabel: elements.aiModelSelect?.selectedOptions?.[0]?.textContent || null,
+                    aiModelLabel: _selectedOptionText(elements.aiModelSelect, '') || null,
                     aiModelCompatible: modelMeta?.is_compatible === true,
                     aiModelCompatibilityReasonIt: modelMeta?.compatibility_reason_it || null,
                     consentToDataCollection: elements.dataConsentCheckbox?.checked === true,
@@ -459,15 +560,39 @@ const UI = (() => {
         });
         elements.playerNameInput?.addEventListener('change', _handlePlayerNameChange);
         elements.dataConsentCheckbox?.addEventListener('change', _handleDataConsentChange);
+        elements.advancedOptionsToggle?.addEventListener('click', () => {
+            _setAdvancedOptionsOpen(!advancedOptionsOpen);
+        });
 
-        elements.newGame.addEventListener('click', () => {
+        elements.abandonGame?.addEventListener('click', () => {
+            _requestAbandonConfirmation();
+        });
+        elements.abandonCancel?.addEventListener('click', () => {
+            _setAbandonModalOpen(false);
+        });
+        elements.abandonConfirm?.addEventListener('click', () => {
+            _setAbandonModalOpen(false);
+            callbacks.onAbandonGame?.();
+        });
+        elements.abandonModal?.addEventListener('click', (event) => {
+            if (event.target === elements.abandonModal) {
+                _setAbandonModalOpen(false);
+            }
+        });
+        document.addEventListener('keydown', (event) => {
+            if (event.key === 'Escape' && abandonModalOpen) {
+                event.preventDefault();
+                _setAbandonModalOpen(false);
+            }
+        });
+
+        elements.newGame?.addEventListener('click', () => {
             callbacks.onNewGame?.();
         });
     };
 
     const setAiAgents = (catalog) => {
         const agents = Array.isArray(catalog) ? catalog : (catalog?.agents || []);
-        aiAgentCommonNoteIt = Array.isArray(catalog) ? '' : (catalog?.common_note_it || '');
 
         if (!elements.aiAgentSelect || !Array.isArray(agents) || agents.length === 0) {
             _updateAiAgentDescription();
@@ -501,10 +626,10 @@ const UI = (() => {
         // a ~1/5 della CPU del 64x10: piu' capacita' per replica), con fallback a scendere.
         const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
         const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
-        const stored = _readStoredSelection(AI_AGENT_STORAGE_KEY);
+        const stored = advancedOptionsOpen ? _readStoredSelection(AI_AGENT_STORAGE_KEY) : '';
         let defaultAgent;
         if (isAvail(stored)) defaultAgent = stored;
-        else if (isAvail('bc_model_pimc_belief_16x8')) defaultAgent = 'bc_model_pimc_belief_16x8';
+        else if (isAvail(DEFAULT_AI_AGENT_NAME)) defaultAgent = DEFAULT_AI_AGENT_NAME;
         else if (isAvail('bc_model_pimc_belief_64x10')) defaultAgent = 'bc_model_pimc_belief_64x10';
         else if (isAvail('bc_model')) defaultAgent = 'bc_model';
         else if (isAvail('heuristic_v1')) defaultAgent = 'heuristic_v1';
@@ -567,7 +692,7 @@ const UI = (() => {
 
         // Default: ultima scelta dell'utente (localStorage) se ancora presente e compatibile;
         // altrimenti modello consigliato compatibile; fallback al best più recente compatibile.
-        const storedModel = _readStoredSelection(AI_MODEL_STORAGE_KEY);
+        const storedModel = advancedOptionsOpen ? _readStoredSelection(AI_MODEL_STORAGE_KEY) : '';
         const storedCompatible = orderedModels.find((m) => m?.id === storedModel && m.is_compatible !== false);
         const recommendedCompatible = orderedModels.find((m) => _isBestAiModel(m) && m?.id && m.is_compatible !== false);
         const firstCompatible = orderedModels.find((m) => m?.id && m.is_compatible !== false);
@@ -577,27 +702,41 @@ const UI = (() => {
         else if (orderedModels[0]?.id) elements.aiModelSelect.value = orderedModels[0].id;
 
         _updateAiModelUi();
+        _updateDefaultOpponentSummary();
     };
 
     const setDataCollectionConsent = (payload) => {
         const required = payload?.required === true;
         const descriptionIt = payload?.description_it || '';
-        dataConsentRequired = required;
+        dataConsentRequired = true;
 
         if (elements.dataConsentGroup) {
-            elements.dataConsentGroup.classList.toggle('hidden', !required);
+            elements.dataConsentGroup.classList.remove('hidden');
         }
         _restoreDataConsentCheckbox();
         if (elements.dataConsentDescription) {
-            elements.dataConsentDescription.textContent = required
-                ? (descriptionIt || 'Questa istanza sta raccogliendo dataset umano: serve il tuo consenso.')
-                : '';
+            elements.dataConsentDescription.textContent =
+                descriptionIt ||
+                'Serve il consenso: le tue mosse vengono registrate in forma anonima per migliorare e valutare l’IA.';
         }
         _updateConsentUi();
     };
 
+    const setAdvancedOptionsLoading = (loading) => {
+        elements.advancedOptionsLoading?.classList.toggle('hidden', loading !== true);
+    };
+
+    const showSetupError = (message) => {
+        if (!elements.setupError) return;
+        const text = String(message || '').trim();
+        elements.setupError.textContent = text;
+        elements.setupError.classList.toggle('hidden', text.length === 0);
+    };
+
     const showGameSetup = () => {
         _setGameStartupLoading(false);
+        _setAbandonModalOpen(false);
+        _clearSetupError();
         elements.homeHero?.classList.remove('hidden');
         elements.homeAbout?.classList.remove('hidden');
         elements.gameSetup.classList.remove('hidden');
@@ -621,6 +760,7 @@ const UI = (() => {
     };
 
     const showGameResult = () => {
+        _setAbandonModalOpen(false);
         elements.homeHero?.classList.add('hidden');
         elements.homeAbout?.classList.add('hidden');
         elements.gameSetup.classList.add('hidden');
@@ -951,6 +1091,8 @@ const UI = (() => {
         setAiAgents,
         setAiModels,
         setDataCollectionConsent,
+        setAdvancedOptionsLoading,
+        showSetupError,
         showGameSetup,
         showGameBoard,
         showGameResult,

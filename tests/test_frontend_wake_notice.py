@@ -119,7 +119,10 @@ def test_wake_notice_appears_on_slow_create_and_disappears(live_server: str) -> 
             route.continue_()
 
         page.route("**/api/games", handle)
+        page.click("#advanced-options-toggle")
+        page.wait_for_selector("#ai-agent-select")
         page.select_option("#ai-agent-select", "heuristic_v1")
+        page.check("#data-consent-checkbox")
         page.click("#start-game")
         page.wait_for_function("document.getElementById('game-status').textContent.includes('Connesso')", timeout=20000)
 

@@ -34,7 +34,8 @@ body {
     user-select: none;
 }
 
-body.starting-game {
+body.starting-game,
+body.modal-open {
     overflow: hidden;
 }
 
@@ -76,7 +77,7 @@ header h1 {
 /* Panel styles */
 .panel {
     background: rgba(255, 255, 255, 0.05);
-    border-radius: 12px;
+    border-radius: 8px;
     padding: 20px;
     backdrop-filter: blur(10px);
     border: 1px solid rgba(255, 255, 255, 0.1);
@@ -84,6 +85,10 @@ header h1 {
 
 /* Form styles */
 .form-group {
+    margin-bottom: 16px;
+}
+
+#game-setup h2 {
     margin-bottom: 16px;
 }
 
@@ -118,6 +123,10 @@ select option:checked,
 select option:hover {
     background: var(--secondary-color);
     color: #fff;
+}
+
+#data-consent-group {
+    margin-top: 16px;
 }
 
 /* Consent checkbox: non vogliamo lo stile full-width dell'input text. */
@@ -162,6 +171,55 @@ select:focus {
     white-space: pre-wrap;
 }
 
+.default-opponent-summary {
+    margin: -2px 0 16px;
+    color: var(--text-muted);
+    font-size: 0.95rem;
+}
+
+.form-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-top: 2px;
+}
+
+.form-actions button {
+    flex: 1 1 180px;
+}
+
+.secondary-button {
+    background: rgba(255, 255, 255, 0.08);
+    color: var(--text-color);
+    border: 1px solid rgba(255, 255, 255, 0.18);
+    box-shadow: none;
+}
+
+.secondary-button:hover {
+    box-shadow: 0 4px 12px rgba(255, 255, 255, 0.08);
+}
+
+.advanced-options {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.advanced-options .form-group:last-child {
+    margin-bottom: 0;
+}
+
+.setup-error {
+    margin-top: 12px;
+    padding: 10px 12px;
+    border: 1px solid rgba(231, 76, 60, 0.45);
+    border-radius: 8px;
+    background: rgba(231, 76, 60, 0.14);
+    color: #ffd8d2;
+    font-size: 0.92rem;
+}
+
 /* Callout evidenziato per la nota anti-cheat (didattica + leggibilità). */
 .anti-cheat-callout {
     margin-top: 10px;
@@ -182,7 +240,16 @@ select:focus {
     color: var(--text-color);
     font-size: 0.9rem;
     line-height: 1.35;
-    white-space: pre-wrap;
+}
+
+.anti-cheat-body a {
+    color: #7cc4f0;
+    font-weight: 700;
+    text-decoration: none;
+}
+
+.anti-cheat-body a:hover {
+    text-decoration: underline;
 }
 
 button {
@@ -208,6 +275,56 @@ button:disabled {
     transform: none;
 }
 
+.danger-button {
+    background: linear-gradient(135deg, #e74c3c, #c0392b);
+}
+
+.danger-button:hover {
+    box-shadow: 0 4px 12px rgba(231, 76, 60, 0.38);
+}
+
+/* Dialog applicative: usate per conferme utente, non per messaggi di sistema. */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1100;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+    background: rgba(8, 12, 24, 0.72);
+    backdrop-filter: blur(3px);
+}
+
+.confirm-dialog {
+    width: min(420px, 100%);
+    padding: 22px;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    border-radius: 8px;
+    background: rgba(35, 42, 66, 0.96);
+    box-shadow: 0 18px 44px rgba(0, 0, 0, 0.38);
+}
+
+.confirm-dialog h2 {
+    font-size: 1.25rem;
+    margin-bottom: 10px;
+}
+
+.confirm-dialog p {
+    color: var(--text-muted);
+    margin-bottom: 18px;
+}
+
+.confirm-actions {
+    display: flex;
+    gap: 10px;
+    justify-content: flex-end;
+}
+
+.confirm-actions button {
+    min-width: 150px;
+}
+
 /* Overlay mostrato mentre il backend crea la partita e il frontend prepara gli asset iniziali. */
 .startup-loading {
     position: fixed;
@@ -225,7 +342,7 @@ button:disabled {
     display: grid;
     justify-items: center;
     gap: 10px;
-    width: min(320px, 100%);
+    width: min(380px, 100%);
     padding: 22px 24px;
     border: 1px solid rgba(255, 255, 255, 0.16);
     border-radius: 12px;
@@ -252,6 +369,28 @@ button:disabled {
 .startup-loading-detail {
     color: var(--text-muted);
     font-size: 0.9rem;
+}
+
+.startup-tip {
+    width: 100%;
+    margin-top: 4px;
+    padding-top: 12px;
+    border-top: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.startup-tip-label {
+    margin-bottom: 5px;
+    color: #d7ecff;
+    font-size: 0.78rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.startup-tip-text {
+    color: var(--text-color);
+    font-size: 0.93rem;
+    line-height: 1.4;
 }
 
 @keyframes startup-spin {
@@ -313,6 +452,30 @@ button:disabled {
     flex-direction: column;
     gap: 12px;
     padding: 12px;
+}
+
+.abandon-game-button {
+    flex: 0 0 auto;
+    margin-left: auto;
+    width: 30px;
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.24);
+    background: rgba(0, 0, 0, 0.32);
+    color: rgba(255, 255, 255, 0.9);
+    font-size: 1.25rem;
+    line-height: 1;
+    box-shadow: none;
+}
+
+.abandon-game-button:hover {
+    transform: none;
+    background: rgba(231, 76, 60, 0.78);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.28);
 }
 
 /* Player areas */
@@ -806,6 +969,14 @@ footer {
     /* Su mobile mostriamo solo l'icona GitHub (la parola occupa spazio prezioso). */
     footer .github-link span {
         display: none;
+    }
+
+    .confirm-actions {
+        flex-direction: column;
+    }
+
+    .confirm-actions button {
+        width: 100%;
     }
 
     #table-area {

@@ -45,6 +45,7 @@ import random
 import time
 import uuid
 from contextlib import aclosing, asynccontextmanager, suppress
+from dataclasses import replace
 from datetime import UTC, datetime
 from typing import Any
 
@@ -126,6 +127,12 @@ class GameAction(BaseModel):
     # Metadati client-side (opzionali): utili per analisi qualità dati umani.
     client_observed_server_version: int | None = None
     client_decision_time_ms: int | None = Field(default=None, ge=0)
+
+
+class GameAbandonRequest(BaseModel):
+    """Payload opzionale per abbandonare una partita in corso."""
+
+    player_index: int | None = Field(default=None, ge=0, le=3)
 
 
 class GameState(BaseModel):
@@ -476,6 +483,20 @@ _MAX_ACTIONS_PER_GAME = 400
 
 _DEFAULT_AI_AGENT_NAME = "random"
 _AI_PLAYER_DISPLAY_NAME = "Giocatore AI"
+_STARTING_PLAYER_SEED_SALT = 0xB415C01A
+_AI_STARTS_PRESENTATION_DELAY_SECONDS = 3.0
+
+
+def _choose_starting_player(seed: int, num_players: int) -> int:
+    """
+    Sceglie in modo riproducibile chi comincia una partita creata via API.
+
+    `new_game_state` resta volutamente stabile: il seed decide shuffle e pescate iniziali.
+    La UI pubblica invece vuole un primo giocatore casuale, quindi deriviamo un secondo RNG
+    dal seed della partita senza alterare l'ordine del mazzo. Helper separato anche perché
+    i test API possono fissare esplicitamente il primo giocatore senza dipendere dal salt.
+    """
+    return random.Random(seed ^ _STARTING_PLAYER_SEED_SALT).randrange(num_players)
 
 
 def _utcnow() -> datetime:
@@ -599,6 +620,57 @@ def _display_name_for_player(session: GameSession, player_index: int) -> str:
     if 0 <= player_index < len(state.players):
         return state.players[player_index].name
     return f"Giocatore {player_index + 1}"
+
+
+def _schedule_ai_turn_if_needed(
+    session: GameSession,
+    *,
+    human_player_index: int = 0,
+    initial_delay_seconds: float = 0.0,
+) -> None:
+    """
+    Avvia il task IA quando lo stato corrente è fermo su un seat controllato dal backend.
+
+    Serve soprattutto per l'avvio partita casuale: se il sorteggio assegna la prima mano
+    all'IA, non esiste ancora un'azione umana che possa innescare `_maybe_ai_turn`.
+    """
+    state = session.state
+    if state.game_over:
+        return
+    if state.num_players != 2:
+        return
+    if state.current_turn == human_player_index:
+        return
+    if not _is_ai_controlled_player(session, state.current_turn):
+        return
+    asyncio.create_task(
+        _maybe_ai_turn(
+            game_id=session.game_id,
+            human_player_index=human_player_index,
+            initial_delay_seconds=initial_delay_seconds,
+        )
+    )
+
+
+def _initial_ai_start_delay_seconds(session: GameSession, *, human_player_index: int) -> float:
+    """
+    Ritardo di sola presentazione quando il sorteggio assegna la prima mano all'IA.
+
+    Il backend normalmente non introduce delay di animazione: la UI gestisce reveal e prese.
+    Qui però il primo turno IA è un caso diverso, perché può partire subito dopo lo snapshot
+    iniziale e rendere invisibile il messaggio "Comincia l'IA". Il ritardo resta confinato
+    alla versione 0 della partita e avviene prima di acquisire il lock di gioco.
+    """
+    state = session.state
+    if session.version != 0:
+        return 0.0
+    if state.current_turn != state.first_player:
+        return 0.0
+    if state.current_turn == human_player_index:
+        return 0.0
+    if not _is_ai_controlled_player(session, state.current_turn):
+        return 0.0
+    return _AI_STARTS_PRESENTATION_DELAY_SECONDS
 
 
 def _metadata_for_model_catalog_ui(metadata: dict[str, Any]) -> dict[str, Any]:
@@ -815,6 +887,8 @@ async def create_game(config: GameConfig, request: Request):
         # In produzione useremmo RNG più robusto o un seed esplicito del client.
         seed = random.randrange(0, 2**32)
         state = new_game_state(config.num_players, config.player_names, seed=seed)
+        starting_player = _choose_starting_player(seed, config.num_players)
+        state = replace(state, current_turn=starting_player, first_player=starting_player)
 
         # Genera un ID univoco per la partita
         game_id = str(uuid.uuid4())
@@ -874,6 +948,7 @@ async def create_game(config: GameConfig, request: Request):
                 "rules_version": get_rules_version(),
                 "num_players": config.num_players,
                 "is_team_game": state.is_team_game,
+                "first_player": starting_player,
                 "ai_agent": ai_agent_name if config.num_players == 2 else None,
                 "ai_model_id": config.ai_model_id
                 if (config.num_players == 2 and agent_uses_selected_model(ai_agent_name))
@@ -891,6 +966,8 @@ async def create_game(config: GameConfig, request: Request):
             "status": "created",
             "num_players": config.num_players,
             "is_team_game": state.is_team_game,
+            "first_player": starting_player,
+            "current_turn": state.current_turn,
             "player_names": [p.name for p in state.players],
             "ai_agent": ai_agent_name if config.num_players == 2 else None,
             "ai_model_id": config.ai_model_id
@@ -934,6 +1011,11 @@ async def get_game_state(game_id: str, player_index: int | None = None):
         # Restituisce una vista specifica per il giocatore (stesso formato dei messaggi WS)
         try:
             observation_dto = build_observation_dto(game, player_index, session.version)
+            _schedule_ai_turn_if_needed(
+                session,
+                human_player_index=player_index,
+                initial_delay_seconds=_initial_ai_start_delay_seconds(session, human_player_index=player_index),
+            )
             return observation_dto.model_dump()
         except ValueError as e:
             raise HTTPException(status_code=400, detail=str(e)) from e
@@ -950,6 +1032,62 @@ async def get_game_state(game_id: str, player_index: int | None = None):
             )
         game_state_dto = build_game_state_dto(game, session.version)
         return game_state_dto.model_dump()
+
+
+@app.post("/games/{game_id}/abandon", response_model=dict)
+async def abandon_game(game_id: str, payload: GameAbandonRequest) -> dict:
+    """
+    Abbandona una partita in corso.
+
+    La semantica è intenzionalmente semplice:
+    - se la partita è ancora aperta, la marchiamo come abortita nell'event log (best-effort);
+    - rimuoviamo la sessione dallo store, così polling/WS/azioni successive non la tengono viva;
+    - non assegniamo una vittoria a tavolino: per dataset e report è una partita incompleta.
+    """
+    async with game_store.lock(game_id):
+        session = await game_store.get(game_id)
+        if session is None:
+            raise HTTPException(status_code=404, detail="Partita non trovata")
+
+        state = session.state
+        server_version = session.version
+        if state.game_over:
+            return {"game_id": game_id, "status": "already_finished"}
+
+        log = _get_event_log()
+        aborted_marked = False
+        if log is not None and _get_event_log_mode() != "off":
+            try:
+                seed = getattr(state, "seed", None)
+                log.ensure_game(
+                    game_id,
+                    num_players=state.num_players,
+                    seed=seed if isinstance(seed, int) else None,
+                    code_version=get_code_version(),
+                    rules_version=get_rules_version(),
+                )
+                aborted_marked = log.try_mark_game_aborted(game_id, aborted_reason="user_abandoned")
+            except Exception:
+                aborted_marked = False
+
+        if aborted_marked:
+            _safe_log_event(
+                game_id,
+                "game_aborted",
+                {
+                    "reason": "user_abandoned",
+                    "player_index": payload.player_index,
+                },
+                server_version=server_version,
+                player_index=payload.player_index,
+                state=state,
+            )
+
+        await game_store.delete(game_id)
+        game_timestamps.pop(game_id, None)
+        game_data.pop(game_id, None)
+
+    return {"game_id": game_id, "status": "abandoned"}
 
 
 @app.post("/games/{game_id}/actions", response_model=PlayActionResultDTO, response_model_exclude_none=True)
@@ -1136,14 +1274,23 @@ async def play_action(game_id: str, action: GameAction) -> PlayActionResultDTO:
     return action_result_dto
 
 
-async def _maybe_ai_turn(game_id: str, human_player_index: int) -> None:
+async def _maybe_ai_turn(
+    game_id: str,
+    human_player_index: int,
+    *,
+    initial_delay_seconds: float = 0.0,
+) -> None:
     """
     Esegue automaticamente le mosse dell'IA quando è il suo turno (2-player).
 
     Nota architetturale:
     - modello standard: il backend avanza la partita senza richiedere un trigger dal client.
-    - il frontend controlla solo la *presentazione* (hold/animazioni) senza influenzare il dominio.
+    - il frontend controlla quasi tutta la *presentazione* (hold/animazioni) senza influenzare
+      il dominio; l'unica eccezione è la pausa iniziale quando il sorteggio fa partire l'IA.
     """
+    if initial_delay_seconds > 0:
+        await asyncio.sleep(initial_delay_seconds)
+
     # In 2-player ci aspettiamo al massimo una mossa IA per volta, ma gestiamo anche
     # eventuali casi futuri dove l'IA potrebbe avere turni consecutivi (safety loop).
     safety = 10
@@ -1502,6 +1649,11 @@ async def websocket_endpoint(websocket: WebSocket, game_id: str, player_index: i
             state=state,
         )
         await websocket.send_text(dto.model_dump_json())
+        _schedule_ai_turn_if_needed(
+            session,
+            human_player_index=player_index,
+            initial_delay_seconds=_initial_ai_start_delay_seconds(session, human_player_index=player_index),
+        )
 
         # Mantiene la connessione aperta e gestisce i messaggi
         while True:

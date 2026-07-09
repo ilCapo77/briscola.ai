@@ -10,6 +10,7 @@ interferenze tra casi di test.
 
 import asyncio
 import json
+import time
 from collections.abc import Generator
 from datetime import datetime
 from pathlib import Path
@@ -67,6 +68,11 @@ def _put_state(game_id: str, state: GameState, *, version: int = 0) -> None:
             )
 
     asyncio.run(_do())
+
+
+def _force_starting_player(monkeypatch: pytest.MonkeyPatch, player_index: int) -> None:
+    """Rende deterministico il sorteggio del primo giocatore nei test API."""
+    monkeypatch.setattr(server, "_choose_starting_player", lambda _seed, _num_players: player_index)
 
 
 @pytest.fixture(autouse=True)
@@ -236,6 +242,50 @@ def test_create_game_requires_consent_in_dataset_mode(monkeypatch: pytest.Monkey
         json={"num_players": 2, "player_names": ["Alice", "Bob"], "consent_to_data_collection": True},
     )
     assert ok.status_code == 200
+
+
+def test_abandon_game_deletes_open_session() -> None:
+    """`POST /games/{id}/abandon` deve chiudere una partita aperta senza assegnare un risultato."""
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["Alice", "IA"]})
+    assert create.status_code == 200
+    game_id = create.json()["game_id"]
+    assert _get_session(game_id) is not None
+
+    abandon = client.post(f"/games/{game_id}/abandon", json={"player_index": 0})
+    assert abandon.status_code == 200
+    assert abandon.json()["status"] == "abandoned"
+    assert _get_session(game_id) is None
+
+    missing = client.get(f"/games/{game_id}", params={"player_index": 0})
+    assert missing.status_code == 404
+
+
+def test_create_game_sets_random_first_player(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Il primo giocatore deve derivare dal seed della partita e comparire nei payload pubblici."""
+    _force_starting_player(monkeypatch, 1)
+    client = TestClient(server.app)
+
+    create = client.post("/games", json={"num_players": 2, "player_names": ["Alice", "IA"]})
+    assert create.status_code == 200
+    payload = create.json()
+    assert payload["first_player"] == 1
+    assert payload["current_turn"] == 1
+
+    session = _get_session(payload["game_id"])
+    assert session is not None
+    assert session.state.first_player == 1
+    assert session.state.current_turn == 1
+    assert server._initial_ai_start_delay_seconds(session, human_player_index=0) == pytest.approx(
+        server._AI_STARTS_PRESENTATION_DELAY_SECONDS
+    )
+
+    session.version = 1
+    assert server._initial_ai_start_delay_seconds(session, human_player_index=0) == 0.0
+    session.version = 0
+
+    obs = client.get(f"/games/{payload['game_id']}", params={"player_index": 0}).json()
+    assert obs["first_player"] == 1
 
 
 def test_list_ai_agents_exposes_metadata_in_italian() -> None:
@@ -624,8 +674,9 @@ def test_create_game_supports_bc_model_pimc_16x8_with_ai_model_id(
     assert "feature_dim" in bad.json()["detail"]
 
 
-def test_create_game_get_state_and_play_action_happy_path() -> None:
+def test_create_game_get_state_and_play_action_happy_path(monkeypatch: pytest.MonkeyPatch) -> None:
     """Happy path: crea partita, legge observation e gioca una carta valida."""
+    _force_starting_player(monkeypatch, 0)
     client = TestClient(server.app)
 
     create = client.post(
@@ -639,11 +690,20 @@ def test_create_game_get_state_and_play_action_happy_path() -> None:
     assert payload["num_players"] == 2
     assert payload["player_names"] == ["Alice", "Bob"]
 
-    state_p0 = client.get(f"/games/{game_id}", params={"player_index": 0})
-    assert state_p0.status_code == 200
-    obs = state_p0.json()
+    deadline = time.monotonic() + 5.0
+    while time.monotonic() < deadline:
+        state_p0 = client.get(f"/games/{game_id}", params={"player_index": 0})
+        assert state_p0.status_code == 200
+        obs = state_p0.json()
+        if obs["my_turn"]:
+            break
+        time.sleep(0.05)
+    else:
+        pytest.fail("il turno umano non è arrivato dopo l'avvio automatico IA")
+
     assert obs["my_index"] == 0
     assert obs["my_turn"] is True
+    assert obs["first_player"] in (0, 1)
     assert obs["valid_actions"]
     initial_version = obs.get("server_version", 0)
 
@@ -687,11 +747,13 @@ def test_play_action_rejects_wrong_turn() -> None:
 
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
+    session = _get_session(game_id)
+    assert session is not None
+    wrong_player = 1 - session.state.current_turn
 
-    # A inizia (player_index=0). B prova a giocare: deve fallire.
     r = client.post(
         f"/games/{game_id}/actions",
-        json={"game_id": game_id, "player_index": 1, "card_index": 0},
+        json={"game_id": game_id, "player_index": wrong_player, "card_index": 0},
     )
     assert r.status_code == 400
     assert r.json()["detail"] == "Non è il tuo turno"
@@ -704,6 +766,7 @@ def test_play_action_rejects_ai_controlled_player(monkeypatch: pytest.MonkeyPatc
         return None
 
     monkeypatch.setattr(server, "_maybe_ai_turn", _no_ai)
+    _force_starting_player(monkeypatch, 0)
 
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "IA"]})
@@ -735,6 +798,7 @@ def test_dataset_mode_logs_ai_action_for_audit(
 
     monkeypatch.setenv("BRISCOLA_EVENT_LOG_MODE", "dataset")
     monkeypatch.setattr(server, "_maybe_ai_turn", _no_auto_ai)
+    _force_starting_player(monkeypatch, 0)
 
     db_path = tmp_path / "events.sqlite3"
     log = EventLog(EventLogConfig(path=str(db_path)))
@@ -1138,8 +1202,9 @@ def test_websocket_rejects_unknown_game() -> None:
     assert excinfo.value.code == 1000
 
 
-def test_websocket_ping_pong_and_receives_update_after_action() -> None:
+def test_websocket_ping_pong_and_receives_update_after_action(monkeypatch: pytest.MonkeyPatch) -> None:
     """WS: ping/pong funziona e, dopo una giocata HTTP, arriva uno snapshot aggiornato."""
+    _force_starting_player(monkeypatch, 0)
     client = TestClient(server.app)
 
     create = client.post("/games", json={"num_players": 2, "player_names": ["Alice", "Bob"]})
@@ -1243,6 +1308,7 @@ def test_create_game_allows_selecting_ai_agent_and_ai_turn_uses_observation(monk
     - il client può scegliere l'agente IA all'avvio (`ai_agent`)
     - quando l'IA gioca, la policy riceve una `PlayerObservation` (non `GameState`)
     """
+    _force_starting_player(monkeypatch, 0)
 
     async def _no_ai(*_args, **_kwargs) -> None:
         return None
@@ -1328,12 +1394,13 @@ def test_version_recommended_model_respects_env(monkeypatch: pytest.MonkeyPatch)
         assert body["recommended_model"] == "custom_model.npz"
 
 
-def test_play_action_when_local_game_data_buffer_missing() -> None:
+def test_play_action_when_local_game_data_buffer_missing(monkeypatch: pytest.MonkeyPatch) -> None:
     """Simula una replica diversa: lo stato vive nello store ma il buffer `game_data` locale non c'è.
 
     play_action deve funzionare (setdefault), senza KeyError/500: è il caso multi-replica
     in cui l'azione arriva su una replica che non ha creato la partita.
     """
+    _force_starting_player(monkeypatch, 0)
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]

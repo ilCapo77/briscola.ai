@@ -138,6 +138,7 @@ class ObservationDTO(BaseModel):
     my_hand: list[CardDTO]
     my_points: int
     my_turn: bool
+    first_player: int = 0
 
     # Stato del tavolo
     trump_card: CardDTO | None

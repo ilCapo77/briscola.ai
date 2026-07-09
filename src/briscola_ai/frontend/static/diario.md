@@ -30,7 +30,7 @@ Il primo problema serio, curiosamente, non riguardò l'intelligenza: fu il ritmo
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/01-timing-ui.md)*</small>
 
-## Capitolo 2 — Le regole e il patto anti-cheat
+<h2 id="patto-anti-cheat">Capitolo 2 — Le regole e il patto anti-cheat</h2>
 
 Poi venne il motore delle regole. Può sembrare eccessivo dedicare tanto tempo a un gioco che molti imparano da bambini, ma qui ogni esperimento dipende da quello strato. Se il motore sbaglia una presa, o pesca nel momento sbagliato, tutti i risultati successivi diventano sospetti. Per questo il dominio del gioco è stato scritto in modo puro e deterministico. Il trucco è semplice: ogni partita nasce da un numero, il "seme", che decide il mescolamento del mazzo. Stesso seme, stesso mazzo, stesse pescate. È così che due giocatori possono essere confrontati sulle stesse identiche mani, o che una partita si può rigiocare tale e quale per capire cosa è successo.
 

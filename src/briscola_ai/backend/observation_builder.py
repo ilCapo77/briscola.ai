@@ -105,6 +105,7 @@ def build_observation_dto(state: DomainGameState, player_index: int, server_vers
         my_hand=my_hand,
         my_points=me.points,
         my_turn=my_turn,
+        first_player=state.first_player,
         trump_card=trump_card,
         trump_suit=trump_suit,
         table_cards=table_cards,
