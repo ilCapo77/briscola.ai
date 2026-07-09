@@ -6,13 +6,14 @@
 
 ## Stato Corrente
 
-- Versione live: `0.33.0` (2026-07-08), produzione su <https://ai.briscola.dev>. In 0.33.0:
-  `human_action` salva il `result` (audit di campo) + `export_live_actions.py` (export unico
-  mosse umane+IA).
+- Versione live: `0.34.0` (2026-07-09), produzione su <https://ai.briscola.dev>. Include
+  la promozione di `best_a2c_v13.npz` come default e l'audit di campo introdotto in 0.33.0:
+  `human_action` salva il `result` + `export_live_actions.py` esporta un JSONL unico
+  mosse umane+IA.
 - Runtime web: tutto Python, niente import Numba nel processo web. I kernel Numba restano
   per training, valutazioni e benchmark.
-- Default UI: `bc_model_pimc_belief_16x8` su `best_a2c_v11.npz`, senza `overkill_guard`.
-  La variante 64×10 resta selezionabile ma più costosa.
+- Default UI in preparazione: `bc_model_pimc_belief_16x8` su `best_a2c_v13.npz`, senza
+  `overkill_guard`. La variante 64×10 resta selezionabile ma più costosa.
 - Infrastruttura: FastAPI Cloud + Redis per stato/realtime + Postgres event log in modalità
   `dataset`. Scale-to-zero dopo ~90s di idle; avviso UI "server che si sveglia" live.
 - Dati live: il log contiene `human_action`, `ai_action`, `game_finished`, metadati modello
@@ -26,15 +27,15 @@
   "segno sbagliato" iniziale era artefatto OOD dei profili manuali); il segnale di stile è
   raro (tagli/aperture-carico ≈0 per tutta la partita). Encoder v5 chiuso; v13 solo come
   esercizio didattico a payoff basso.
-- v13 overkill shaping: `beta=0.005` a 5M e `0.01/0.02/0.03` a 1M sono troppo morbidi.
-  Stress 100k: `0.1/0.2/0.3` restano point-neutral vs v11 e riducono l'overkill in modo
-  monotono; `1.0` prova che la leva funziona ma è troppo dura per una candidata. Se si
-  prosegue, il ramo sensato è un run lungo su `beta=0.3` (o `0.2` più conservativo), non
-  `1.0`. **Run lungo `beta=0.3` in corso** (2026-07-09, sotto `caffeinate`): in attesa di
-  log/artefatti per decidere se diventa candidata o si chiude.
+- v13 overkill shaping: `beta=0.3` a 5M è la prima promozione comportamentale riuscita.
+  Non dimostra un salto di forza, ma mantiene v11 entro rumore: policy-only `-0.03`
+  (CI `-0.38..+0.32`) e default PIMC 16x8 `+0.14` (CI `-0.20..+0.47`) contro v11.
+  Riduce però nettamente l'overkill di briscola su piatti poveri: circa `28-31%` su v11
+  → `6-8%` su v13 nei gate di qualità. Decisione: promuovere `best_a2c_v13.npz` come
+  default `0.34.0` con wording onesto, "stessa forza, comportamento migliore".
 - Diario: capitoli 13-16 pubblicati; approfondimenti tecnici 13-16 presenti in `docs/diario/`.
 - Test rapidi: `pytest -m "not slow and not numba"` (~4s). Gate completo locale recente:
-  ruff, mypy, pytest (`533 passed`).
+  ruff, mypy, pytest (`544 passed`).
 
 ## Prossima Decisione
 
@@ -44,11 +45,11 @@ forza quasi invariata su v11 e comportamento sui carichi praticamente identico.
 **Le tre piste "comportamento sospetto vs umani" sono chiuse con evidenza**: carichi
 guidati (sonda `lead_load_guard_probe.py`), timing dell'asso di briscola e cavata con mano
 lunga (sonda `trump_play_probe.py`). Su questi assi v11 è già forte: nessun guard/shaping
-migliora seat-fair. **Prossimo passo azionabile: attendere l'esito del run lungo `beta=0.3`**
-(vedi Stato Corrente) e leggerne log/artefatti; l'audit di campo resta gated dal volume di
-partite umane.
+migliora seat-fair. **Prossimo passo azionabile: verificare il deploy `0.34.0` (`/version`,
+catalogo modelli, default UI) e poi monitorare il campo su v13**; l'audit resta gated dal
+volume di partite umane.
 
-Quando ci sono ~50-100 partite umane complete contro il default v11:
+Quando ci sono ~50-100 partite umane complete contro il default v13:
 
 1. Esporta le azioni live filtrando bot/loadtest.
 2. Conta carichi guidati dall'IA, carichi tagliati dagli umani, fase della partita e
@@ -175,7 +176,7 @@ Export live consigliato per il prossimo audit:
 ```bash
 DATABASE_URL=... uv run python scripts/export_live_actions.py \
   --ai-agent bc_model_pimc_belief_16x8 \
-  --ai-model-id best_a2c_v11.npz \
+  --ai-model-id best_a2c_v13.npz \
   --exclude-client-id loadtest-bot \
   --out data/prod_live_actions_v11.jsonl
 ```
@@ -184,7 +185,7 @@ Profilo comportamentale locale:
 
 ```bash
 uv run python scripts/behavior_profile.py \
-  --model data/models/best_a2c_v11.npz \
+  --model data/models/best_a2c_v13.npz \
   --opponents heuristic_trump_saver,mirror,heuristic_v1 \
   --num-games 2000
 ```

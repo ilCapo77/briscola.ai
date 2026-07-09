@@ -218,6 +218,34 @@ Il prossimo passo, quindi, non è un'altra notte di training. È raccogliere alt
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/16-ascolto-e-stile.md)*</small>
 
+## Capitolo 17 — Stessa forza, comportamento migliore <small>(9 luglio 2026)</small>
+
+La v12 ci aveva lasciato con una domanda ancora aperta. Avevamo visto giocatori umani vincere conservando le briscole, tagliando i carichi e punendo certe aperture dell'IA. Avevamo provato a mettere quello stile nel training, ma il risultato era stato quasi nullo: la v12 giocava forte come la v11, non meglio, e non cambiava davvero abitudine. Restava quindi il dubbio più interessante: quei comportamenti erano errori del modello, oppure ci sembravano errori perché li guardavamo dalle partite perse?
+
+Il caso più evidente erano i carichi guidati. In alcune sconfitte l'IA usciva con un asso o un tre non di briscola, l'umano tagliava, e la presa sembrava raccontare da sola il problema. Ma una mano singola è una cattiva testimone. Come sempre, l'impressione è diventata un'ipotesi da misurare: prima sulle partite vinte dagli umani, poi sul tasso base di tutte le partite disponibili.
+
+Il risultato ha ridimensionato l'aneddoto. I carichi guidati tagliati dagli umani erano reali, ma non erano un marchio di sconfitta: capitavano spesso anche nelle partite che l'IA vinceva. Peggio ancora per l'ipotesi del "difetto": quando abbiamo provato a impedirli con un guard, il modello perdeva punti. Quella pista si è chiusa lì. Comportamento visibile, sì; difetto sfruttabile, no.
+
+Lo stesso è successo con altri sospetti. L'asso di briscola veniva forse giocato troppo presto? No: quasi sempre usciva tardi e catturava punti veri. La "cavata", cioè aprire in briscola quando se ne hanno molte in mano, sembrava aggressiva? Messa alla prova contro l'alternativa, era una scelta buona: impedirla faceva crollare il punteggio. Anche l'idea di allargare la finestra PIMC da 8 a 10 non ha retto: più ragionamento, in quel punto, non significava gioco migliore.
+
+La lezione non era molto comoda, ma era pulita: molte mosse che sembravano brutte erano semplicemente difficili da valutare a occhio. In una partita singola vedi il carico tagliato e pensi "errore". Su diecimila partite scopri che quel sacrificio, in media, fa parte di un piano che funziona.
+
+Restava però un comportamento diverso: l'overkill di briscola. Da secondo di mano, su un piatto povero, il modello a volte vinceva con una briscola più alta del necessario, anche quando ne aveva una più economica che avrebbe preso comunque. Questo caso era più concreto. Non stiamo dicendo "non prendere", ma "prendi con la carta meno costosa". E soprattutto era abbastanza frequente da dare al training un segnale vero.
+
+Così è nata la tredicesima generazione. Non un nuovo grande cambio di architettura, non nuove feature, non un guard scritto a mano al momento della mossa. Solo una penalità morbida durante l'allenamento: se vinci una presa povera sprecando una briscola troppo alta, paghi un piccolo costo proporzionale allo spreco. La forza della penalità è stata scelta dopo varie prove: abbastanza forte da cambiare l'abitudine, non così forte da trasformarsi in una regola rigida.
+
+Il risultato è esattamente il tipo di progresso che bisogna raccontare con onestà. La v13 non è più forte della v11 in modo significativo. Sulla sola policy fa -0,03 punti a partita, con intervallo di confidenza da -0,38 a +0,32. Nel confronto che conta per il sito, cioè il default reale con PIMC belief 16x8, fa +0,14, con intervallo da -0,20 a +0,47. In entrambi i casi siamo dentro il rumore statistico.
+
+Contro gli avversari di controllo non si rompe nulla: nel default PIMC 16x8 fa +16,30 contro il conservatore di briscole, contro +16,06 della v11, e +22,40 contro l'euristica storica, contro +22,48 della v11. Differenze piccole, non una nuova soglia di forza.
+
+Però cambia il comportamento che volevamo cambiare. L'overkill di briscola su piatti poveri scende da circa 28-31% a circa 6-8%. In pratica, il modello continua a giocare forte come prima, ma molto più spesso prende con la briscola giusta invece di pagare più del necessario.
+
+Per questo la v13 diventa il nuovo default. Non perché sia "più intelligente" in senso assoluto, ma perché è un giocatore più pulito. La frase giusta è: stessa forza, comportamento migliore.
+
+È una promozione diversa dalle precedenti. Le prime generazioni cercavano punti. Questa corregge un'abitudine senza comprare forza. In un progetto didattico è comunque un risultato importante: dopo molte ipotesi bocciate, abbiamo trovato un caso in cui il reward shaping non serve a vincere di più, ma a insegnare al modello a vincere nello stesso modo con meno spreco.
+
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/17-stessa-forza-comportamento-migliore.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.

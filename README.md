@@ -501,9 +501,9 @@ modelli UI **non** li mostra come policy selezionabili (sono asset interni, filt
 Il provisioning allo startup scarica policy consigliata, value e belief dalle env dedicate:
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v10.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.27.0/best_a2c_v10.npz
-BRISCOLA_MODEL_SHA256=a163a37f14a7459674b4dec2c57282cfe5fd4ccd4dab6cd92e3d512982c6ef00
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v13.npz
+BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.34.0/best_a2c_v13.npz
+BRISCOLA_MODEL_SHA256=5b1c6ea0bca7fd2c868e01d4d583cbc5df7bbef2ab86bbb3ded4b18b14c9f1cf
 BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
 BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
 BRISCOLA_BELIEF_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.23.0/belief_v0_h128_50k_seed20260702.npz

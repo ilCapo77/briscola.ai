@@ -224,6 +224,29 @@ MODEL_SPECS: list[ModelSpec] = [
             "Runs WITHOUT the overkill guard, measured harmful on this model (-0.5 with guard on)."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v13",
+        path=_rel("data/models/best_a2c_v13.npz"),
+        role="official best",
+        status="promoted",
+        order=11,
+        progress_source="benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/eval_v13_vs_heuristic_v1_medium.json",
+        progress_score=21.5182,
+        h2h_source=(
+            "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/"
+            "pimc16x8_medium/v13_vs_v11_pimc16x8_medium.json"
+        ),
+        h2h_score=0.1366,
+        decision="Promoted as recommended model for the v0.34.0 release.",
+        notes=(
+            "Overkill-shaping beta=0.3, warm-started from best_a2c_v11 for 5M games with a BC anchor "
+            "toward v11. This is a behavior-cleanup promotion, not a strength-jump claim: policy-only "
+            "v13 vs v11 is neutral (-0.03, CI -0.38..+0.32), and the default PIMC 16x8 gate is also "
+            "neutral-slightly-positive (+0.14, CI -0.20..+0.47). The value is that low-lead trump "
+            "overkill drops sharply (about 28-31% on v11 gates to 6-8% on v13) without breaking "
+            "trump_saver or heuristic_v1 performance. Summary: same strength, better behavior."
+        ),
+    ),
 ]
 
 
@@ -468,6 +491,27 @@ MILESTONES: list[dict[str, Any]] = [
         "impact": "Default model moves to best_a2c_v10; both progression meters at all-time highs.",
         "source": "data/models/best_a2c_v10.npz + 30M complete-panel run (data/exit/definitivo.log)",
     },
+    {
+        "order": 15,
+        "date": "2026-07-09",
+        "model_id": "best_a2c_v13",
+        "type": "promoted",
+        "decision": "Promote v13 beta=0.3 as the recommended default model for v0.34.0.",
+        "why": (
+            "The overkill shaping changed the target behavior without measurable strength loss: same "
+            "force as v11 within confidence intervals, much less low-lead trump overkill."
+        ),
+        "evidence": (
+            "Policy-only v13 vs v11 -0.03 (CI -0.38..+0.32); default PIMC 16x8 v13 vs v11 +0.14 "
+            "(CI -0.20..+0.47). Low-lead overkill drops from 27.8% to 6.1% vs v11 and from 31.4% "
+            "to 7.8% vs heuristic_v1."
+        ),
+        "impact": (
+            "Default remains bc_model_pimc_belief_16x8, but now backed by best_a2c_v13.npz; no runtime "
+            "overkill guard is reintroduced."
+        ),
+        "source": "data/models/best_a2c_v13.npz + v13_overkill_gap_beta0300_5M_seed20260709 gates",
+    },
 ]
 
 
@@ -580,6 +624,16 @@ def decision_quality_rows() -> list[dict[str, Any]]:
             "best_a2c_v6",
             "Best A2C v6",
             "benchmarks/experiments/a2c_v6_scaling_seed501_5m_numba/quality_5m_vs_heuristic_v1_big_numba.json",
+        ),
+        (
+            "best_a2c_v11",
+            "Best A2C v11",
+            "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/quality_v11_vs_heuristic_v1_medium.json",
+        ),
+        (
+            "best_a2c_v13",
+            "Best A2C v13",
+            "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/quality_v13_vs_heuristic_v1_medium.json",
         ),
     ]
     rows = []
@@ -727,6 +781,55 @@ def promotion_rows() -> list[dict[str, Any]]:
             model_id="best_a2c_v6",
             label="Best A2C v6",
             opponent="best_a2c_v5_holdout",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/eval_v13_vs_v11_medium.json",
+            model_id="best_a2c_v13",
+            label="Best A2C v13 policy",
+            opponent="best_a2c_v11_policy",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/eval_v13_vs_heuristic_v1_medium.json",
+            model_id="best_a2c_v13",
+            label="Best A2C v13 policy",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            (
+                "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/"
+                "pimc16x8_medium/v13_vs_v11_pimc16x8_medium.json"
+            ),
+            model_id="best_a2c_v13",
+            label="Best A2C v13 PIMC 16x8",
+            opponent="best_a2c_v11_pimc16x8",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            (
+                "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/"
+                "pimc16x8_medium/v13_vs_trumpsaver_pimc16x8_medium.json"
+            ),
+            model_id="best_a2c_v13",
+            label="Best A2C v13 PIMC 16x8",
+            opponent="heuristic_trump_saver",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            (
+                "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/"
+                "pimc16x8_medium/v13_vs_heuristic_v1_pimc16x8_medium.json"
+            ),
+            model_id="best_a2c_v13",
+            label="Best A2C v13 PIMC 16x8",
+            opponent="heuristic_v1",
         )
     )
     return rows
