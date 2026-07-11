@@ -167,6 +167,14 @@ vanno testate separatamente. Non è ancora un GO alla promozione: l'intervento d
 i flip senza regressione nei gate di forza e stile. La media delle 24 predizioni resta solo
 un upper bound costoso, non una proposta runtime.
 
+### Esito del test causale (2026-07-11)
+
+Paired, forward-KL e hinge sono stati chiusi dopo gli screening documentati. La media
+esatta sulle 24 rinomine ha invece flip zero, costa `1,45x` grazie a un solo batch e batte
+v13 di `+0,90` punti/partita (CI `+0,47..+1,33`). La simmetria è quindi una leva di forza.
+Il prossimo passo è distillare questo teacher in una singola MLP; dettagli e limiti in
+`suit-symmetrized-v13-2026-07-11.md`.
+
 ## 5. Pista 3: dose e budget adattivo PIMC
 
 ### Domanda

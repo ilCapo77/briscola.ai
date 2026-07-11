@@ -23,7 +23,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
-from briscola_ai.ai.agents import build_agent, list_agent_specs
+from briscola_ai.ai.agents import SuitSymmetrizedBCModelAgent, build_agent, list_agent_specs
 from briscola_ai.ai.evaluation.decision_quality import (
     evaluate_bc_model_seat_fair_match_2p_with_quality_numba,
     evaluate_seat_fair_match_2p_with_quality_parallel,
@@ -53,7 +53,7 @@ def main() -> int:
             "dover modificare i metadati del modello."
         ),
     )
-    agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model"]
+    agent_names = [spec.name for spec in list_agent_specs()] + ["bc_model", "bc_model_suit_symmetrized"]
     parser.add_argument("--agent-a", default="bc_model", choices=agent_names, help="Agente A (misuriamo qualità su A).")
     parser.add_argument("--agent-b", default="heuristic_v1", choices=agent_names, help="Agente B (avversario).")
     parser.add_argument("--agent-a-model", default="", help="Path modello `.npz` se A=bc_model.")
@@ -81,6 +81,10 @@ def main() -> int:
     effective_workers = 1 if args.engine == "numba" else int(args.workers)
 
     def _build(*, agent_name: str, model_path: str, flag: str):
+        if agent_name == "bc_model_suit_symmetrized":
+            if not model_path.strip():
+                raise ValueError(f"`--{flag}-model` obbligatorio quando `--{flag} bc_model_suit_symmetrized`.")
+            return SuitSymmetrizedBCModelAgent.from_npz(Path(model_path.strip()))
         if agent_name == "bc_model":
             if not model_path.strip():
                 raise ValueError(f"`--{flag}-model` obbligatorio quando `--{flag} bc_model`.")

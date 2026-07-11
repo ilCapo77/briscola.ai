@@ -36,6 +36,7 @@ from .rule_based import (
     RandomAgent,
     card_to_short_string,
 )
+from .suit_symmetrized import SuitSymmetrizedBCModelAgent
 from .value_lookahead import ValueLookaheadAgent, ValueLookaheadStats
 
 __all__ = [
@@ -57,6 +58,7 @@ __all__ = [
     "PIMCAgent",
     "PIMCSearchDiagnostics",
     "RandomAgent",
+    "SuitSymmetrizedBCModelAgent",
     "ValueLookaheadAgent",
     "ValueLookaheadStats",
     "agent_uses_selected_model",

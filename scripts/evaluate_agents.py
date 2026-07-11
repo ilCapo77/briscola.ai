@@ -24,7 +24,13 @@ import json
 from dataclasses import asdict
 from pathlib import Path
 
-from briscola_ai.ai.agents import Agent, agent_uses_selected_model, build_agent, list_agent_specs
+from briscola_ai.ai.agents import (
+    Agent,
+    SuitSymmetrizedBCModelAgent,
+    agent_uses_selected_model,
+    build_agent,
+    list_agent_specs,
+)
 from briscola_ai.ai.evaluation import evaluate_match_2p, evaluate_seat_fair_match_2p
 from briscola_ai.ai.evaluation.round_robin import seat_fair_avg_point_diff_ci, seat_fair_score_rate_ci
 from briscola_ai.ai.fast.evaluation import (
@@ -136,6 +142,7 @@ def main() -> int:
     # perché non sono avversari offerti dalla UI: le abilitiamo solo per valutazioni CLI.
     agent_names = [spec.name for spec in list_agent_specs()] + [
         "bc_model",
+        "bc_model_suit_symmetrized",
         "heuristic_trump_saver",
         "bc_model_pimc_belief_16x10",
     ]
@@ -154,12 +161,12 @@ def main() -> int:
     parser.add_argument(
         "--agent0-model",
         default="",
-        help="Path al modello `.npz` se `--agent0 bc_model` (output di scripts/train_bc.py).",
+        help="Path al modello `.npz` se agent0 usa una policy neurale (output di scripts/train_bc.py).",
     )
     parser.add_argument(
         "--agent1-model",
         default="",
-        help="Path al modello `.npz` se `--agent1 bc_model` (output di scripts/train_bc.py).",
+        help="Path al modello `.npz` se agent1 usa una policy neurale (output di scripts/train_bc.py).",
     )
     parser.add_argument(
         "--seat-fair",
@@ -228,6 +235,12 @@ def main() -> int:
             raise ValueError(f"Benchmark non supportato: {args.benchmark!r}")
 
     def _build(*, agent_name: str, model_path: str, agent_flag: str) -> Agent:
+        if agent_name == "bc_model_suit_symmetrized":
+            if not model_path.strip():
+                raise ValueError(
+                    f"`--{agent_flag}-model` obbligatorio quando `--{agent_flag} bc_model_suit_symmetrized`."
+                )
+            return SuitSymmetrizedBCModelAgent.from_npz(model_path.strip())
         if agent_uses_selected_model(agent_name):
             # Vale per `bc_model` e per tutti gli agenti del catalogo che avvolgono un `.npz`
             # (hybrid endgame, value lookahead, PIMC): il registry sa come costruirli e

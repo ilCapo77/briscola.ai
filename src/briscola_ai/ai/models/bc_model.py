@@ -54,7 +54,7 @@ class LoadedBCModel(Protocol):
         """Dimensione feature attesa dall'encoder."""
 
     def logits(self, x: np.ndarray) -> np.ndarray:
-        """Ritorna logits (40,) a partire da feature `x` (D,)."""
+        """Ritorna logits ``(..., 40)`` da feature ``(..., D)``, anche in batch."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,7 +78,7 @@ class LinearBCModel:
         return int(self.w.shape[0])
 
     def logits(self, x: np.ndarray) -> np.ndarray:
-        """Logits lineari: xW + b."""
+        """Logits lineari, anche in batch: ``xW + b``."""
         return x @ self.w + self.b
 
 
@@ -131,7 +131,7 @@ class MLPBCModel:
         return np.concatenate([encoder_features, self.belief_probs(encoder_features)]).astype(np.float32)
 
     def logits(self, x: np.ndarray) -> np.ndarray:
-        """Forward MLP: relu(xW1 + b1)W2 + b2. `x` deve essere già l'input completo della policy."""
+        """Forward MLP, anche in batch: ``relu(xW1 + b1)W2 + b2`` sull'input completo della policy."""
         z1 = x @ self.w1 + self.b1
         h = np.maximum(z1, 0.0)
         return h @ self.w2 + self.b2

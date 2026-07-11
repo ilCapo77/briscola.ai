@@ -28,6 +28,10 @@
   porta il flip a **14,42%**, conserva il gap top-2 (`0,915` vs `0,929` dei controlli) ed è neutro contro v13
   (`-0,14` punti/partita). Beta `1.0` non migliora: la curva è satura. **STOP margin v0; niente run lungo.** Report:
   `docs/plans/suit-margin-v0-2026-07-11.md`.
+- La media esatta dei logits v13 sulle 24 rinomine chiude la domanda causale: flip `0`, costo inference solo `1,45x`
+  grazie al batch e vantaggio diretto **`+0,90` punti/partita** su v13 (CI `+0,47..+1,33`). Migliora anche sulle
+  due baseline e dimezza l'overkill su piatti poveri (`8,0% -> 3,9%`). **GO alla distillazione; nessuna promozione
+  runtime/PIMC del wrapper 24x.** Report: `docs/plans/suit-symmetrized-v13-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -35,21 +39,19 @@
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
-- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 19,
-  `docs/diario/19-la-copia-non-basta.md`.
+- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 20,
+  `docs/diario/20-ventiquattro-pareri.md`.
 
 ## Prossima Decisione
 
-Le loss ausiliarie hanno migliorato ma non eliminato l'asimmetria: paired peggiora, KL comprime i margini, hinge si
-ferma intorno al 14,4%. Prima di modificare ancora il training conviene rispondere causalmente alla domanda centrale:
-una policy resa **esattamente simmetrica** gioca meglio, uguale o peggio? Ipotesi e criteri delle sette piste restano
-in `docs/plans/prossima-iterazione-modello.md`.
+La policy esattamente simmetrica gioca meglio: la domanda causale è chiusa. Ora bisogna trasferire il beneficio in un
+modello singolo, senza introdurre il batch 24x nel default PIMC. Ipotesi e criteri delle altre piste restano in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Policy symmetrized per media sulle 24 rinomine.** Per ogni osservazione, valutare v13 su tutte le permutazioni,
-   riallineare i 40 output e mediarli prima dell'argmax. Deve avere flip matematicamente nullo; testare prima
-   policy-only seat-fair contro v13 e baseline, registrando costo CPU. Se la forza migliora o resta neutra, usare il
-   teacher simmetrizzato per distillazione o progettare pesi condivisi; se peggiora, chiudere l'ipotesi che la
-   simmetria dei semi sia una leva di forza. Nessun training prima di questo test causale.
+1. **Distillare il teacher simmetrizzato.** Costruire un corpus per partita, produrre target soft dalla media 24x e
+   allenare una singola MLP v4. Prima verificare imitation su holdout, poi flip, direct match contro v13 e teacher,
+   baseline e qualità decisionale. Se la MLP ordinaria perde il vantaggio o torna asimmetrica, passare a pesi
+   condivisi fra semi; non riaprire un'altra variante della consistency loss.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.
@@ -136,6 +138,16 @@ Sonda riproducibile di simmetria dei semi:
 uv run python scripts/probe_suit_symmetry.py \
   --model data/models/best_a2c_v13.npz \
   --out-json docs/reports/evidence/suit_symmetry_v13.v1.json
+```
+
+Policy simmetrizzata, costo e direct match:
+
+```bash
+uv run python scripts/benchmark_suit_symmetrized.py \
+  --model data/models/best_a2c_v13.npz --observations 160 --decisions 10000
+uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
+  --agent0 bc_model_suit_symmetrized --agent0-model data/models/best_a2c_v13.npz \
+  --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
 ```
 
 Avvio locale:

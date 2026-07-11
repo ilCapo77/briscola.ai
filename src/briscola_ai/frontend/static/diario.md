@@ -296,6 +296,24 @@ A questo punto smettiamo temporaneamente di insegnare. Il prossimo controllo pre
 
 <small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
 
+## Capitolo 20 — Ventiquattro pareri, una sola mossa <small>(11 luglio 2026)</small>
+
+Dopo tre tentativi di insegnare la coerenza, la domanda più importante era ancora aperta. Il modello cambiava carta quando cambiavamo soltanto i nomi dei semi, ma non sapevamo se questo gli facesse davvero perdere partite. Due mosse diverse possono avere lo stesso valore, e correggere un difetto interno non garantisce un giocatore più forte.
+
+Questa volta non abbiamo allenato nulla. Abbiamo preso la v13 così com'è e, per ogni decisione, le abbiamo mostrato tutte le 24 ristampe possibili della stessa posizione. Ogni risposta è stata riportata ai nomi originali delle carte; poi abbiamo fatto la media e scelto la carta col valore più alto. È come chiedere ventiquattro pareri allo stesso giocatore dopo aver cambiato soltanto le etichette sul tavolo.
+
+Per costruzione, il risultato non può più dipendere dai nomi dei semi. Il controllo su 160 posizioni reali e 3.680 rinomine non banali ha trovato zero cambi di carta. E il costo è molto più piccolo di quanto suggerisca il numero ventiquattro: le copie entrano nella rete tutte insieme, in un *batch*, quindi la latenza media passa da circa 0,051 a 0,074 millisecondi. Una volta e mezza, non ventiquattro.
+
+Il confronto diretto ha finalmente separato il sintomo dalla causa. Su diecimila partite con gli stessi mazzi e i posti scambiati, la versione simmetrica batte la v13 originale di 0,90 punti a partita. Il margine d'incertezza va da +0,47 a +1,33: questa volta la parità resta fuori. Anche contro le due euristiche di controllo il vantaggio cresce di circa sette decimi.
+
+Non abbiamo ricomprato quei punti tornando a sprecare briscole. L'overkill sui piatti poveri, il comportamento corretto dalla v13, scende ancora: dall'8,0% al 3,9% nel controllo contro l'euristica storica. Le volte in cui usa una briscola anche se una carta normale avrebbe già vinto scendono da 99 a 41.
+
+Ora sappiamo qualcosa che prima mancava: le associazioni accidentali con i nomi dei semi non erano soltanto disordine nella testa del modello. Gli costavano davvero forza.
+
+La versione a ventiquattro pareri non diventa subito il giocatore del sito. Il default usa la ricerca PIMC e richiama la policy molte volte dentro le sue simulazioni; quel costo va studiato nel contesto giusto. Il prossimo passo sarà invece usare la risposta media come maestro e insegnarla a una sola rete. Il termine tecnico è *distillazione*: trasferire il comportamento di un sistema più costoso in un modello più compatto. Se funziona, una sola risposta conserverà ciò che oggi otteniamo chiedendone ventiquattro.
+
+<small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/20-ventiquattro-pareri.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.
