@@ -64,3 +64,18 @@ L'overkill sui piatti poveri scende al 4,17%, ormai vicino al 3,9% del maestro.
 Il primo controllo dentro il PIMC, su duemila partite, dà +0,35 ma con un margine largo
 che comprende la parità. Non è una bocciatura e non è una promozione. Serve l'ultimo test
 da diecimila partite nella configurazione esatta del sito.
+
+## L'ultimo test
+
+Nelle diecimila partite finali entrambi i giocatori usano la stessa ricerca PIMC belief
+16x8, la stessa stima delle carte nascoste, lo stesso numero di mondi simulati e lo stesso
+solver. Cambia soltanto la policy: distillato 50k contro v13.
+
+Il candidato guadagna 0,43 punti a partita. L'intervallo va da +0,03 a +0,84: per poco,
+ma la parità resta fuori anche nel giocatore completo del sito. Vince 4.936 partite, ne
+perde 4.758 e ne pareggia 306.
+
+Questo chiude la catena iniziata dai nomi dei semi: difetto misurato, causa verificata,
+maestro simmetrico, distillazione compatta e infine vantaggio conservato dentro la search.
+Il modello ha superato i criteri tecnici per diventare la quattordicesima generazione;
+restano il confezionamento della release e i controlli del catalogo online.

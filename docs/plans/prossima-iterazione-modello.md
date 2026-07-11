@@ -183,6 +183,10 @@ Il 50k porta il flip a `6,04%` e resta positivo contro v13 (`+0,66`, CI
 `+0,24..+1,09`). Il PIMC belief 16x8 small è neutro (`+0,35`, CI `-0,53..+1,22`):
 prossima e unica decisione del ramo è il confronto PIMC medium a pari configurazione.
 
+Il PIMC medium passa con `+0,43` punti/partita (CI `+0,03..+0,84`): il vantaggio arriva
+anche al default reale. Il ramo è chiuso con GO tecnico alla promozione v14; restano
+soltanto audit di release, catalogo e report.
+
 ## 5. Pista 3: dose e budget adattivo PIMC
 
 ### Domanda

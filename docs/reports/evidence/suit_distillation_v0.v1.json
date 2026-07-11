@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "date": "2026-07-11",
-  "decision": "GO al confronto PIMC belief 16x8 medium; nessuna promozione prima del risultato",
+  "decision": "GO tecnico alla promozione come best_a2c_v14; release proposta 0.36.0",
   "dataset": {
     "path_local": "data/distillation/suit_teacher_v13_10k_seed20260711.npz",
     "sha256": "cdcfb37ec20b32deb76fa785e118c1083a60d6e7cc8dba474787eec6ec443275",
@@ -112,6 +112,17 @@
       "wins": 976,
       "losses": 960,
       "draws": 64
+    },
+    "pimc_belief_16x8_medium_vs_v13": {
+      "num_games": 10000,
+      "seed_suite": "seed_suites/medium_5000.txt",
+      "avg_point_diff": 0.4342,
+      "ci95": [0.03, 0.84],
+      "score_rate": 0.5089,
+      "score_rate_ci95": [0.5007, 0.5171],
+      "wins": 4936,
+      "losses": 4758,
+      "draws": 306
     }
   }
 }

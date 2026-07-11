@@ -336,6 +336,8 @@ L'estensione a cinquantamila partite ha poi rafforzato il risultato. L'accordo c
 
 Il primo controllo dentro il PIMC, su duemila partite, è neutro: +0,35 punti, ma con un intervallo che comprende ampiamente la parità. Resta quindi un ultimo test da diecimila partite nella configurazione esatta usata dal sito.
 
+Anche l'ultimo test ha ora un risultato. Con lo stesso PIMC belief 16x8 su entrambi i lati, il distillato guadagna 0,43 punti a partita sulla v13; il margine d'incertezza va da +0,03 a +0,84. Per poco, ma la parità resta fuori anche nel giocatore completo del sito. Il candidato ha quindi superato tutti i criteri tecnici per diventare la quattordicesima generazione; restano il confezionamento della release e i controlli del catalogo online.
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.

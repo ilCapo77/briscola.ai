@@ -40,6 +40,10 @@
   forza policy-only (`+0,66` vs v13, CI `+0,24..+1,09`; `-0,22` vs teacher, CI `-0,53..+0,09`) e porta l'overkill
   povero al `4,17%`. Il PIMC belief 16x8 small è neutro (`+0,35`, CI `-0,53..+1,22`). **GO al PIMC medium;
   nessuna promozione prima del gate.**
+- Il gate finale nel default reale passa: distillato 50k PIMC belief 16x8 vs v13 PIMC belief 16x8 fa **`+0,43`**
+  punti/partita su 10.000 partite, CI **`+0,03..+0,84`**. Score rate `50,89%` (CI `50,07..51,71%`). Il vantaggio
+  è piccolo ma sopravvive alla search a configurazione identica. **GO tecnico alla promozione come
+  `best_a2c_v14.npz`; bump minor proposto `0.36.0`.**
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -52,14 +56,14 @@
 
 ## Prossima Decisione
 
-La distillazione 50k ha superato i gate policy-only, simmetria e comportamento. Resta da verificare se il vantaggio
-sopravvive nel default reale PIMC belief 16x8. Ipotesi e criteri delle altre piste restano in
+La distillazione 50k ha superato policy-only, simmetria, comportamento e PIMC belief 16x8. La prossima decisione è
+la promozione del candidato e la release. Ipotesi e criteri delle altre piste restano in
 `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Gate PIMC belief 16x8 medium.** Confrontare distillato 50k e v13 sulla suite medium, stessi policy slot,
-   belief v0, `uniform_mix=0.10`, finestra 8, 16 determinizzazioni e solver. Il probe small è neutro; servono 10.000
-   partite per decidere. Se la CI dimostra regressione, stop promozione; se è neutra o positiva, completare audit
-   catalogo/report e decidere se il miglioramento di simmetria/comportamento giustifica la release.
+1. **Promuovere v14 e preparare la release 0.36.0.** Copiare il candidato verificato come `best_a2c_v14.npz`,
+   aggiornare provisioning/default/catalogo e descrizioni UI, nascondendo sempre belief/value. Rigenerare
+   `model_progress.xlsx`, verificare il grafico fino alla riga v14, eseguire gate completo, bump `pyproject.toml` +
+   `uv.lock`, commit, tag annotato e push. Dopo il deploy verificare `/version`, catalogo e default PIMC.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.
@@ -158,26 +162,20 @@ uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
 ```
 
-Gate PIMC distillato 50k vs v13 (job circa 12-13 minuti):
+Gate PIMC distillato 50k vs v13 completato:
 
 ```bash
-mkdir -p benchmarks/experiments/suit_distillation_v0_50k_seed20260712
-nohup uv run python scripts/evaluate_agents.py \
-  --benchmark medium --engine domain \
+cat benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json
+```
+
+Risultato atteso registrato:
+
+```bash
+uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent0 bc_model_pimc_belief_16x8 \
   --agent0-model data/models/suit_distilled_v0_50k_seed20260712.npz \
   --agent1 bc_model_pimc_belief_16x8 \
-  --agent1-model data/models/best_a2c_v13.npz \
-  --out-json benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json \
-  > benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.log 2>&1 &
-```
-
-Lo script stampa soltanto al termine; controllo processo e risultato:
-
-```bash
-pgrep -af "evaluate_agents.py.*suit_distilled_v0_50k"
-tail -30 benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.log
-cat benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json
+  --agent1-model data/models/best_a2c_v13.npz
 ```
 
 Avvio locale:

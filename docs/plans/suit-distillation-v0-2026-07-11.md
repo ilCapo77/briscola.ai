@@ -18,8 +18,9 @@ forward normale a inference?
 - conserva il miglioramento comportamentale: overkill su piatto povero `5,5%`, fra v13
   (`8,0%`) e teacher (`3,9%`).
 
-**Il corpus indipendente da 50.000 partite ha poi superato il gate: GO al confronto PIMC
-16x8 medium; nessuna promozione prima di quel risultato.**
+**Il corpus indipendente da 50.000 partite e il successivo PIMC 16x8 medium hanno superato
+tutti i gate: GO tecnico alla promozione come nuova policy ufficiale, subordinato al bump
+di release e all'audit catalogo/report.**
 
 ## Pipeline implementata
 
@@ -191,24 +192,38 @@ da 2.000 partite è neutro ma senza regressione evidente: `+0,35`, CI `-0,53..+1
 Una partita richiede circa `0,076 s` quando entrambi i lati usano PIMC belief 16x8; il
 medium da 10.000 dura quindi circa 12-13 minuti e va lanciato dal maintainer.
 
-Il confronto usa la stessa belief v0, `uniform_mix=0.10`, finestra 8, 16 determinizzazioni
+Il confronto medium usa la stessa belief v0, `uniform_mix=0.10`, finestra 8, 16 determinizzazioni
 e solver su entrambi i lati tramite il registry `bc_model_pimc_belief_16x8`; cambia soltanto
 il file policy. È questo il gate che decide se la forza policy-only arriva al default reale.
 
-Il candidato passa se la CI medium non dimostra una regressione contro v13. Un vantaggio
-positivo autorizzerebbe i controlli finali di catalogo/release; una neutralità manterrebbe
-aperta la scelta fra promuovere il comportamento più simmetrico e richiedere altra evidenza.
-Una regressione chiude la promozione PIMC anche se la policy-only è migliore.
+| configurazione A | configurazione B | partite | punti A-B | CI95 |
+|---|---|---:|---:|---:|
+| distillato 50k PIMC belief 16x8 | v13 PIMC belief 16x8 | 2.000 | +0,35 | -0,53..+1,22 |
+| **distillato 50k PIMC belief 16x8** | **v13 PIMC belief 16x8** | **10.000** | **+0,43** | **+0,03..+0,84** |
+
+Nel medium il candidato vince 4.936 partite, ne perde 4.758 e pareggia 306; score rate
+`50,89%`, CI `50,07..51,71%`. Il margine è piccolo ma positivo secondo il criterio
+preregistrato: la CI sulle 5.000 coppie seat-fair esclude appena zero.
+
+Il beneficio della policy simmetrica sopravvive quindi alla ricerca del default reale.
+Non va sommato aritmeticamente al `+0,66` policy-only: sono due configurazioni e due match
+diversi. Entrambi rispondono però nella stessa direzione, senza regressioni sulle baseline
+o sui comportamenti di conservazione delle briscole.
+
+**Decisione tecnica: GO alla promozione.** Il modello va nominato `best_a2c_v14.npz`; la
+release è un cambiamento visibile del default e merita un bump minor pre-1.0, proposto
+`0.36.0`. Prima del push servono catalogo/UI, provisioning, report Excel, quality gate,
+tag annotato e verifica del deploy come previsto da `AGENTS.md`.
 
 ## Criteri registrati
 
-L'estensione 50k è passata perché:
+L'intera distillazione v0 è passata perché:
 
 1. agreement test e KL migliorano rispetto al 10k;
 2. flip resta sotto 10,23% o almeno non supera il gate 12%;
 3. forza diretta contro v13 resta positiva e contro teacher non peggiora;
 4. overkill povero non supera v13;
-5. il probe PIMC small non mostra regressione significativa.
+5. il PIMC medium dimostra un piccolo vantaggio su v13 (`+0,43`, CI `+0,03..+0,84`).
 
-Il comando PIMC medium è in `PLAN.md`; supera cinque minuti e va lanciato dal maintainer
-con `nohup`.
+Artefatto grezzo finale:
+`benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json`.
