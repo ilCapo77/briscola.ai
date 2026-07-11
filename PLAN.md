@@ -32,6 +32,10 @@
   grazie al batch e vantaggio diretto **`+0,90` punti/partita** su v13 (CI `+0,47..+1,33`). Migliora anche sulle
   due baseline e dimezza l'overkill su piatti poveri (`8,0% -> 3,9%`). **GO alla distillazione; nessuna promozione
   runtime/PIMC del wrapper 24x.** Report: `docs/plans/suit-symmetrized-v13-2026-07-11.md`.
+- La distillazione v0 su 10.000 partite trasferisce il beneficio in una singola MLP: agreement test `92,88%`, flip
+  **`10,23%`**, direct match vs v13 **`+0,51`** (CI `+0,11..+0,92`) e neutralità vs teacher 24x (`-0,23`, CI
+  `-0,59..+0,13`). L'overkill povero resta migliore di v13 (`5,5%` vs `8,0%`). **GO al corpus indipendente 50k;
+  candidato ancora locale, nessun catalogo/PIMC.** Report: `docs/plans/suit-distillation-v0-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -39,19 +43,19 @@
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
-- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 20,
-  `docs/diario/20-ventiquattro-pareri.md`.
+- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 21,
+  `docs/diario/21-una-voce-sola.md`.
 
 ## Prossima Decisione
 
-La policy esattamente simmetrica gioca meglio: la domanda causale è chiusa. Ora bisogna trasferire il beneficio in un
-modello singolo, senza introdurre il batch 24x nel default PIMC. Ipotesi e criteri delle altre piste restano in
-`docs/plans/prossima-iterazione-modello.md`.
+La distillazione 10k ha trasferito in una singola MLP gran parte del vantaggio del teacher simmetrico. Prima di
+toccare il default PIMC va verificato che il risultato regga su un corpus indipendente cinque volte più ampio.
+Ipotesi e criteri delle altre piste restano in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Distillare il teacher simmetrizzato.** Costruire un corpus per partita, produrre target soft dalla media 24x e
-   allenare una singola MLP v4. Prima verificare imitation su holdout, poi flip, direct match contro v13 e teacher,
-   baseline e qualità decisionale. Se la MLP ordinaria perde il vantaggio o torna asimmetrica, passare a pesi
-   condivisi fra semi; non riaprire un'altra variante della consistency loss.
+1. **Estendere la distillazione a 50.000 partite indipendenti.** Stesso roster, ricetta e split per partita, seed
+   `20260712`; attesi 1,9M esempi. Il modello deve migliorare agreement/KL, restare sotto il 12% di flip, conservare
+   vantaggio su v13 e neutralità col teacher, senza peggiorare l'overkill povero. Solo dopo eseguire il gate PIMC
+   16x8. Se più dati non aiutano, non aumentare ancora: valutare pesi condivisi fra semi.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.
@@ -148,6 +152,24 @@ uv run python scripts/benchmark_suit_symmetrized.py \
 uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent0 bc_model_suit_symmetrized --agent0-model data/models/best_a2c_v13.npz \
   --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
+```
+
+Corpus distillazione 50k (job oltre 5 minuti, circa 3,2 GB RAM durante la raccolta):
+
+```bash
+mkdir -p data/distillation benchmarks/experiments/suit_distillation_v0_50k_seed20260712
+nohup uv run python scripts/generate_suit_distillation_dataset.py \
+  --model data/models/best_a2c_v13.npz \
+  --out data/distillation/suit_teacher_v13_50k_seed20260712.npz \
+  --num-games 50000 --seed 20260712 --progress-every 500 \
+  > benchmarks/experiments/suit_distillation_v0_50k_seed20260712/generate.log 2>&1 &
+```
+
+Controllo avanzamento e artefatto atteso:
+
+```bash
+tail -f benchmarks/experiments/suit_distillation_v0_50k_seed20260712/generate.log
+ls -lh data/distillation/suit_teacher_v13_50k_seed20260712.npz
 ```
 
 Avvio locale:

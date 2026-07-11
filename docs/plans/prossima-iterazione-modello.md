@@ -175,6 +175,10 @@ v13 di `+0,90` punti/partita (CI `+0,47..+1,33`). La simmetria è quindi una lev
 Il prossimo passo è distillare questo teacher in una singola MLP; dettagli e limiti in
 `suit-symmetrized-v13-2026-07-11.md`.
 
+La prima distillazione su 10.000 partite supera lo screening: flip `10,23%`, `+0,51`
+punti/partita contro v13 e neutralità col teacher 24x. Il gate successivo è un corpus
+indipendente da 50.000 partite; protocollo in `suit-distillation-v0-2026-07-11.md`.
+
 ## 5. Pista 3: dose e budget adattivo PIMC
 
 ### Domanda

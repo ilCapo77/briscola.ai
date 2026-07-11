@@ -314,6 +314,24 @@ La versione a ventiquattro pareri non diventa subito il giocatore del sito. Il d
 
 <small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/20-ventiquattro-pareri.md)*</small>
 
+## Capitolo 21 — Una voce sola <small>(11 luglio 2026)</small>
+
+Il consiglio a ventiquattro aveva risposto alla domanda scientifica, ma non era ancora la soluzione più semplice da mettere in campo. Per ogni mossa chiedeva alla v13 di guardare tutte le ristampe della posizione e poi mediava le risposte. Funzionava e costava meno del previsto, ma il giocatore del sito usa quella policy molte volte dentro le simulazioni PIMC. Portare lì ventiquattro pareri per ogni scelta interna sarebbe un cambiamento più grande.
+
+Abbiamo quindi provato a trasferire il risultato in una sola rete. Il metodo si chiama *distillazione*: un sistema più costoso fa da maestro, un modello compatto osserva le sue risposte e impara a riprodurle. Il nuovo corpus contiene diecimila partite, pari a 380.000 decisioni non obbligate. Metà nasce da v13 contro se stessa; l'altra metà mescola quattro avversari con stili diversi.
+
+Questa volta le partite intere vengono assegnate all'allenamento, alla verifica oppure all'esame finale. Nessuna mossa della stessa partita può attraversare quel confine. È un dettaglio importante: separare a caso le singole decisioni permetterebbe alla rete di studiare una parte di una partita e ritrovarne un'altra nell'esame.
+
+Prima dell'allenamento v13 sceglie la stessa carta del consiglio nel 86,83% delle decisioni dell'esame. Dopo cinque passaggi sul corpus arriva al 92,88%. La dipendenza dai nomi dei semi scende dal 18,19% al 10,23%, sotto la soglia del 12% che i tentativi precedenti non erano riusciti a superare.
+
+La prova sul gioco conserva il segnale. Su diecimila partite con gli stessi mazzi e i posti scambiati, la singola rete batte v13 di 0,51 punti a partita; il margine d'incertezza va da +0,11 a +0,92. Contro il consiglio a ventiquattro perde 0,23 punti, ma l'intervallo comprende la parità. In altre parole, con questa misura non riusciamo a distinguerli nettamente.
+
+Anche il comportamento finisce nel punto giusto. L'overkill di briscola sui piatti poveri era all'8,0% per v13 e al 3,9% per il maestro; l'allievo distillato arriva al 5,5%. Ha assorbito una parte del miglioramento senza tornare al vecchio difetto.
+
+Non è ancora una nuova versione ufficiale. Diecimila partite sono lo screening che autorizza il passo successivo: un corpus indipendente da cinquantamila partite. Se il risultato regge, il modello verrà finalmente provato dentro il PIMC usato dal sito. Fino ad allora resta un candidato locale.
+
+<small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/21-una-voce-sola.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.
