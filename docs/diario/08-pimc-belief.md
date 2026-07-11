@@ -38,6 +38,14 @@ il costo Python era già dominato dalle matmul BLAS di numpy). L'agente di produ
 il kernel, con fallback trasparente al Python sugli stati non determinizzabili; dal
 v0.27.1 il kernel è compilato allo startup (warm-up), non alla prima mossa del giocatore.
 
+> **Nota retrospettiva (v0.31.x).** Questo paragrafo descrive il runtime delle release
+> v0.25-v0.30, non quello attuale. Con v0.31.0 la search di produzione è tornata al path
+> Python con la configurazione 16×8; con v0.31.1 anche il solver web è diventato Python
+> puro tramite `solve_endgame_fast` e principal variation. Il processo web oggi non
+> importa Numba; i kernel JIT restano disponibili per training, self-play, valutazioni e
+> benchmark offline. Misure e motivazione sono in
+> [Perché il sito era lento al risveglio](15-zero-numba.md).
+
 ## La composizione col modello più forte (misura del 2026-07-05)
 
 Il margine della search NON si riduce al crescere della policy — si compone:

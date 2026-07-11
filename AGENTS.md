@@ -23,7 +23,10 @@ Briscola end-to-end: motore di regole puro → backend HTTP/WS → UI → pipeli
 - **Stato partita**: vive in un `GameSessionStore` (`game_store.py`) — `InMemoryGameSessionStore` in locale, `RedisGameSessionStore` se è impostata `REDIS_URL`. Salva `GameState` (serializzato via `domain/serialization.py`) + la config IA per posto; l'oggetto `Agent` **non** è serializzato (si ricostruisce con `build_agent`, con cache). Lock per partita (asyncio in-memory / lock Redis distribuito) per serializzare le azioni concorrenti. Evita di reintrodurre dict globali di stato (`active_games` & co. sono stati rimossi).
 - **Realtime**: il fan-out degli eventi WebSocket passa per il **pub/sub** dello store (Redis in prod, fan-out asyncio in dev), così `ai_card_reveal`/`trick_result`/snapshot raggiungono il client su QUALSIASI replica. Gli snapshot per-giocatore sono ricostruiti dal subscriber (anti-cheat). `?polling=1` resta come fallback di debug.
 - **Event log** (`event_log.py`): append-only per dataset. `EventLog` su SQLite (default locale) **oppure** `PostgresEventLog` se è impostata `DATABASE_URL` (deploy persistente/condiviso); il backend è scelto da `build_event_log`. Stesso schema `games`/`events`. Attivo solo se configurato (`BRISCOLA_EVENT_DB_PATH` o `DATABASE_URL`); con modalità `dataset` richiede il consenso utente.
-- **Provisioning modello** (`ai/models/provisioning.py`): allo startup, se manca, scarica il modello consigliato da `BRISCOLA_MODEL_URL` (verifica `BRISCOLA_MODEL_SHA256`). Se configurati, scarica anche asset ausiliari come il value model da `BRISCOLA_VALUE_MODEL_URL` (verifica `BRISCOLA_VALUE_MODEL_SHA256`). Best-effort: non blocca l'avvio.
+- **Provisioning modello** (`ai/models/provisioning.py`): gli asset runtime ufficiali piccoli sono tracciati in Git;
+  allo startup il provisioning funge da fallback/override best-effort. Se un asset manca, può scaricare la policy da
+  `BRISCOLA_MODEL_URL`, il value model da `BRISCOLA_VALUE_MODEL_URL` e la belief network da
+  `BRISCOLA_BELIEF_MODEL_URL`, verificando i rispettivi SHA-256. Un errore non blocca l'avvio.
 
 **Modelli locali (`.npz`)**: la UI seleziona un avversario `bc_model` da un catalogo server-side (`ai/models/catalog.py`). Il browser invia solo un `ai_model_id` (path relativo) tra quelli di `GET /api/ai/models`; il backend rifiuta path traversal e carica solo da `BRISCOLA_MODELS_DIR` (default `./data/models/`). I trainer salvano nei `.npz` i metadati (`label`, `description_it`, `feature_dim`).
 
@@ -56,7 +59,10 @@ Deps di runtime per il cloud: `redis` (game store) e `psycopg` (event log Postgr
 
 ### Runtime & deploy (variabili d'ambiente)
 
-Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-replica) servono Redis + i provisioning. Il sito è live su `https://ai.briscola.dev`; l'entrypoint per `fastapi run` è lo shim `main:app` nella root.
+Tutte opzionali; in locale i default vanno bene. In cloud multi-replica serve Redis per stato/realtime condivisi e,
+se si abilita l'event log persistente, Postgres. Gli asset runtime ufficiali sono già tracciati in Git; il
+provisioning è un fallback/override opzionale. Il sito è live su `https://ai.briscola.dev`; l'entrypoint per
+`fastapi run` è lo shim `main:app` nella root.
 
 > **Deploy automatico al push**: FastAPI Cloud è collegato al repo GitHub e ridistribuisce **da solo** a ogni push su `master` (il build gira `uv sync --locked` → ricordarsi `uv lock` a ogni bump di versione). NON serve — e non va lanciato — `fastapi deploy` manualmente dall'agente. Dopo il push, verificare l'esito da `GET /version` (versione live) e dai log della piattaforma; il build impiega ~1-3 min. Nota **scale-to-zero**: idle ~90s, il cold start è frequente (mitigato da un keep-alive esterno se configurato).
 
@@ -65,9 +71,13 @@ Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-
 - `BRISCOLA_EVENT_LOG_MODE`: `debug` (default) | `dataset` (minimale, richiede consenso) | `off`.
 - `BRISCOLA_MODEL_URL` + `BRISCOLA_MODEL_SHA256` (+ `BRISCOLA_DEFAULT_MODEL_ID`): provisioning del modello consigliato allo startup.
 - `BRISCOLA_VALUE_MODEL_URL` + `BRISCOLA_VALUE_MODEL_SHA256`: provisioning del value model richiesto da `bc_model_value_lookahead_8x8`.
+- `BRISCOLA_BELIEF_MODEL_URL` + `BRISCOLA_BELIEF_MODEL_SHA256`: provisioning della belief network richiesta dagli
+  agenti `bc_model_pimc_belief_*`.
 - `BRISCOLA_MODELS_DIR` (default `./data/models/`); `BRISCOLA_CORS_ALLOW_ORIGINS` (default `*`, restringere in prod).
 - `BRISCOLA_REALTIME_MODE` (`ws`|`polling`, override; default `ws`); `BRISCOLA_ASSET_VERSION` (override del cache-busting, che di default deriva da versione + mtime degli static).
-- `BRISCOLA_DEBUG_STATE_ENDPOINT`: abilita la vista full-state di `GET /api/games/{id}` senza `player_index` (mani di tutti + `next_deck_card`, per debug/spectator). Default **disabilitata** (403) per l'anti-cheat: non attivarla in produzione pubblica.
+- `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: abilita la vista full-state di `GET /api/games/{id}` senza
+  `player_index` (mani di tutti + `next_deck_card`, per debug/spectator). Default **disabilitata** (403); i valori
+  booleani come `1` sono rifiutati deliberatamente. Non impostarla nella produzione pubblica.
 - `BRISCOLA_CREATE_GAME_RATE_LIMIT`: tetto di partite create per IP al minuto su `POST /api/games` (default `30`; `0` disabilita — la suite test lo azzera via conftest).
 
 ### Pipeline AI (script in `scripts/`)
@@ -83,7 +93,8 @@ Tutte opzionali; in locale i default vanno bene. In cloud (FastAPI Cloud, multi-
 - Matrix / decision quality: `scripts/evaluate_matrix.py`, `scripts/evaluate_decision_quality.py`
 - Benchmark throughput: `python scripts/benchmark_perf.py`
 
-Artefatti in `data/` e `benchmarks/experiments/` sono locali (gitignored).
+Dataset, run e benchmark in `data/` e `benchmarks/experiments/` sono locali (gitignored), salvo i piccoli asset
+runtime ufficiali esplicitamente tracciati in `data/models/`.
 
 ## Quality gate (prima di ogni commit)
 

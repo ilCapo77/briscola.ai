@@ -988,11 +988,13 @@ def _debug_state_endpoint_enabled() -> bool:
     la vista full-state espone le mani di TUTTI i giocatori e `next_deck_card`, quindi
     contraddice l'invariante anti-cheat se raggiungibile da qualunque client in produzione.
     La teniamo come strumento di debug/spectator locale, ma va abilitata esplicitamente
-    dall'operatore con `BRISCOLA_DEBUG_STATE_ENDPOINT=1`. Leggiamo l'env a ogni richiesta
-    (non a import time) così i test possono attivarla/disattivarla con `monkeypatch`.
+    dall'operatore con `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`. Il valore
+    volutamente esplicito evita che un vecchio flag booleano lasci per errore carte nascoste
+    accessibili su un deploy pubblico. Leggiamo l'env a ogni richiesta (non a import time),
+    così i test possono attivarla/disattivarla con `monkeypatch`.
     """
     raw = os.getenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "").strip().lower()
-    return raw in {"1", "true", "yes", "on"}
+    return raw == "unsafe-full-state"
 
 
 @app.get("/games/{game_id}", response_model=dict)
@@ -1027,7 +1029,8 @@ async def get_game_state(game_id: str, player_index: int | None = None):
                 status_code=403,
                 detail=(
                     "Vista full-state disabilitata (anti-cheat). Usa `player_index` per la vista "
-                    "del giocatore, oppure imposta BRISCOLA_DEBUG_STATE_ENDPOINT=1 per il debug."
+                    "del giocatore, oppure imposta "
+                    "BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state per il debug locale."
                 ),
             )
         game_state_dto = build_game_state_dto(game, session.version)

@@ -122,3 +122,19 @@ umane complete contro v11 in produzione, idealmente ~50-100, poi lo stesso audit
 
 Solo dopo quel controllo ha senso scegliere tra encoder v5, potential shaping anti-spreco,
 o una sonda mirata sulla cavata delle briscole.
+
+## Nota retrospettiva: l'encoder v5 è stato chiuso
+
+Questa era la decisione aperta l'8 luglio. La sonda riproducibile del giorno successivo ha
+mostrato che l'ipotesi di partenza era troppo forte: l'encoder v4 (`feature_dim=369`)
+contiene già contatori pubblici di stile e la policy li usa nel verso corretto, riducendo
+la massa sui carichi contro il conservatore. L'effetto è però piccolo (circa −0.8 punti
+percentuali e ~1% di flip dell'argmax) perché tagli e aperture di carico sono eventi rari,
+non perché manchino le feature.
+
+Decisione conclusiva: **nessun encoder v5 dedicato allo stile**. La pista dei carichi è
+stata chiusa come causa generale; la correzione promossa è stata invece lo shaping
+anti-overkill di v13, che agisce su un comportamento più frequente e misurabile senza
+reintrodurre un guard runtime. Metodo e caveat sono nella
+[nota tecnica sulla sensibilità allo stile](../plans/sonda-stile-finestra-2026-07-08.md);
+l'esito v13 è in [Stessa forza, comportamento migliore](17-stessa-forza-comportamento-migliore.md).

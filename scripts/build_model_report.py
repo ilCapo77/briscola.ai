@@ -6,12 +6,10 @@ The report is intentionally curated: it tracks official best models, one teacher
 model, and only the rejected candidates that explain an important decision. It
 does not try to dump every experiment under `benchmarks/experiments/`.
 
-Reproducibility note (important): this script reads LOCAL, gitignored artifacts —
-the `.npz` models in `data/models/` and the evaluation JSONs in
-`benchmarks/experiments/` and `data/`. The committed `docs/reports/model_progress.xlsx`
-is therefore a maintainer-curated artifact: it can only be regenerated on a machine
-that has those artifacts (the historical `.npz` files are tens of MB and are not
-tracked on purpose). CI and clean clones skip the tests that need these inputs.
+Reproducibility note (important): normal report builds read the compact, versioned
+evidence snapshot in `docs/reports/evidence/`. The original `.npz` models and benchmark
+JSONs remain useful audit inputs; many historical inputs are gitignored and are required
+only when a maintainer explicitly refreshes that snapshot with `--refresh-evidence`.
 """
 
 from __future__ import annotations
@@ -29,6 +27,9 @@ import numpy as np
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "docs" / "reports" / "model_progress.xlsx"
+EVIDENCE_PATH = ROOT / "docs" / "reports" / "evidence" / "model_progress.v1.json"
+EVIDENCE_SCHEMA_VERSION = 1
+EVIDENCE_SNAPSHOT_DATE = "2026-07-11"
 _XLSX_ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 
 
@@ -89,9 +90,9 @@ MODEL_SPECS: list[ModelSpec] = [
         status="promoted",
         order=2,
         progress_source="benchmarks/experiments/a2c_v3_league_seed301_1m_numba/baseline_best_a2c_v3_big_vs_heuristic_v1_numba.json",
-        progress_score=17.28946,
+        progress_score=17.28786,
         h2h_source="benchmarks/experiments/best_a2c_v3_vs_best_a2c_2026-06-28_big_numba.json",
-        h2h_score=0.17928,
+        h2h_score=0.18258,
         decision="Promoted as recommended v3 baseline.",
         notes="Encoder v3, BC/A2C v3 pipeline, guard enabled for runtime/UI.",
     ),
@@ -143,7 +144,7 @@ MODEL_SPECS: list[ModelSpec] = [
         progress_source="data/eval_best_a2c_v7_vs_heuristic_v1_big_holdout_seedrange1000000.json",
         progress_score=18.7314,
         h2h_source="data/eval_a2c_vs_value_lookahead_5M_vs_v6_big_holdout_seedrange1000000.json",
-        h2h_score=2.274,
+        h2h_score=2.27394,
         decision="Promoted as recommended model for the v0.19.0 release.",
         notes=(
             "5M A2C run warm-started from best_a2c_v6 against the fast Numba value-lookahead opponent. "
@@ -157,9 +158,9 @@ MODEL_SPECS: list[ModelSpec] = [
         status="promoted",
         order=7,
         progress_source="benchmarks/experiments/fase3/iter2_h256_vs_heuristic_v1_big.json",
-        progress_score=17.6067,
+        progress_score=17.60724,
         h2h_source="benchmarks/experiments/fase3/iter2_h256_vs_v7_big.json",
-        h2h_score=0.893,
+        h2h_score=0.89104,
         decision="Promoted as recommended model for the v0.22.0 release.",
         notes=(
             "Encoder v4 (trick-history features) + Net2Net widening to hidden 256. Chain: warm-start from "
@@ -175,9 +176,9 @@ MODEL_SPECS: list[ModelSpec] = [
         status="promoted",
         order=8,
         progress_source="benchmarks/experiments/fase3/superA_vs_h1_big.json",
-        progress_score=18.78,
+        progress_score=18.78196,
         h2h_source="benchmarks/experiments/fase3/superA_vs_v8_big.json",
-        h2h_score=0.97,
+        h2h_score=0.96962,
         decision="Promoted as recommended model for the v0.26.0 release.",
         notes=(
             "20M-game 'super training' vs a mixed panel: value-lookahead(v8) 65%, v8 mirror 15%, "
@@ -194,9 +195,9 @@ MODEL_SPECS: list[ModelSpec] = [
         status="promoted",
         order=9,
         progress_source="benchmarks/experiments/fase3/definitivo_vs_h1_big.json",
-        progress_score=20.52,
+        progress_score=20.5235,
         h2h_source="benchmarks/experiments/fase3/definitivo_vs_v9_big.json",
-        h2h_score=0.66,
+        h2h_score=0.66076,
         decision="Promoted as recommended model for the v0.27.0 release.",
         notes=(
             "The 'definitive' 30M-game run vs the complete panel: PIMC-belief teacher 25%, "
@@ -212,9 +213,9 @@ MODEL_SPECS: list[ModelSpec] = [
         status="promoted",
         order=10,
         progress_source="benchmarks/experiments/fase3/v11_vs_h1_big.json",
-        progress_score=20.80,
+        progress_score=20.79522,
         h2h_source="benchmarks/experiments/fase3/v11_vs_v10_big.json",
-        h2h_score=0.85,
+        h2h_score=0.85186,
         decision="Promoted as recommended model for the v0.31.0 release.",
         notes=(
             "Dose-shift hypothesis validated: 40% of the panel to the PIMC 16x8 belief teacher "
@@ -232,11 +233,8 @@ MODEL_SPECS: list[ModelSpec] = [
         order=11,
         progress_source="benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/eval_v13_vs_heuristic_v1_medium.json",
         progress_score=21.5182,
-        h2h_source=(
-            "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/"
-            "pimc16x8_medium/v13_vs_v11_pimc16x8_medium.json"
-        ),
-        h2h_score=0.1366,
+        h2h_source="benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/eval_v13_vs_v11_medium.json",
+        h2h_score=-0.0272,
         decision="Promoted as recommended model for the v0.34.0 release.",
         notes=(
             "Overkill-shaping beta=0.3, warm-started from best_a2c_v11 for 5M games with a BC anchor "
@@ -248,6 +246,71 @@ MODEL_SPECS: list[ModelSpec] = [
         ),
     ),
 ]
+
+
+# The reference metrics in `MODEL_SPECS` are intentionally not treated as one
+# mathematical series. Historical evaluations used different seed ranges and, for
+# v13, a smaller gate. Keeping the protocol beside every value prevents accidental
+# comparisons such as medium/PIMC v13 against big/policy-only predecessors.
+METRIC_PROTOCOLS: dict[str, dict[str, str]] = {
+    "bc_v3": {"progress": "not applicable", "h2h": "not applicable"},
+    "best_a2c": {
+        "progress": "policy + promoted guard; big 100k; holdout seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; standard seeds; Numba; vs previous v2 best",
+    },
+    "best_a2c_v3": {
+        "progress": "policy + promoted guard; big 100k; holdout seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; holdout seeds; Numba; vs best_a2c",
+    },
+    "best_a2c_v4": {
+        "progress": "policy + promoted guard; big 100k; holdout seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; holdout seeds; Numba; vs best_a2c_v3",
+    },
+    "best_a2c_v5": {
+        "progress": "policy + promoted guard; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; standard seeds; Numba; vs best_a2c_v4",
+    },
+    "best_a2c_v6": {
+        "progress": "policy + promoted guard; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; holdout seeds; Numba; vs best_a2c_v5",
+    },
+    "best_a2c_v7": {
+        "progress": "policy + promoted guard; big 100k; holdout seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; holdout seeds; Numba; vs best_a2c_v6",
+    },
+    "best_a2c_v8": {
+        "progress": "policy + promoted guard; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; standard seeds; Numba; vs best_a2c_v7",
+    },
+    "best_a2c_v9": {
+        "progress": "policy + promoted guard; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; standard seeds; Numba; vs best_a2c_v8",
+    },
+    "best_a2c_v10": {
+        "progress": "policy + promoted guard; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy + promoted guard; big 100k; standard seeds; Numba; vs best_a2c_v9",
+    },
+    "best_a2c_v11": {
+        "progress": "policy, guard off; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy, guard off; big 100k; standard seeds; Numba; vs best_a2c_v10 with guard",
+    },
+    "best_a2c_v13": {
+        "progress": "policy, guard off; medium 10k; suite medium; Numba; vs heuristic_v1",
+        "h2h": "policy, guard off; medium 10k; suite medium; Numba; vs best_a2c_v11",
+    },
+}
+
+# Only these rows share the same benchmark/engine/seed protocol and therefore form the
+# chart. They use each model's promoted runtime configuration: v8-v10 include the guard,
+# v11 does not, so the series is not presented as pure architectural progress. v13 is
+# deliberately absent because its available promotion gate is medium 10k; its direct
+# policy and PIMC gates remain separately labelled in the evidence sheets.
+HOMOGENEOUS_CHART_MODEL_IDS = (
+    "best_a2c_v8",
+    "best_a2c_v9",
+    "best_a2c_v10",
+    "best_a2c_v11",
+)
 
 
 REJECTED_CANDIDATES: list[dict[str, Any]] = [
@@ -266,6 +329,63 @@ REJECTED_CANDIDATES: list[dict[str, Any]] = [
         "decision": "not promoted",
         "reason": "Did not pass the medium filter against best_a2c_v3.",
         "evidence": "medium vs best_a2c_v3 -0.12/+0.05; vs heuristic_v1 +16.94/+16.95.",
+    },
+    {
+        "candidate": "pimc_distillation_v7",
+        "path": "data/models/pimc_distill_v7_*.npz",
+        "training_games": "dataset: 50k records",
+        "decision": "branch closed",
+        "reason": (
+            "One-shot BC on PIMC actions was lossy: fitting expert argmax labels erased more of the RL policy "
+            "than the sparse search corrections added."
+        ),
+        "evidence": (
+            "Expert-iteration probe: hard warm-start -2.33 vs v7; anchored variant -1.52; soft targets -9.19."
+        ),
+    },
+    {
+        "candidate": "exit_iter1b_belief_input",
+        "path": "data/models/exit_iter1b_a2c_v4belief_vs_vl_v7_5M_seed20260716.npz",
+        "training_games": 5_000_000,
+        "decision": "not promoted",
+        "reason": (
+            "The frozen belief vector is a deterministic function of the same public v4 features; as policy input "
+            "it added redundancy rather than information."
+        ),
+        "evidence": "Medium 10k: -0.56 vs its iter1 control (CI -1.05..-0.06); +0.82 vs v7.",
+    },
+    {
+        "candidate": "pimc_teacher_v8_5m",
+        "path": "data/models/pimc_teacher_v8_5M_32x10_seed20260721.npz",
+        "training_games": 5_000_000,
+        "decision": "not promoted",
+        "reason": (
+            "An elite-teacher-only diet improved the mirror matchup but regressed anti-weak style; the larger "
+            "mixed-panel arm won on every promotion axis."
+        ),
+        "evidence": "Big 100k: +0.40 vs v8, +16.71 vs heuristic_v1, and -0.63 vs the promoted mixed-panel arm.",
+    },
+    {
+        "candidate": "v11_guard_on",
+        "path": "benchmarks/experiments/fase3/v11guard_vs_v10_big.json",
+        "training_games": "eval-only wrapper",
+        "decision": "wrapper rejected",
+        "reason": "The historical overkill guard suppressed choices that the stronger v11 policy made deliberately.",
+        "evidence": "Big 100k vs v10: +0.32 with guard, compared with +0.85 without it (about -0.53).",
+    },
+    {
+        "candidate": "best_a2c_v12",
+        "path": "data/models/a2c_v12_saver12_pimc40_10M_seed20260708.npz",
+        "training_games": 10_000_000,
+        "decision": "not promoted",
+        "reason": (
+            "Adding trump_saver to the opponent mix neither produced a significant strength gain nor changed the "
+            "target behavior."
+        ),
+        "evidence": (
+            "Big 100k: +0.11 vs v11 (CI -0.03..+0.25), +20.74 vs heuristic_v1; lead-load and trump-use "
+            "profiles remained effectively unchanged."
+        ),
     },
 ]
 
@@ -446,9 +566,9 @@ MILESTONES: list[dict[str, Any]] = [
         ),
         "impact": (
             "Frontend/server/cloud default model moves to best_a2c_v8 (first v4-encoder, first hidden-256 "
-            "default); value model asset unchanged. Known nuance: inside value-lookahead determinized "
-            "simulations the v4 history block is empty (mild degradation of the advanced opponent's "
-            "response modeling, not a correctness issue)."
+            "default); value model asset unchanged. The initially empty v4 history inside determinized "
+            "value-lookahead simulations was later fixed by carrying real public trick history into the "
+            "simulation state; it is no longer a runtime limitation."
         ),
         "source": "data/models/best_a2c_v8.npz + ExIt iteration-1/2 (docs/plans/belief-expert-iteration.md)",
     },
@@ -493,6 +613,54 @@ MILESTONES: list[dict[str, Any]] = [
     },
     {
         "order": 15,
+        "date": "2026-07-07",
+        "model_id": "best_a2c_v11",
+        "type": "promoted",
+        "decision": "Promote v11 (5M PIMC dose-shift) as the recommended .npz policy for v0.31.0.",
+        "why": (
+            "Moving teacher dose from value-lookahead to PIMC belief restored the improvement slope with "
+            "one sixth of v10's training volume."
+        ),
+        "evidence": (
+            "Big 100k: +0.85 vs v10 (CI +0.71..+0.99), +20.80 vs heuristic_v1. The matched guard-on "
+            "ablation reached only +0.32 vs v10."
+        ),
+        "impact": (
+            "Default model moves to best_a2c_v11 and the inference overkill guard is disabled; PIMC belief "
+            "16x8 becomes the efficient runtime default."
+        ),
+        "source": "docs/diario/14-sonda-e-dose-shift.md + benchmarks/experiments/fase3/v11_vs_*.json",
+    },
+    {
+        "order": 16,
+        "date": "2026-07-07",
+        "model_id": "best_a2c_v11",
+        "type": "runtime_ablation",
+        "decision": "Retire the inference overkill guard for v11 and later promoted policies.",
+        "why": "The wrapper had become harmful and obscured what behavior belonged to the policy itself.",
+        "evidence": "Big 100k vs v10: +0.32 with guard, +0.85 without it; wrapper cost about 0.53 points/game.",
+        "impact": "Later quality tables must expose wrapper and guard state explicitly.",
+        "source": "docs/diario/14-sonda-e-dose-shift.md + benchmarks/experiments/fase3/v11guard_vs_v10_big.json",
+    },
+    {
+        "order": 17,
+        "date": "2026-07-08",
+        "model_id": "best_a2c_v12",
+        "type": "rejected",
+        "decision": "Do not promote v12 after the 10M trump-saver opponent-mix run.",
+        "why": (
+            "The candidate was statistically flat against v11 and did not change the lead-load or trump-use "
+            "behaviors it was intended to teach."
+        ),
+        "evidence": (
+            "Big 100k: +0.11 vs v11 (CI -0.03..+0.25), +20.74 vs heuristic_v1; behavioral counters "
+            "remained effectively identical to v11."
+        ),
+        "impact": "v11 remained the official best; v12 stayed a local rejected artifact.",
+        "source": "docs/diario/14-sonda-e-dose-shift.md + benchmarks/experiments/fase3/v12_vs_*.json",
+    },
+    {
+        "order": 18,
         "date": "2026-07-09",
         "model_id": "best_a2c_v13",
         "type": "promoted",
@@ -542,6 +710,45 @@ def load_json(path: str) -> dict[str, Any]:
     return json.loads((ROOT / path).read_text(encoding="utf-8"))
 
 
+def load_evidence_manifest() -> dict[str, Any]:
+    """Load and minimally validate the committed evidence snapshot.
+
+    A normal build must work in a clean clone, where many historical model weights and
+    raw benchmark outputs are intentionally absent. The snapshot is therefore the
+    canonical build input; raw paths preserved inside it are audit references, not
+    runtime dependencies.
+    """
+    payload = json.loads(EVIDENCE_PATH.read_text(encoding="utf-8"))
+    if payload.get("schema_version") != EVIDENCE_SCHEMA_VERSION:
+        raise ValueError(
+            f"Unsupported evidence schema {payload.get('schema_version')!r}; expected {EVIDENCE_SCHEMA_VERSION}"
+        )
+    required_sections = {"models", "promotion_evidence", "decision_quality"}
+    missing = required_sections.difference(payload)
+    if missing:
+        raise ValueError(f"Evidence manifest is missing sections: {sorted(missing)}")
+    return payload
+
+
+def manifest_model_metadata(model_id: str) -> dict[str, Any]:
+    """Return the versioned metadata snapshot for one curated model."""
+    models = load_evidence_manifest()["models"]
+    try:
+        return dict(models[model_id])
+    except KeyError as exc:
+        raise ValueError(f"Evidence manifest has no metadata for {model_id!r}") from exc
+
+
+def manifest_rows(section: str) -> list[dict[str, Any]]:
+    """Return normalized rows and attach a stable JSON-pointer source."""
+    rows = []
+    for index, source_row in enumerate(load_evidence_manifest()[section]):
+        row = dict(source_row)
+        row["source"] = f"{repo_path(EVIDENCE_PATH)}#/{section}/{index}"
+        rows.append(row)
+    return rows
+
+
 def short_opponent(name: str) -> str:
     """Normalize verbose bc_model labels to stable report names."""
     match = re.search(r"bc_model\(([^,]+)", name)
@@ -564,6 +771,8 @@ def matrix_rows(source: str, *, model_id: str, label: str) -> list[dict[str, Any
                 "benchmark": payload.get("benchmark"),
                 "engine": payload.get("engine"),
                 "suite": suite.get("name"),
+                "seed_range_start": suite.get("range_start"),
+                "seat_fair": True,
                 "opponent": short_opponent(row.get("opponent") or stats.get("agent_b_name", "")),
                 "avg_diff": stats.get("avg_point_diff_agent_a_minus_agent_b"),
                 "wins_model": stats.get("wins_agent_a"),
@@ -583,13 +792,19 @@ def h2h_rows(source: str, *, model_id: str, label: str, opponent: str) -> list[d
     if "rows" in payload:
         return matrix_rows(source, model_id=model_id, label=label)
     stats = payload["stats"]
+    seed_suite = payload.get("seed_suite", {})
+    suite_name = seed_suite.get("name")
+    if not suite_name:
+        suite_name = "holdout" if seed_suite.get("range_start") == 1_000_000 else "standard"
     return [
         {
             "model_id": model_id,
             "label": label,
             "benchmark": payload.get("benchmark"),
             "engine": payload.get("engine"),
-            "suite": payload.get("seed_suite", {}).get("name") or "standard",
+            "suite": suite_name,
+            "seed_range_start": seed_suite.get("range_start"),
+            "seat_fair": True,
             "opponent": opponent,
             "avg_diff": stats.get("avg_point_diff_agent_a_minus_agent_b"),
             "wins_model": stats.get("wins_agent_a"),
@@ -602,8 +817,8 @@ def h2h_rows(source: str, *, model_id: str, label: str, opponent: str) -> list[d
     ]
 
 
-def decision_quality_rows() -> list[dict[str, Any]]:
-    """Return curated decision-quality rows."""
+def _decision_quality_rows_from_local_sources() -> list[dict[str, Any]]:
+    """Read decision-quality rows from local raw artifacts for a snapshot refresh."""
     sources = [
         (
             "best_a2c_v3",
@@ -648,6 +863,8 @@ def decision_quality_rows() -> list[dict[str, Any]]:
                 "benchmark": payload.get("benchmark"),
                 "engine": payload.get("engine"),
                 "suite": "seat_fair",
+                "seed_range_start": None,
+                "seat_fair": True,
                 "opponent": "heuristic_v1",
                 "avg_diff": match.get("avg_point_diff_agent_a_minus_agent_b"),
                 "trump_waste_rate": quality.get("trump_waste_rate"),
@@ -661,11 +878,67 @@ def decision_quality_rows() -> list[dict[str, Any]]:
     return rows
 
 
+_PROMOTED_GUARD_BY_MODEL = {
+    "best_a2c": True,
+    "best_a2c_v3": True,
+    "best_a2c_v4": True,
+    "best_a2c_v5": True,
+    "best_a2c_v6": True,
+    "best_a2c_v7": True,
+    "best_a2c_v8": True,
+    "best_a2c_v9": True,
+    "best_a2c_v10": True,
+    "best_a2c_v11": False,
+    "best_a2c_v11_guard_on": True,
+    "best_a2c_v12": False,
+    "best_a2c_v13": False,
+}
+
+
+def _runtime_fields(row: dict[str, Any]) -> tuple[str, bool]:
+    """Describe the evaluated inference stack, including post-policy wrappers."""
+    if "PIMC 16x8" in str(row.get("label", "")):
+        return "bc_model_pimc_belief_16x8", False
+    model_id = str(row["model_id"])
+    return "bc_model (direct policy)", _PROMOTED_GUARD_BY_MODEL[model_id]
+
+
+def _snapshot_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Prepare locally extracted rows for the compact committed snapshot."""
+    snapshot = []
+    for source_row in rows:
+        row = dict(source_row)
+        row["raw_source"] = row.pop("source")
+        row["wrapper"], row["guard"] = _runtime_fields(row)
+        snapshot.append(row)
+    return snapshot
+
+
+def _snapshot_model_metadata(meta: dict[str, Any]) -> dict[str, Any]:
+    """Keep only report-relevant metadata, excluding large training histories."""
+    keys = (
+        "label",
+        "format",
+        "encoder_version",
+        "feature_dim",
+        "seed",
+        "init",
+        "opponent_mix",
+        "bc_anchor_path",
+        "bc_anchor_beta",
+        "inference_overkill_guard",
+    )
+    snapshot = {key: meta.get(key) for key in keys}
+    train = meta.get("train") or {}
+    snapshot["train"] = {"num_games": train.get("num_games")} if train.get("num_games") is not None else {}
+    return snapshot
+
+
 def model_rows() -> list[dict[str, Any]]:
     """Build one summary row per significant model."""
     rows = []
     for spec in MODEL_SPECS:
-        meta = load_npz_metadata(spec.path)
+        meta = manifest_model_metadata(spec.model_id)
         train = meta.get("train") or {}
         rows.append(
             {
@@ -687,8 +960,10 @@ def model_rows() -> list[dict[str, Any]]:
                 "bc_anchor": meta.get("bc_anchor_path", ""),
                 "bc_anchor_beta": meta.get("bc_anchor_beta", ""),
                 "guard": meta.get("inference_overkill_guard", ""),
-                "progress_big_holdout_vs_h1": spec.progress_score,
-                "h2h_big_holdout": spec.h2h_score,
+                "reference_vs_h1": spec.progress_score,
+                "reference_vs_h1_protocol": METRIC_PROTOCOLS[spec.model_id]["progress"],
+                "reference_h2h": spec.h2h_score,
+                "reference_h2h_protocol": METRIC_PROTOCOLS[spec.model_id]["h2h"],
                 "decision": spec.decision,
                 "notes": spec.notes,
                 "data_quality": spec.data_quality,
@@ -697,8 +972,8 @@ def model_rows() -> list[dict[str, Any]]:
     return rows
 
 
-def promotion_rows() -> list[dict[str, Any]]:
-    """Build the normalized evidence table."""
+def _promotion_rows_from_local_sources() -> list[dict[str, Any]]:
+    """Read normalized promotion rows from local raw artifacts for a snapshot refresh."""
     rows: list[dict[str, Any]] = []
     rows.extend(
         matrix_rows(
@@ -785,6 +1060,118 @@ def promotion_rows() -> list[dict[str, Any]]:
     )
     rows.extend(
         h2h_rows(
+            "data/eval_best_a2c_v7_vs_heuristic_v1_big_holdout_seedrange1000000.json",
+            model_id="best_a2c_v7",
+            label="Best A2C v7",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "data/eval_a2c_vs_value_lookahead_5M_vs_v6_big_holdout_seedrange1000000.json",
+            model_id="best_a2c_v7",
+            label="Best A2C v7",
+            opponent="best_a2c_v6",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/iter2_h256_vs_heuristic_v1_big.json",
+            model_id="best_a2c_v8",
+            label="Best A2C v8",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/iter2_h256_vs_v7_big.json",
+            model_id="best_a2c_v8",
+            label="Best A2C v8",
+            opponent="best_a2c_v7",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/superA_vs_h1_big.json",
+            model_id="best_a2c_v9",
+            label="Best A2C v9",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/superA_vs_v8_big.json",
+            model_id="best_a2c_v9",
+            label="Best A2C v9",
+            opponent="best_a2c_v8",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/definitivo_vs_h1_big.json",
+            model_id="best_a2c_v10",
+            label="Best A2C v10",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/definitivo_vs_v9_big.json",
+            model_id="best_a2c_v10",
+            label="Best A2C v10",
+            opponent="best_a2c_v9",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/v11_vs_h1_big.json",
+            model_id="best_a2c_v11",
+            label="Best A2C v11",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/v11_vs_v10_big.json",
+            model_id="best_a2c_v11",
+            label="Best A2C v11",
+            opponent="best_a2c_v10",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/v11guard_vs_v10_big.json",
+            model_id="best_a2c_v11_guard_on",
+            label="Best A2C v11 + overkill guard",
+            opponent="best_a2c_v10",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/v12_vs_h1_big.json",
+            model_id="best_a2c_v12",
+            label="Rejected A2C v12",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/v12_vs_v11_big.json",
+            model_id="best_a2c_v12",
+            label="Rejected A2C v12",
+            opponent="best_a2c_v11",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/fase3/v12_vs_trump_saver_big.json",
+            model_id="best_a2c_v12",
+            label="Rejected A2C v12",
+            opponent="heuristic_trump_saver",
+        )
+    )
+    rows.extend(
+        h2h_rows(
             "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/eval_v13_vs_v11_medium.json",
             model_id="best_a2c_v13",
             label="Best A2C v13 policy",
@@ -835,43 +1222,116 @@ def promotion_rows() -> list[dict[str, Any]]:
     return rows
 
 
+def promotion_rows() -> list[dict[str, Any]]:
+    """Return promotion evidence from the committed canonical snapshot."""
+    return manifest_rows("promotion_evidence")
+
+
+def decision_quality_rows() -> list[dict[str, Any]]:
+    """Return decision-quality evidence from the committed canonical snapshot."""
+    return manifest_rows("decision_quality")
+
+
+def refresh_evidence_manifest() -> None:
+    """Refresh the canonical snapshot from local model and benchmark artifacts.
+
+    This is deliberately opt-in because the raw inputs are large and gitignored. A
+    maintainer with the historical artifacts can refresh and review the compact JSON;
+    everyone else, including CI, can reproduce the workbook directly from that JSON.
+    """
+    raw_metadata = {spec.model_id: load_npz_metadata(spec.path) for spec in MODEL_SPECS}
+    missing_models = [model_id for model_id, metadata in raw_metadata.items() if metadata.get("_missing")]
+    if missing_models:
+        raise FileNotFoundError(f"Cannot refresh evidence; missing model files: {missing_models}")
+    models = {model_id: _snapshot_model_metadata(metadata) for model_id, metadata in raw_metadata.items()}
+    payload = {
+        "schema_version": EVIDENCE_SCHEMA_VERSION,
+        "snapshot_date": EVIDENCE_SNAPSHOT_DATE,
+        "description": (
+            "Canonical compact inputs for docs/reports/model_progress.xlsx. raw_source paths are optional "
+            "audit references; normal report builds use only this file."
+        ),
+        "models": models,
+        "promotion_evidence": _snapshot_rows(_promotion_rows_from_local_sources()),
+        "decision_quality": _snapshot_rows(_decision_quality_rows_from_local_sources()),
+    }
+    EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    EVIDENCE_PATH.write_text(json.dumps(payload, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def sources_rows() -> list[dict[str, Any]]:
     """List sources used by the report."""
-    rows = []
+    rows = [
+        {
+            "kind": "canonical_evidence",
+            "id": "model_progress.v1",
+            "path": repo_path(EVIDENCE_PATH),
+            "data_quality": "versioned_snapshot",
+            "note": "Complete build input; sufficient to regenerate the workbook in a clean clone.",
+        },
+        {
+            "kind": "stable_narrative",
+            "id": "model_chain",
+            "path": "docs/diario/05-catena-campioni.md",
+            "data_quality": "curated_narrative",
+            "note": "Historical model chain and promotion context.",
+        },
+        {
+            "kind": "stable_narrative",
+            "id": "belief_exit",
+            "path": "docs/plans/belief-expert-iteration.md",
+            "data_quality": "curated_experiment_log",
+            "note": "ExIt, belief-input, distillation, and real-history conclusions.",
+        },
+        {
+            "kind": "stable_narrative",
+            "id": "v11_v12",
+            "path": "docs/diario/14-sonda-e-dose-shift.md",
+            "data_quality": "curated_experiment_log",
+            "note": "v11 promotion, guard ablation, and v12 rejection.",
+        },
+        {
+            "kind": "stable_narrative",
+            "id": "v13",
+            "path": "docs/diario/17-stessa-forza-comportamento-migliore.md",
+            "data_quality": "curated_experiment_log",
+            "note": "v13 policy/PIMC strength gates and behavior-quality evidence.",
+        },
+    ]
     for spec in MODEL_SPECS:
         rows.append(
             {
-                "kind": "model",
+                "kind": "optional_raw_model",
                 "id": spec.model_id,
                 "path": repo_path(spec.path),
                 "data_quality": spec.data_quality,
-                "note": "metadata_json read from .npz",
+                "note": "Original metadata audit input; normalized fields are preserved in canonical_evidence.",
             }
         )
         if spec.progress_source:
             rows.append(
                 {
-                    "kind": "progress_metric",
+                    "kind": "optional_raw_metric",
                     "id": spec.model_id,
                     "path": spec.progress_source,
                     "data_quality": "exact" if spec.progress_score is not None else "not_applicable",
-                    "note": "source for Dashboard progression score",
+                    "note": "Original metric audit input; not required to build the workbook.",
                 }
             )
         if spec.h2h_source:
             rows.append(
                 {
-                    "kind": "h2h_metric",
+                    "kind": "optional_raw_metric",
                     "id": spec.model_id,
                     "path": spec.h2h_source,
                     "data_quality": "exact",
-                    "note": "source for head-to-head score",
+                    "note": "Original metric audit input; not required to build the workbook.",
                 }
             )
     for row in REJECTED_CANDIDATES:
         rows.append(
             {
-                "kind": "rejected_candidate",
+                "kind": "rejected_candidate_reference",
                 "id": row["candidate"],
                 "path": row["path"],
                 "data_quality": "manual_summary",
@@ -883,7 +1343,7 @@ def sources_rows() -> list[dict[str, Any]]:
 
 def detail_rows(spec: ModelSpec) -> list[list[Any]]:
     """Build a model detail sheet."""
-    meta = load_npz_metadata(spec.path)
+    meta = manifest_model_metadata(spec.model_id)
     train = meta.get("train") or {}
     rows: list[list[Any]] = [
         [f"Detail: {spec.model_id}"],
@@ -904,7 +1364,9 @@ def detail_rows(spec: ModelSpec) -> list[list[Any]]:
         ["BC anchor beta", meta.get("bc_anchor_beta", "")],
         ["Guard anti-overkill", meta.get("inference_overkill_guard", "")],
         ["Progress score", spec.progress_score if spec.progress_score is not None else ""],
+        ["Progress protocol", METRIC_PROTOCOLS[spec.model_id]["progress"]],
         ["H2H score", spec.h2h_score if spec.h2h_score is not None else ""],
+        ["H2H protocol", METRIC_PROTOCOLS[spec.model_id]["h2h"]],
         ["Decision", spec.decision],
         ["Notes", spec.notes],
         [],
@@ -935,43 +1397,51 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
     models = model_rows()
     promotion = promotion_rows()
     quality = decision_quality_rows()
-    # Derivato da MODEL_SPECS (fonte di verita'), NON hardcodato: la lista fissa aveva
-    # gia' causato una promozione senza riga nel grafico (v11, 2026-07-07). Un nuovo best
-    # promosso con progress_score entra nel Dashboard automaticamente.
-    progress_model_ids = {
-        spec.model_id
-        for spec in MODEL_SPECS
-        if spec.role == "official best" and spec.status == "promoted" and spec.progress_score is not None
-    }
-    progress_models = [m for m in models if m["model_id"] in progress_model_ids]
+
+    # This deliberately narrow series is the only charted comparison. It shares
+    # benchmark size, engine, opponent, seed range, and seat-fair protocol. Wrapper
+    # state is still shown per row because v8-v10 used the promoted guard while v11
+    # did not; the chart is product-stack evidence, not pure architecture progress.
+    chart_rows = []
+    for model_id in HOMOGENEOUS_CHART_MODEL_IDS:
+        candidates = [
+            row
+            for row in promotion
+            if row["model_id"] == model_id
+            and row["opponent"] == "heuristic_v1"
+            and row["benchmark"] == "big"
+            and row["engine"] == "numba"
+            and row["suite"] == "standard"
+            and row["eval_games"] == 100_000
+            and row["wrapper"] == "bc_model (direct policy)"
+        ]
+        if len(candidates) != 1:
+            raise ValueError(f"Expected one homogeneous chart row for {model_id}, found {len(candidates)}")
+        chart_rows.append(candidates[0])
 
     dashboard: list[list[Any]] = [
         ["Briscola AI - Model Progress Report"],
-        ["Curated report for significant models only. Generated by scripts/build_model_report.py."],
+        ["Curated report for significant models only. Canonical input: docs/reports/evidence/model_progress.v1.json."],
         [],
-        ["Progression curve data"],
+        ["Homogeneous recent comparison"],
         [
             "Model",
-            "Big holdout vs heuristic_v1",
-            "Training games",
-            "H2H big holdout vs predecessor/current best",
-            "Cumulative strength index (sum of H2H)",
+            "Avg point diff vs heuristic_v1",
+            "Evaluation games",
+            "Protocol",
+            "Wrapper",
+            "Guard",
         ],
     ]
-    # Indice di forza CUMULATO: somma dei margini head-to-head generazione su generazione.
-    # E' il metro onesto della progressione: il punteggio vs heuristic_v1 (metro fisso ma
-    # DEBOLE) puo' scendere per non-transitivita' di stile anche quando il modello e' piu'
-    # forte (v8 batte v7 ma segna meno contro l'euristica).
-    cumulative = 0.0
-    for row in progress_models:
-        cumulative += float(row["h2h_big_holdout"] or 0.0)
+    for row in chart_rows:
         dashboard.append(
             [
                 row["model_id"],
-                row["progress_big_holdout_vs_h1"],
-                row["training_games"],
-                row["h2h_big_holdout"],
-                round(cumulative, 3),
+                row["avg_diff"],
+                row["eval_games"],
+                "big 100k; standard seeds 0..49,999; seat-fair; Numba; promoted runtime config",
+                row["wrapper"],
+                row["guard"],
             ]
         )
     dashboard.extend(
@@ -979,10 +1449,13 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v10 is the recommended v0.27.0 .npz policy: a 30M-game run vs the complete panel "
-                "(PIMC-belief teacher, value-lookahead, mirror, heuristics). It beats v9 (+0.66) and sets the "
-                "all-time heuristic_v1 record (+20.52): both meters at their maximum. "
-                "The value-lookahead runtime agent remains the stronger advanced option."
+                "best_a2c_v13 is the recommended .npz policy in current v0.35.1 (first promoted in v0.34.0) "
+                "and backs the default "
+                "bc_model_pimc_belief_16x8 stack without an overkill guard. Its medium 10k gates show no "
+                "material strength change from v11: policy-only -0.03 and PIMC 16x8 +0.14 head-to-head, "
+                "both confidence intervals crossing zero. The promotion is behavioral: low-lead trump "
+                "overkill falls from about 28-31% to 6-8%. v13 is excluded from the chart because no "
+                "homogeneous big 100k result is available."
             ],
             [],
             ["Quick comparison"],
@@ -1016,8 +1489,10 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
                 "bc_anchor",
                 "bc_anchor_beta",
                 "guard",
-                "progress_big_holdout_vs_h1",
-                "h2h_big_holdout",
+                "reference_vs_h1",
+                "reference_vs_h1_protocol",
+                "reference_h2h",
+                "reference_h2h_protocol",
                 "decision",
                 "notes",
                 "data_quality",
@@ -1031,6 +1506,10 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
                 "benchmark",
                 "engine",
                 "suite",
+                "seed_range_start",
+                "seat_fair",
+                "wrapper",
+                "guard",
                 "opponent",
                 "avg_diff",
                 "wins_model",
@@ -1038,6 +1517,7 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
                 "draws",
                 "eval_games",
                 "source",
+                "raw_source",
                 "data_quality",
             ],
         ),
@@ -1049,6 +1529,10 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
                 "benchmark",
                 "engine",
                 "suite",
+                "seed_range_start",
+                "seat_fair",
+                "wrapper",
+                "guard",
                 "opponent",
                 "avg_diff",
                 "trump_waste_rate",
@@ -1056,6 +1540,7 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
                 "trump_overkill_low_rate",
                 "eval_games",
                 "source",
+                "raw_source",
                 "data_quality",
             ],
         ),
@@ -1287,13 +1772,13 @@ def drawing_rels_xml() -> str:
 
 
 def dashboard_progress_row_count(dashboard_rows: list[list[Any]]) -> int:
-    """Count official-best progression rows in the Dashboard sheet.
+    """Count homogeneous comparison rows in the Dashboard sheet.
 
-    The chart range must grow with promoted models. The Dashboard section is deliberately simple:
-    title row, header row, then one row per official best until the next blank separator.
+    The Dashboard section is deliberately simple: title row, header row, then one
+    comparable row per selected runtime configuration until the blank separator.
     """
     for idx, row in enumerate(dashboard_rows):
-        if row[:1] == ["Progression curve data"]:
+        if row[:1] == ["Homogeneous recent comparison"]:
             data_start = idx + 2
             count = 0
             for data_row in dashboard_rows[data_start:]:
@@ -1305,12 +1790,11 @@ def dashboard_progress_row_count(dashboard_rows: list[list[Any]]) -> int:
 
 
 def chart_xml(progress_row_count: int) -> str:
-    """Chart XML for the official-best progression curve."""
+    """Chart XML for the homogeneous recent runtime-stack comparison."""
     first_row = 6
     last_row = max(first_row, first_row + progress_row_count - 1)
     cats_ref = f"Dashboard!$A${first_row}:$A${last_row}"
     vals_ref = f"Dashboard!$B${first_row}:$B${last_row}"
-    cumul_ref = f"Dashboard!$E${first_row}:$E${last_row}"
     return (
         '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
         '<c:chartSpace xmlns:c="http://schemas.openxmlformats.org/drawingml/2006/chart" '
@@ -1318,20 +1802,14 @@ def chart_xml(progress_row_count: int) -> str:
         'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
         "<c:chart>"
         '<c:title><c:tx><c:rich><a:bodyPr/><a:lstStyle/><a:p><a:r><a:rPr lang="it-IT" sz="1400" b="1"/>'
-        "<a:t>Progressione dei best ufficiali</a:t></a:r></a:p></c:rich></c:tx></c:title>"
+        "<a:t>Confronto omogeneo recente vs heuristic_v1</a:t></a:r></a:p></c:rich></c:tx></c:title>"
         "<c:plotArea><c:layout/>"
         '<c:lineChart><c:grouping val="standard"/>'
         '<c:ser><c:idx val="0"/><c:order val="0"/>'
-        "<c:tx><c:v>vs heuristic_v1 (metro fisso)</c:v></c:tx>"
+        "<c:tx><c:v>big 100k, seed 0..49,999, configurazione promossa</c:v></c:tx>"
         '<c:marker><c:symbol val="circle"/><c:size val="7"/></c:marker>'
         f"<c:cat><c:strRef><c:f>{cats_ref}</c:f></c:strRef></c:cat>"
         f"<c:val><c:numRef><c:f>{vals_ref}</c:f></c:numRef></c:val>"
-        "</c:ser>"
-        '<c:ser><c:idx val="1"/><c:order val="1"/>'
-        "<c:tx><c:v>Indice cumulato (somma H2H)</c:v></c:tx>"
-        '<c:marker><c:symbol val="diamond"/><c:size val="7"/></c:marker>'
-        f"<c:cat><c:strRef><c:f>{cats_ref}</c:f></c:strRef></c:cat>"
-        f"<c:val><c:numRef><c:f>{cumul_ref}</c:f></c:numRef></c:val>"
         "</c:ser>"
         '<c:axId val="100"/><c:axId val="101"/>'
         "</c:lineChart>"
@@ -1386,10 +1864,17 @@ def write_xlsx(sheets: dict[str, list[list[Any]]], out_path: Path) -> None:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Build the significant-model Excel report.")
     parser.add_argument("--out", default=str(DEFAULT_OUT), help="Output .xlsx path.")
+    parser.add_argument(
+        "--refresh-evidence",
+        action="store_true",
+        help="Refresh the committed evidence snapshot from local gitignored raw artifacts before building.",
+    )
     args = parser.parse_args()
     out_path = Path(args.out)
     if not out_path.is_absolute():
         out_path = ROOT / out_path
+    if args.refresh_evidence:
+        refresh_evidence_manifest()
     sheets = build_workbook_data()
     write_xlsx(sheets, out_path)
     print(f"Wrote {repo_path(out_path)}")

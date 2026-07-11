@@ -219,7 +219,7 @@ def test_meta_exposes_event_log_runtime_status(monkeypatch: pytest.MonkeyPatch, 
     assert payload2["event_log_mode"] == "debug"
     assert payload2["dataset_requires_consent"] is False
 
-    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "unsafe-full-state")
     r3 = client.get("/meta")
     assert r3.status_code == 200
     assert r3.json()["debug_state_endpoint_enabled"] is True
@@ -919,7 +919,7 @@ def test_get_game_state_without_player_index_is_forbidden_by_default() -> None:
 
 def test_get_game_state_without_player_index_returns_game_state_dto(monkeypatch: pytest.MonkeyPatch) -> None:
     """Contratto debug (opt-in): `GET /games/{id}` senza player_index ritorna `type: \"game_state\"`."""
-    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "unsafe-full-state")
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
     game_id = create.json()["game_id"]
@@ -939,9 +939,16 @@ def test_get_game_state_without_player_index_returns_game_state_dto(monkeypatch:
     assert "hand" in payload["players"][0]
     assert isinstance(payload["players"][0]["hand"], list)
 
-    observation = client.get(f"/games/{game_id}", params={"player_index": 0}).json()
-    assert observation["type"] == "observation"
-    assert "next_deck_card" not in observation
+
+def test_get_game_state_rejects_legacy_boolean_debug_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hardening: un vecchio `=1` non deve riaprire per errore le mani sul deploy pubblico."""
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
+    client = TestClient(server.app)
+    create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})
+    game_id = create.json()["game_id"]
+
+    assert client.get(f"/games/{game_id}").status_code == 403
+    assert client.get("/meta").json()["debug_state_endpoint_enabled"] is False
 
 
 def test_get_game_state_rejects_invalid_player_index() -> None:
@@ -1158,7 +1165,7 @@ def test_server_version_is_monotone_on_actions_when_ai_disabled(monkeypatch: pyt
 
     monkeypatch.setattr(server, "_maybe_ai_turn", _no_ai)
     # Il loop usa la vista full-state (debug) per seguire `current_turn`: va abilitata esplicitamente.
-    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "1")
+    monkeypatch.setenv("BRISCOLA_DEBUG_STATE_ENDPOINT", "unsafe-full-state")
 
     client = TestClient(server.app)
     create = client.post("/games", json={"num_players": 2, "player_names": ["A", "B"]})

@@ -11,14 +11,22 @@ dover leggere subito i path ottimizzati.
 - `models/`: caricamento modelli `.npz`, agente BC/A2C, catalogo server-side e provisioning.
 - `endgame/`: solver esatto del finale 2-player a mazzo vuoto; `solver.py` e' l'oracolo didattico
   su dominio canonico, `fast_solver.py` e' il solver completo numerico/Python, `numba_solver.py` e'
-  il choose-only JIT per runtime caldo e futuri loop di training.
+  il choose-only JIT per training, valutazioni e benchmark offline.
 - `encoding/`: spazio azioni e encoder observation -> feature/mask per i modelli.
 - `training/`: componenti di training condivisi (curriculum, reward shaping, opponent mix, regolarizzazioni).
 - `evaluation/`: valutazione offline, matrici benchmark e metriche di qualita' decisionale.
 - `fast/`: motore 2-player mutabile in Python/NumPy per rollout veloci.
-- `numba/`: path JIT ad alto throughput. `core.py` contiene regole/euristiche numeriche,
+- `numba/`: path JIT ad alto throughput esclusivamente offline. `core.py` contiene regole/euristiche numeriche,
   `observation.py` encoder e kernel condivisi, `value_lookahead.py` il core depth-1 su stati
   numerici determinizzati e il collector A2C value-aware, `mlp.py` wrapper MLP/A2C, `types.py` DTO.
+
+## Confine del runtime web
+
+Il backend/UI di produzione e' deliberatamente **zero-Numba**: search PIMC e solver usano
+i path Python (`agents/pimc.py` e `endgame/fast_solver.py`) e il processo web non importa
+`numba`/`llvmlite`. Evitiamo cosi' compilazione JIT, memoria aggiuntiva e warm-up a ogni
+cold start. I kernel in `ai/numba/` restano fondamentali per self-play, training,
+evaluation e benchmark, dove il costo di compilazione viene ammortizzato su milioni di stati.
 
 ## Regola didattica
 

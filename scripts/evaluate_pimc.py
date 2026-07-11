@@ -3,7 +3,8 @@
 Valuta un prototipo PIMC sopra un modello `.npz`.
 
 Esempio:
-  python scripts/evaluate_pimc.py --model data/models/best_a2c_v10.npz --num-games 40 --determinizations 8
+  python scripts/evaluate_pimc.py --model data/models/best_a2c_v13.npz --num-games 40 --determinizations 16 \
+      --max-unknown-cards 8
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta PIMC(model) con engine dominio offline.")
     parser.add_argument(
         "--model",
-        default="data/models/best_a2c_v10.npz",
+        default="data/models/best_a2c_v13.npz",
         help="Path del modello `.npz` usato come fallback/rollout e opponent puro.",
     )
     parser.add_argument("--num-games", type=int, default=40, help="Numero partite seat-fair. Default: 40.")
@@ -33,14 +34,14 @@ def main() -> int:
     parser.add_argument(
         "--determinizations",
         type=int,
-        default=8,
-        help="Determinizzazioni per decisione PIMC. Default: 8.",
+        default=16,
+        help="Determinizzazioni per decisione PIMC. Default: 16 (configurazione agile corrente).",
     )
     parser.add_argument(
         "--max-unknown-cards",
         type=int,
-        default=10,
-        help="Soglia carte vive ignote oltre cui PIMC delega al modello puro. Default: 10.",
+        default=8,
+        help="Soglia carte vive ignote oltre cui PIMC delega al modello puro. Default: 8.",
     )
     parser.add_argument(
         "--disable-endgame-solver",

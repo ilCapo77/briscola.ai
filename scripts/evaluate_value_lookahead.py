@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-Valuta V-lookahead depth-1 contro `v6 + solver`.
+Valuta V-lookahead depth-1 contro la stessa policy con il solo solver finale.
 
-Questo e' lo Stage 1 dell'ipotesi V-lookahead: dopo aver validato offline che `V`
-ordina le carte in modo simile a PIMC, misuriamo se usarlo a runtime produce forza reale
-nel confronto seat-fair contro la baseline deployata `bc_model_hybrid_endgame`.
+Questo harness storico dell'ipotesi V-lookahead misura, in modo seat-fair, quanto la
+lookahead aggiunge rispetto alla policy scelta con il solo solver. Il ramo di ricerca
+value full-game e' chiuso; lo script resta utile per regressioni e confronti tra asset `V`.
 """
 
 from __future__ import annotations
@@ -30,7 +30,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Valuta ValueLookaheadAgent con engine dominio offline.")
     parser.add_argument(
         "--policy-model",
-        default="data/models/best_a2c_v10.npz",
+        default="data/models/best_a2c_v13.npz",
         help="Path modello `.npz` usato da fallback, continuazione e baseline.",
     )
     parser.add_argument("--value-model", required=True, help="Path value model `.npz`.")

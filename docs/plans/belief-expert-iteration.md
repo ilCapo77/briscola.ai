@@ -1,8 +1,26 @@
-# Piano: Belief → Determinizzazioni Pesate → Expert Iteration
+# Piano storico completato: Belief → Determinizzazioni Pesate → Expert Iteration
 
+> **Stato retrospettivo (2026-07-11): programma di ricerca concluso.** Questo documento
+> conserva ipotesi, gate e risultati nel loro ordine storico; non è una roadmap corrente.
+> Per le prossime azioni fa fede esclusivamente `PLAN.md`.
+>
 > Piano di ricerca dettagliato per la progressione del modello dopo `best_a2c_v7`.
 > Fonte: indagine approfondita del 2026-07-02 (analisi encoder/training/esperimenti falliti + letteratura).
-> `PLAN.md` resta la fonte di verità operativa: questo documento è il dettaglio dell'ipotesi.
+> `PLAN.md` resta la fonte di verità operativa: questo documento è l'archivio dell'ipotesi.
+
+## Matrice conclusiva
+
+| Fase | Stato | Decisione consolidata |
+|---|---|---|
+| 0 — sonde | Completata | Warm-start confermato; classe v3 quasi satura; headroom PIMC di circa +3.8. |
+| 1 — encoder v4 | Completata | Storia pubblica delle prese aggiunta; 369 feature e parità dominio/fast/Numba; valore netto misurato +0.27. |
+| 2 — belief | Completata | Belief valida offline; input diretto alla policy chiuso negativo; sampling PIMC pesato validato e rilasciato nel ruolo corretto. |
+| 3 — Expert Iteration | Conclusa | Distillazione BC chiusa; sparring A2C a rendimento decrescente; expert full-game depth-1 chiuso; scelto il miglioramento del runtime PIMC. |
+| 4 — nuova architettura | Chiusa senza esecuzione | Era una proposta condizionata al successo del loop ExIt; non è più il passo successivo di questo piano e va rivalutata dal piano corrente. |
+
+L'esito di prodotto del programma fu `bc_model_pimc_belief_64x10` nella v0.23.0. Le
+configurazioni di produzione sono cambiate in seguito: i riferimenti a quel candidato e
+alla sequenza delle fasi, nel corpo sotto, descrivono il momento dell'esperimento.
 
 ## 1. Perché siamo a un punto morto (diagnosi)
 
@@ -366,7 +384,7 @@ Decisione:
   riutilizzerà per eval e per eventuali auxiliary loss a peso basso).
 - Artefatti: `data/exit/iter0_models/*` (locali). Il dataset `iter0_teacher_v7_d64u8_200k.jsonl` (798MB) è stato rimosso nella pulizia del 2026-07-03: rigenerabile con `generate_pimc_teacher_dataset.py` (ricetta nei commit).
 
-### Roadmap delle iterazioni (deciso 2026-07-02, dopo l'iterazione-0)
+### Sequenza delle iterazioni (archivio della decisione del 2026-07-02)
 
 **Kernel Numba v4: COMPLETATO (2026-07-02).** Storia delle prese mantenuta in tutti i loop
 JIT (play/quality/collector/value-dataset; simulazioni determinizzate con storia dummy:
@@ -407,7 +425,7 @@ Letture:
 3. iter1 (+0.72 su v7) NON supera il campione runtime `value_lookahead(v7)`: obiettivo
    primario non raggiunto in una iterazione, come previsto dal design iterativo.
 
-Prossime leve, in ordine di rapporto valore/costo:
+Le leve allora ordinate per rapporto valore/costo erano:
 - **iterazione 1b — belief come input della policy** (40 feature in più): richiede il
   forward della belief nei kernel di rollout; è l'informazione mancante più promettente
   (l'inferenza vale nelle prime 15 prese, dove la policy gioca da sola);
@@ -511,9 +529,10 @@ mostra che paga. Non usare il risultato BC come argomento contro la capacità in
 - Stima effort: 3-4 sessioni per l'harness del loop (molti pezzi esistono già:
   teacher dataset, soft-label in `train_bc`, warm-start) + run multi-notte.
 
-## 7. Fase 4 — Architettura (dentro ExIt, non da sola)
+## 7. Fase 4 — Architettura (proposta non avviata)
 
-Quando il loop ExIt è in piedi (o al più tardi alla prima iterazione piatta per capacità):
+Questa fase non fu avviata dentro il programma: il loop ExIt si fermò sui gate precedenti.
+Il disegno conservato per archivio era:
 
 - MLP più profonda (2-3 hidden, 256-512) con **embedding di carta** condivisi (40×d) e
   aggregazione delle feature per-carta, opzionalmente encoder della storia (stile DouZero:
@@ -561,7 +580,10 @@ Quando il loop ExIt è in piedi (o al più tardi alla prima iterazione piatta pe
 - J. Cotarelo et al. — *Perfect Information Monte Carlo with Postponing Reasoning*
   (EPIMC, arXiv:2408.02380) — mitigazione strategy fusion.
 
-## 11. Sequenza operativa consigliata
+## 11. Sequenza operativa originale (archivio)
+
+La lista seguente era il piano ex ante. Gli esiti nella matrice conclusiva la sostituiscono;
+non va usata come coda di lavoro corrente.
 
 1. Fase 0 (a+b+c in parallelo, notti CPU) → fissa target e priorità.
 2. Fase 1 encoder v4 → gate 4.3.
@@ -570,5 +592,6 @@ Quando il loop ExIt è in piedi (o al più tardi alla prima iterazione piatta pe
 4. Fase 3 ExIt → l'obiettivo primario.
 5. Fase 4 architettura dentro ExIt, solo se/quando il loop satura per capacità.
 
-Ogni promozione segue i criteri standard di PLAN.md (seat-fair con CI su coppie, holdout non
-peggiore, decision-quality, report modelli).
+Le promozioni del programma hanno seguito i criteri standard (seat-fair con CI su coppie,
+holdout non peggiore, decision-quality, report modelli). Per i criteri e le azioni correnti
+fa fede `PLAN.md`.

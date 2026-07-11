@@ -21,10 +21,12 @@ Obiettivo: arrivare a un’IA (rete neurale) che impari a giocare in modo riprod
 - Interfaccia web con aggiornamenti in tempo reale via WebSocket.
 - IA selezionabile, server‑driven (il backend avanza la partita quando tocca all’IA):
   - baseline: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`;
-  - ibridi endgame: `hybrid_endgame`, `hybrid_endgame_best_a2c` (euristica/modello + solver esatto nel finale);
-  - modelli locali `bc_model`: file `.npz` scelto dalla UI da un catalogo server‑side (no path arbitrari dal browser).
-- Encoder osservazione **v1 / v2 / v3** (vedi sotto) e fast path numerico Python/Numba per training ed evaluation veloci.
-- Pipeline dati completa: event log SQLite → export JSONL → self‑play → valutazione offline → training BC/RL.
+  - ibridi endgame e search PIMC/value-lookahead, incluso il default agile `bc_model_pimc_belief_16x8`;
+  - policy `.npz` scelta dalla UI da un catalogo server‑side (nessun path arbitrario dal browser).
+- Encoder osservazione **v1 / v2 / v3 / v4** (vedi sotto) e fast path numerico Python/Numba per training ed
+  evaluation veloci.
+- Pipeline dati completa: event log configurabile SQLite/Postgres → export JSONL → self‑play → valutazione offline →
+  training BC/RL.
 
 Nota didattica:
 - la UI è pensata e testata soprattutto in **2 giocatori** (modalità principale);
@@ -67,8 +69,8 @@ L’idea è costruire una pipeline ML “dal basso”, in modo verificabile:
 
 1. **Dominio testabile**: regole e transizioni pure in `domain/` + test su invarianti e casi limite.
 2. **Backend/UI**: FastAPI + WS per far giocare umani e rendere osservabile lo stato.
-3. **Raccolta dati**: event log SQLite (append‑only).
-4. **Export dataset**: SQLite → JSONL con schema versionato.
+3. **Raccolta dati**: event log append‑only configurabile su SQLite o Postgres.
+4. **Export dataset**: event log → JSONL con schema versionato.
 5. **Self‑play**: generazione rapida di partite dal dominio.
 6. **Valutazione**: match offline riproducibili (win‑rate/punti medi).
 7. **Training**: imitation/RL quando contratti e pipeline sono stabili.
@@ -90,7 +92,7 @@ processo, errori inclusi, è nel [diario di bordo](https://ai.briscola.dev/diari
 - `src/briscola_ai/ai/`
   - `agents/` – baseline, ibridi endgame, factory e catalogo agenti
   - `endgame/` – solver esatto del finale 2‑player
-  - `encoding/` – encoder v1/v2/v3 e spazio azioni
+  - `encoding/` – encoder v1/v2/v3/v4 e spazio azioni
   - `models/` – agente modello `.npz`, catalogo per la UI e provisioning modello
   - `fast/` – motore "fast" 2‑player (interi/array NumPy)
   - `numba/` – kernel JIT Numba (vedi nota sotto)
@@ -99,7 +101,8 @@ processo, errori inclusi, è nel [diario di bordo](https://ai.briscola.dev/diari
 - `tests/` – unit + integrazione API/WS (pytest)
 - `scripts/` – simulazione, self‑play, export, training, evaluation, benchmark
 - `docs/reports/model_progress.xlsx` – report Excel curato dei modelli significativi e delle milestone di promozione
-- `PLAN.md` – stato corrente e prossime azioni (fonte di verità). `data/` e `benchmarks/` sono artefatti locali (gitignored).
+- `PLAN.md` – stato corrente e prossime azioni (fonte di verità). Dataset/benchmark sono locali e gitignored; fanno
+  eccezione i piccoli asset `.npz` di runtime esplicitamente tracciati in `data/models/`.
 
 ### I tre motori dello stesso gioco (dominio · fast · numba)
 
@@ -131,7 +134,7 @@ Architettura ibrida HTTP + WebSocket.
 | `GET` | `/api/ai/agents` | Catalogo agenti IA disponibili per la UI |
 | `GET` | `/api/ai/models` | Catalogo modelli `.npz` selezionabili |
 | `POST` | `/api/games` | Crea una nuova partita |
-| `GET` | `/api/games/{id}` | Stato completo (DTO `type: "game_state"`, debug/spettatori, include mani e prossima carta mazzo) |
+| `GET` | `/api/games/{id}` | Stato completo di debug; `403` di default, richiede l'opt-in esplicito descritto sotto |
 | `GET` | `/api/games/{id}?player_index={i}` | Vista del giocatore `i` (`type: "observation"`) |
 | `POST` | `/api/games/{id}/actions` | Il giocatore gioca una carta |
 | `GET` | `/api/games/{id}/result` | Risultato finale |
@@ -139,8 +142,9 @@ Architettura ibrida HTTP + WebSocket.
 ### Endpoint Diagnostici
 
 `GET /version` è pensato per controllare rapidamente un deploy cloud senza aprire la UI. Espone almeno:
-`code_version`, `rules_version`, directory modelli, modello consigliato e presenza degli asset (`recommended_model_present`,
-`value_lookahead_model_present`). Quando l'event log è configurato include anche `event_log_available`,
+`code_version`, `rules_version`, directory modelli, modello consigliato e presenza degli asset
+(`recommended_model_present`, `value_lookahead_model_present`, `pimc_belief_model_present`). Quando l'event log è
+configurato include anche `event_log_available`,
 `event_log_healthy`, `event_log_backend`, `event_log_database_name` e `event_log_database_host`, così puoi verificare
 che il processo live stia usando il Postgres/Neon atteso.
 
@@ -149,9 +153,11 @@ che il processo live stia usando il Postgres/Neon atteso.
 `event_log_mode=dataset`, `event_log_available=true`, `event_log_healthy=true`, `event_log_backend=postgres` e host/nome
 DB coerenti col pannello Neon.
 
-`GET /api/games/{id}` senza `player_index` è volutamente un payload di debug/spectator: mostra tutto lo stato della
-partita, incluse le mani complete e `next_deck_card`. Per la UI fair, per gli agenti e per il WebSocket player-facing
-usa invece sempre `GET /api/games/{id}?player_index={i}` o gli snapshot `observation`, che espongono solo
+`GET /api/games/{id}` senza `player_index` mostra le mani complete e `next_deck_card`, quindi è **disabilitato per
+default** e risponde `403`. Può essere abilitato solo per debug/spectator controllato con
+`BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`; i vecchi valori booleani come `1` sono rifiutati per evitare
+attivazioni accidentali e la variabile non va impostata nella produzione pubblica. La UI, gli agenti e il WebSocket
+player-facing usano sempre `GET /api/games/{id}?player_index={i}` o snapshot `observation`, che contengono soltanto
 l'informazione lecita del giocatore.
 
 ### WebSocket (tempo reale)
@@ -224,31 +230,45 @@ Lo stesso stato lecito può essere codificato a livelli crescenti di “memoria/
 - **v1** (`feature_dim=248`): vista istantanea (mano, tavolo, briscola, scalari di stato).
 - **v2** (`288`): v1 + `seen_cards_onehot[40]` → card counting lecito (storia pubblica).
 - **v3** (`310`): v2 + 22 feature **strategiche aggregate**, leggibili: briscole/carichi ignoti, assi/tre usciti per seme, fase partita (`deck_size`, carte in mano, endgame flag), e info sulla presa corrente. Usa `out_of_play_cards_onehot` per distinguere “visto” da “fuori gioco”.
-- **v4** (`369`): v3 + 59 feature di **memoria delle prese** (`trick_history`): aggregati sul comportamento avversario (semi giocati, tagli, risposte, uscite con briscola/carichi) + dettaglio delle ultime 4 prese. È l'encoder di `best_a2c_v8`; il suo contributo misurato è +0.27 punti/partita a parità di tutto (CI +0.12..+0.42).
-- **v4+belief** (`409`, solo policy sperimentali): v4 + 40 probabilità della belief network embedded. Misurato NEGATIVO come input della policy (−0.56: informazione ridondante); la belief vive in produzione dentro la search (`bc_model_pimc_belief_64x10`).
+- **v4** (`369`): v3 + 59 feature di **memoria delle prese** (`trick_history`): aggregati sul comportamento avversario
+  (semi giocati, tagli, risposte, uscite con briscola/carichi) + dettaglio delle ultime 4 prese. È l'encoder della linea
+  promossa da v8 fino all'attuale `best_a2c_v13`; quando fu introdotto, il suo contributo isolato fu +0.27
+  punti/partita (CI +0.12..+0.42).
+- **v4+belief** (`409`, solo policy sperimentali): v4 + 40 probabilità della belief network embedded. Come input
+  diretto della policy è risultato negativo (−0.56: informazione ridondante); la belief resta invece utile per pesare
+  le determinizzazioni della search del default `bc_model_pimc_belief_16x8` e della variante massima 64×10.
 
-L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast** (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, in fallback, dalla `feature_dim` (248/288/310/369).
+L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast**
+(Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il
+backend sceglie l’encoder dai metadati del modello (`encoder_version`) o, per i vecchi artefatti, dalla `feature_dim`
+(248/288/310/369; 409 identifica una policy sperimentale v4+belief con i relativi pesi embedded).
 
 ### Agenti disponibili
 
-- `random` – carta casuale (baseline “zero”).
-- `greedy_points` – gioca la carta con più punti in mano (spiegabile, spesso sub‑ottimale).
-- `heuristic_v1` – euristica 2‑player: prende “a basso costo” quando conviene, scarta in modo economico altrimenti.
-- `heuristic_v2` – come v1 ma usa la storia pubblica (`seen_cards_onehot`) per gestire meglio le briscole (buon teacher per BC).
-- `hybrid_endgame` – `heuristic_v2` nel mid‑game + **solver esatto** a mazzo vuoto.
-- `hybrid_endgame_best_a2c` – modello `best_a2c` nel mid‑game + solver nel finale.
-- `bc_model` – modello locale `.npz` (BC/PG/A2C), encoder dedotto dai metadati.
-- `bc_model_hybrid_endgame` – modello locale `.npz` scelto dalla UI + **solver esatto** nel finale.
-- `bc_model_value_lookahead_8x8` – modello locale `.npz` scelto dalla UI + solver finale + lookahead depth‑1
-  guidata dal value model `value_v0_h128_clean50k_seed20260701.npz` quando restano al massimo 8 carte vive ignote.
-- `bc_model_pimc_16x8` – modello locale `.npz` scelto dalla UI + PIMC 16×8 nel semi‑finale + solver esatto nel finale.
-- `bc_model_pimc_belief_64x10` – **l'avversario più forte**: PIMC con 64 determinizzazioni **pesate dalla belief network**
-  (stima della mano avversaria dedotta dal comportamento) nella finestra delle ultime 10 carte ignote + solver finale.
-  +3.66 punti/partita su v8+solver (CI +3.32..+4.00 su 4k). Richiede `belief_v0_h128_50k_seed20260702.npz` nella directory modelli.
+Il catalogo della UI espone:
+
+- `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2` – baseline dal caso puro a euristiche leggibili;
+- `hybrid_endgame` – `heuristic_v2` nel mid-game + **solver esatto** a mazzo vuoto;
+- `hybrid_endgame_best_a2c` – alias di compatibilità che richiede il file locale legacy `best_a2c.npz`;
+- `bc_model` – policy `.npz` scelta dal catalogo, con encoder dedotto e validato dai metadati;
+- `bc_model_hybrid_endgame` – policy scelta + solver esatto nel finale;
+- `bc_model_value_lookahead_8x8` – policy scelta + solver + lookahead depth-1 guidata dal value model interno;
+- `bc_model_pimc_16x8` – policy scelta + PIMC uniforme 16×8 + solver;
+- `bc_model_pimc_belief_16x8` – **default consigliato**: PIMC con 16 determinizzazioni pesate dalla belief network
+  nella finestra delle ultime 8 carte ignote + solver; nel gate su v10 conserva l'87% del vantaggio della search a
+  circa un sesto del costo della configurazione massima;
+- `bc_model_pimc_belief_64x10` – variante **massima** con 64 determinizzazioni e finestra 10: è la più forte nei
+  benchmark storici a parità di policy, ma è sensibilmente più costosa, resta una scelta avanzata e non è stata
+  nuovamente confrontata con 16×8 sulla policy v13.
+
+Factory e strumenti offline supportano inoltre nomi diagnostici non mostrati nella UI: `heuristic_trump_saver`
+(sonda di exploitability), l'alias locale `best_a2c` e `bc_model_pimc_belief_16x10` (ablation eval-only della
+finestra). Gli agenti belief richiedono `belief_v0_h128_50k_seed20260702.npz`; il value-lookahead richiede
+`value_v0_h128_clean50k_seed20260701.npz`. Sono asset interni e non policy selezionabili nel catalogo modelli.
 
 Il **solver endgame** calcola la mossa ottima esatta con minimax a mazzo vuoto. `ai/endgame/solver.py` resta
 l'oracolo didattico sul dominio canonico; `ai/endgame/fast_solver.py` è il solver completo numerico/Python;
-`ai/endgame/numba_solver.py` è il path choose-only JIT usato nel loop caldo e riusabile dai futuri training Numba.
+`ai/endgame/numba_solver.py` è il path choose-only JIT per loop offline ad alto throughput e training Numba.
 Per la V-lookahead esiste anche `ai/numba/value_lookahead.py`: è un kernel depth‑1 da array numerici per training ed
 evaluation su stati già determinizzati. Non sostituisce il runtime UI anti-cheat, che continua a partire da
 `PlayerObservation` e a determinizzare esplicitamente l'information set.
@@ -256,15 +276,21 @@ L’agente ibrido lo usa in modo **anti‑cheat** ricostruendo lo stato di final
 
 ### Raccolta dati ed export
 
-Avviando `briscola-server` viene scritto un event log su `./data/briscola_events.sqlite3` (gitignored). Path/modalità configurabili via CLI (`--event-db`, `--event-log-mode`) o env (`BRISCOLA_EVENT_DB_PATH`, `BRISCOLA_EVENT_LOG_MODE`). Per ogni partita si salvano `seed`, `code_version`, `rules_version`. In cloud multi‑replica l'SQLite locale è per‑replica ed effimero: imposta `DATABASE_URL` per usare un event log **Postgres** (Neon) persistente e condiviso (`PostgresEventLog`, stesso schema `games`/`events`).
+L'event log viene inizializzato **solo quando è configurato**. Il comando `briscola-server` configura per comodità
+SQLite su `./data/briscola_events.sqlite3` (disabilitabile con `--event-db ''`); avviando invece l'app ASGI
+direttamente servono `BRISCOLA_EVENT_DB_PATH` oppure `DATABASE_URL`/`BRISCOLA_DATABASE_URL`. Postgres ha precedenza
+su SQLite ed è il backend corretto in cloud multi-replica, dove un file locale sarebbe effimero e per-replica.
+Entrambi implementano lo stesso schema append-only `games`/`events` e registrano, tra gli altri, `seed`,
+`code_version` e `rules_version`.
 
-Due modalità di logging:
+Tre modalità di logging (`BRISCOLA_EVENT_LOG_MODE` o `--event-log-mode`):
 - `debug` (default): completa, utile per troubleshooting;
 - `dataset`: pensata per raccogliere partite **umane** tenendo il DB piccolo — salva eventi self-contained
   `human_action` e `ai_action` (observation → action → reward/done → next_observation) + marker `game_finished`,
   **non** salva `player_names` (privacy), usa un `client_id` pseudonimo per split per‑giocatore, ed esige il
   **consenso** (checkbox UI; il backend rifiuta `POST /api/games` senza consenso). `ai_action` include una traccia
-  minimale `decision_trace` per distinguere fallback/solver/search PIMC senza salvare payload realtime.
+  minimale `decision_trace` per distinguere fallback/solver/search PIMC senza salvare payload realtime;
+- `off`: non registra eventi anche se un backend DB è configurato.
 
 Export in JSONL (schema v1, pensato per il 2‑player):
 
@@ -292,8 +318,8 @@ Audit aggregato delle partite per versione/agente/modello, utile per capire se l
 log contiene anche eventi IA auditabili:
 
 ```bash
-DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.16.0 --show-games
-DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_16x8 --json
+DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.35.1 --show-games
+DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_belief_16x8 --json
 ```
 
 Export dettagliato delle singole mosse IA/PIMC auditabili, con `decision_trace`, observation lecita e
@@ -301,7 +327,7 @@ Export dettagliato delle singole mosse IA/PIMC auditabili, con `decision_trace`,
 
 ```bash
 DATABASE_URL=... python scripts/export_ai_actions.py \
-  --ai-agent bc_model_pimc_16x8 \
+  --ai-agent bc_model_pimc_belief_16x8 \
   --out ./data/prod_pimc_ai_actions.jsonl
 ```
 
@@ -311,11 +337,15 @@ Export unico action-by-action per audit di campo (mosse umane + IA nello stesso 
 ```bash
 DATABASE_URL=... python scripts/export_live_actions.py \
   --ai-agent bc_model_pimc_belief_16x8 \
+  --ai-model-id best_a2c_v13.npz \
   --exclude-client-id loadtest-bot \
-  --out ./data/prod_live_actions.jsonl
+  --out ./data/prod_live_actions_v13.jsonl
 ```
 
-**Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la raccolta dati persistente, `DATABASE_URL` (event log Postgres). Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`. Sito live: <https://ai.briscola.dev>.
+**Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la
+raccolta dati persistente, `DATABASE_URL` (event log Postgres). Sul sito live entrambi sono configurati e l'event log
+usa la modalità `dataset`. Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo
+per sviluppo). L'elenco completo delle variabili d'ambiente è in `AGENTS.md`.
 
 ### Simulazioni e self‑play (headless)
 
@@ -336,7 +366,7 @@ Confronti riproducibili senza UI/server:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v8.npz --agent1 heuristic_v1
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v13.npz --agent1 heuristic_v1
 ```
 
 Concetti chiave:
@@ -350,11 +380,12 @@ Strumenti aggiuntivi:
 - `scripts/evaluate_decision_quality.py` – metriche di **stile**, non solo forza:
   - `trump_waste_rate`: gioca briscola pur avendo una risposta vincente **non‑briscola**;
   - `trump_overkill_rate`: quando vince con briscola, usa una briscola più costosa del necessario.
-- `scripts/evaluate_pimc.py` – prototipo offline PIMC/determinizzazione sopra un modello `.npz`: confronta search vs
-  modello puro, control solver (`v6 + solver endgame`) o un'altra config PIMC, con CI su score/avg diff e metriche di
-  costo per mossa di search. Serve a valutare sia un eventuale agente live sia l'uso PIMC come teacher per distillare
-  un futuro `best_a2c_v8`.
-- **Guard anti‑overkill** (`inference_overkill_guard`): post‑processing che, da secondo di mano, gioca la briscola vincente **minima**. Attivabile dai metadati del modello (i trainer lo salvano con `--inference-overkill-guard`) o, per A/B, con `BRISCOLA_BC_OVERKILL_GUARD=1`. È deterministico: verifica sempre l’impatto con le metriche.
+- `scripts/evaluate_pimc.py` – harness offline PIMC/determinizzazione sopra una policy `.npz`: confronta search,
+  modello puro, solver-control o un'altra configurazione PIMC, con CI su score/avg diff e metriche di costo per mossa.
+  È lo strumento per ablation della search; la distillazione PIMC→policy è invece un ramo storico chiuso.
+- **Guard anti‑overkill** (`inference_overkill_guard`): post-processing diagnostico che, da secondo di mano, gioca la
+  briscola vincente **minima**. È attivabile dai metadati o con `BRISCOLA_BC_OVERKILL_GUARD=1` per A/B; il default
+  v13 non lo usa, perché il comportamento è stato corretto tramite reward shaping e deve restare una scelta appresa.
 
 ### Performance (fast path Python/Numba)
 
@@ -377,98 +408,25 @@ cross-entropy su mosse-argmax è un operatore lossy (una MLP hidden=512 memorizz
 e resta al 56–57% in validation). Gli script (`generate_pimc_teacher_dataset.py`, i flag
 `--filter-disagree-with-model`, `--soft-labels`) restano utilizzabili per esperimenti, ma la strada
 consigliata per sfruttare la search è usarla come **avversario di training** (è così che sono nati
-v7 e v8) o direttamente a runtime (`bc_model_pimc_belief_64x10`). Dettagli e numeri:
+v7 e v8) o direttamente a runtime (`bc_model_pimc_belief_16x8` come default, 64×10 come massimo). Dettagli e numeri:
 `docs/plans/belief-expert-iteration.md` e `docs/diario/06-search-endgame.md`.
 
-**Value learning / V-lookahead**: alternativa alla distillazione policy PIMC. Invece di comprimere l'argmax della
-search in una policy reattiva, si allena un value model scalare `V(observation)` e si misura se ordina le carte come
-PIMC quando valuta foglie di lookahead corta.
+**Value learning / V-lookahead — ramo storico chiuso.** Questo ramo ha provato ad apprendere un valore scalare
+`V(observation)` per ordinare le carte in una lookahead corta. Il `value_v0_h128_clean50k_seed20260701.npz` promosso
+resta un asset runtime valido per l'agente selezionabile `bc_model_value_lookahead_8x8`; i successivi tentativi
+value-v1, leaf-level e pairwise non lo hanno però superato materialmente, quindi non sono la direzione attiva.
 
-- `scripts/generate_value_dataset.py`: genera JSONL `value_observation` da self-play 2-player. Per run puliti usa
-  `--label-mode v6-continuation`: gli stati sono visitati con epsilon, ma ogni label viene prodotta completando una
-  copia dello stato con `v6 + solver` senza epsilon. È più costoso del `same-game`, ma dà target on-policy più puliti.
-- `scripts/generate_value_dataset_numba.py`: genera lo stesso tipo di segnale in formato compatto `.npz`, ma usando il
-  fast path Numba e salvando direttamente feature/target. È il percorso consigliato per run lunghe: usa una policy
-  `.npz` come base, target `policy + solver`, e può limitarsi alla finestra utile della V-lookahead
-  (`--collect-mode window --max-unknown-cards 8`). Nota: su base v7 questo migliora il fit di valore, ma finora non ha
-  superato materialmente il `value_v0` runtime.
-- `scripts/generate_pimc_leaf_value_dataset.py`: converte diagnostica PIMC con `action_values` in un dataset leaf-level:
-  per ogni carta candidata campiona una determinizzazione, applica la carta, porta lo stato al decision boundary della
-  V-lookahead e salva la foglia con target pari al valore PIMC della carta. Serve per insegnare a `V` l'ordinamento
-  decisionale, non solo l'esito della continuazione base.
-- `scripts/train_value.py`: allena una MLP scalare `.npz` con target residuale consigliato
-  `(final_score_delta - current_score_delta) / 120`, loss Huber/MSE e salvataggio del best checkpoint per `val_loss`.
-  Legge sia JSONL canonico sia `.npz` compatto Numba.
-- `scripts/train_value_pairwise.py`: allena lo stesso formato di value model, ma combina regressione leaf-level e
-  ranking pairwise intra-root. Per esperimenti reali usa `--init-value-model` da `value_v0`: il training da zero su pochi
-  leaf PIMC tende a degradare.
-- `scripts/evaluate_value_ranking.py`: gate offline contro diagnostica PIMC: confronta top-1 e ranking pairwise di
-  `V` con `teacher.search_diagnostics.action_values`, includendo baseline `reference_top1` del modello v6 sulla stessa
-  popolazione.
-- `scripts/evaluate_value_lookahead.py`: Stage 1 domain-only. Misura un agente `v6 + solver + V-lookahead depth-1`
-  contro la baseline `v6 + solver`, con CI su score/avg diff e contatori di latenza per mossa lookahead. Il guard
-  anti-overkill è attivo di default sulle decisioni V-lookahead; usa `--disable-overkill-guard` solo per A/B test.
-- `scripts/evaluate_value_lookahead_pair.py`: confronto diretto tra due value model nello stesso harness
-  value-lookahead. È il gate corretto per decidere se un nuovo `V` migliora il `value_v0` già deployabile.
-- `ai/numba/value_lookahead.py`: core JIT training-first dello stesso schema depth‑1, ma su array di stato già
-  determinizzati. Serve per rollout/evaluation veloci senza passare da oggetti dominio a ogni mossa; `train_a2c.py`
-  può usarlo come opponent `bc_model_value_lookahead_8x8` nel fast rollout Numba.
-- `scripts/evaluate_value_lookahead_quality.py`: confronta decision-quality del candidato e della baseline contro
-  `heuristic_v1` sullo stesso seed.
+Il codice rimane per riproducibilità e didattica:
 
-Esempio minimo:
+- `generate_value_dataset.py` / `generate_value_dataset_numba.py` raccolgono target JSONL o `.npz` compatto;
+- `train_value.py` allena la regressione scalare e `train_value_pairwise.py` aggiunge ranking intra-root;
+- `evaluate_value_ranking.py`, `evaluate_value_lookahead.py`, `evaluate_value_lookahead_pair.py` e
+  `evaluate_value_lookahead_quality.py` costituiscono i gate offline e seat-fair;
+- `ai/numba/value_lookahead.py` conserva il core JIT training-first utilizzabile come avversario nei rollout A2C.
 
-```bash
-# Run lunga consigliata per value_v1 su base v7: dataset compatto, solo finestra lookahead/finale.
-python scripts/generate_value_dataset_numba.py \
-  --model ./data/models/best_a2c_v8.npz \
-  --epsilon 0.10 \
-  --collect-mode window \
-  --max-unknown-cards 8 \
-  --include-endgame \
-  --num-games 1000000 \
-  --batch-games 4096 \
-  --feature-dtype float16 \
-  --out ./data/value/value_v7_solver_eps10_window_1M_seed20260701.npz \
-  --seed 20260701
-
-python scripts/train_value.py \
-  --data ./data/value/value_v7_solver_eps10_window_1M_seed20260701.npz \
-  --out ./data/models/value_v1_h128_v7_window1M_seed20260701.npz \
-  --hidden-dim 128 \
-  --target residual \
-  --loss huber \
-  --epochs 30
-
-# NOTA storica: il percorso "decision-aligned" (teacher PIMC -> value pairwise) è stato
-# esplorato e chiuso con esito NEGATIVO (vedi docs/plans e report modelli): resta nei
-# commit per riferimento, non è una ricetta consigliata.
-
-# Percorso leggibile/didattico precedente, utile per smoke o debug record-per-record.
-python scripts/generate_value_dataset.py \
-  --agent bc_model_hybrid_endgame \
-  --model ./data/models/best_a2c_v8.npz \
-  --epsilon 0.10 \
-  --num-games 5000 \
-  --out ./data/value/value_dataset_didattico.jsonl \
-  --seed 42
-
-python scripts/train_value.py \
-  --data ./data/value/value_dataset_didattico.jsonl \
-  --encoder-version v4 \
-  --out ./data/models/value_didattico.npz \
-  --hidden-dim 128 \
-  --target residual \
-  --loss huber \
-  --epochs 30
-
-python scripts/evaluate_value_lookahead.py \
-  --policy-model ./data/models/best_a2c_v8.npz \
-  --value-model ./data/models/value_didattico.npz \
-  --num-games 2000 \
-  --determinizations 8 \
-  --max-unknown-cards 8
-```
+Le ricette v6-v8 e i relativi risultati sono deliberatamente storici e vivono in
+`docs/plans/belief-expert-iteration.md`, nel report modelli e in `--help` degli script; non vanno interpretati come
+comandi per rigenerare l'attuale best v13.
 
 **Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
 - **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.
@@ -478,9 +436,12 @@ Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
 - **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
-- **league**: allenare contro un campione congelato. Attenzione: l’alias agente `best_a2c` carica il file **legacy** `best_a2c.npz` (encoder v2), **non** il campione attuale v8. Per allenare contro il best v8 usa `bc_model` con path esplicito nel mix, es. `--opponent-mix bc_model:0.5,heuristic_v1:0.3,random:0.2 --opponent-model ./data/models/best_a2c_v8.npz` (sul fast rollout Numba è supportato al più un tipo di opponent‑modello per mix);
+- **league**: allenare contro un campione congelato. L'alias `best_a2c` carica il file locale **legacy**
+  `best_a2c.npz`, non il campione ufficiale corrente. Per usare v13 indica `bc_model` nel mix e passa esplicitamente
+  `--opponent-model ./data/models/best_a2c_v13.npz` (il fast rollout Numba supporta al più un tipo di
+  opponent-modello per mix);
 - **value-lookahead opponent**: nel fast rollout Numba puoi allenare contro `bc_model_value_lookahead_8x8` passando sia
-  `--opponent-model ./data/models/best_a2c_v8.npz` sia
+  `--opponent-model ./data/models/best_a2c_v13.npz` sia
   `--opponent-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz`. Questo path usa lo stato numerico
   già determinizzato del rollout come singola determinizzazione: è un avversario di training forte, non una replica
   bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
@@ -488,17 +449,34 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 **Pipeline riproducibile** (`scripts/run_experiment.py`): un comando unico fa training → evaluation matrix → manifest → aggiorna il best locale. Supporta `--rollout-engine fast --fast-rollout numba` e `--eval-engine numba` per i run lunghi. Output in `data/models/` e `benchmarks/experiments/<name>/`.
 
-> I dettagli (decine di varianti di comando e numeri di benchmark) vivono in `--help` degli script e nei commit:
-> qui teniamo solo i concetti. La cronologia degli esperimenti e i risultati promossi sono in `PLAN.md`.
+> I dettagli operativi vivono in `--help` degli script. La cronologia e i numeri completi sono nel diario,
+> in `docs/plans/` e nel report modelli; `PLAN.md` contiene soltanto stato reale e prossime decisioni.
 
 ### Baseline AI ufficiale
 
-Il modello consigliato è **`data/models/best_a2c_v10.npz`** (encoder v4 con memoria delle prese, hidden 256), il 'giocatore definitivo': 30M partite contro la rosa completa di avversari (maestro PIMC belief 25%, value-lookahead 35%, specchio 15%, euristiche+random 25%, base v9). Batte `best_a2c_v9` di +0.66 (CI95 coppie +0.51..+0.81 su 100k) e segna il record assoluto contro `heuristic_v1` (+20.52). In UI, quando disponibile, il default è `bc_model_pimc_belief_64x10` sul modello consigliato (v9), senza solver/search aggiunti. L'avversario avanzato più forte è `bc_model_pimc_belief_64x10`: search PIMC con 64 determinizzazioni pesate dalla **belief network** (stima del contenuto della mano avversaria dedotta dal comportamento) nella finestra delle ultime 10 carte ignote — batte v8+solver di +3.66 punti/partita (CI +3.32..+4.00 su 4k). Resta selezionabile anche `bc_model_value_lookahead_8x8` (+2.12, più leggero lato CPU). `best_a2c_v9.npz` resta utile per regressioni. I file `.npz` sono artefatti **locali** (gitignored): la ricetta di riproduzione del best v10 è in `PLAN.md` e in `docs/plans/belief-expert-iteration.md`.
+La policy ufficiale è **`data/models/best_a2c_v13.npz`** (encoder v4, hidden 256). È un warm-start da v11 allenato
+per 5M partite con reward shaping anti-overkill `gap`, `beta=0.3`. Non ha dimostrato un salto di forza su v11:
+policy-only `-0.03` (CI `-0.38..+0.32`) e stack PIMC belief 16×8 `+0.14` (CI `-0.20..+0.47`). Riduce però
+l'overkill di briscola sui piatti poveri da circa `28-31%` a `6-8%`. La descrizione corretta è quindi **stessa
+forza, comportamento migliore**, non “modello più forte”.
+
+Il default effettivo della UI è **`bc_model_pimc_belief_16x8` su `best_a2c_v13.npz`**, senza guard runtime. Nel gate
+di scelta della configurazione, eseguito su v10, la 16×8 conservava l'87% del vantaggio della search (+3.37
+punti/partita rispetto alla policy pura) a circa 1/6 del costo CPU della 64×10. La
+`bc_model_pimc_belief_64x10` resta selezionabile come variante massima: nei gate storici a parità di policy aveva il
+miglior risultato grezzo, ma non è stata nuovamente confrontata sulla v13 e non è il default per ragioni di capacità
+e latenza. Anche `bc_model_value_lookahead_8x8` resta selezionabile come ramo storico più leggero.
+
+Gli asset runtime necessari al sito sono **tracciati in Git**: policy v10, v11 e v13, value model e belief network.
+Gli altri `.npz` in `data/models/`, i dataset e gli artefatti in `benchmarks/experiments/` restano locali e
+gitignored. Questa distinzione è intenzionale: il repository contiene ciò che serve a riprodurre il runtime e le
+milestone ufficiali, non l'intera storia dei run.
 
 Gli agenti search richiedono asset ausiliari in `BRISCOLA_MODELS_DIR`: il value model per
-`bc_model_value_lookahead_8x8` e la belief network per `bc_model_pimc_belief_64x10`. Il catalogo
+`bc_model_value_lookahead_8x8` e la belief network per entrambe le varianti `bc_model_pimc_belief_*`. Il catalogo
 modelli UI **non** li mostra come policy selezionabili (sono asset interni, filtrati per formato).
-Il provisioning allo startup scarica policy consigliata, value e belief dalle env dedicate:
+Gli asset versionati sono già inclusi nell'immagine di deploy. Il provisioning best-effort ne verifica gli SHA e,
+se un file manca, può riscaricarlo dai Release asset configurati tramite env:
 
 ```text
 BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v13.npz
@@ -524,28 +502,38 @@ uv run python scripts/build_model_report.py
 ```
 
 Serve a tracciare solo i modelli **significativi**: best ufficiali, teacher/anchor importanti e candidati scartati
-che spiegano una decisione. La prima tab contiene una dashboard con curva di progressione dei best; le altre tab
-riportano milestone, dettagli modello, prove di promozione, decision quality, candidati scartati e fonti dati.
+che spiegano una decisione. La Dashboard traccia soltanto la serie recente confrontabile v8-v11 (big 100k, stessi
+seed e configurazione promossa); i gate medium di v13 sono mostrati separatamente, senza mescolarli nel grafico. Le
+altre tab riportano milestone, dettagli modello, prove di promozione, decision quality, candidati scartati e fonti.
+
+Il build normale legge il manifest canonico versionato
+`docs/reports/evidence/model_progress.v1.json`, quindi funziona anche senza gli artefatti storici locali. Solo quando
+si aggiornano le prove a partire dai `.npz` e benchmark originali si usa
+`uv run python scripts/build_model_report.py --refresh-evidence`, revisionando insieme manifest e foglio generato.
 
 Aggiornalo quando promuovi un nuovo best o quando un esperimento importante cambia una decisione. Non usarlo come dump
 di tutti i run: gli esperimenti locali restano in `benchmarks/experiments/` (gitignored), mentre il report conserva la
 narrazione sintetica e verificabile.
 
-Esempio di confronto testa‑a‑testa tra due modelli:
+Esempio di confronto testa-a-testa tra policy ufficiale e anchor precedente:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v8.npz \
-  --agent1 bc_model --agent1-model ./data/models/best_a2c_v7.npz
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v13.npz \
+  --agent1 bc_model --agent1-model ./data/models/best_a2c_v11.npz
 ```
 
 ## Stato e roadmap
 
-Il gioco è **online** su <https://ai.briscola.dev> (deploy su FastAPI Cloud: stato partita su Redis, realtime via pub/sub, event log Postgres opzionale). Stato corrente, invarianti da non rompere e prossime azioni: vedi **`PLAN.md`**.
+La release corrente del repository è `0.35.1`; ogni push di `master` viene distribuito automaticamente su
+<https://ai.briscola.dev> tramite FastAPI Cloud, con stato partita su Redis, realtime via pub/sub ed event log
+Postgres in modalità `dataset`. Il deploy effettivo va controllato tramite `/version`. Stato corrente, invarianti da
+non rompere e prossime azioni sono in **`PLAN.md`**.
 
 La storia del progetto — scelte, errori e svolte, raccontati in tono divulgativo — è il **diario di
-bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`), con
-approfondimenti tecnici per capitolo in `docs/diario/`.
+bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`). Il racconto arriva al
+**capitolo 17, “Stessa forza, comportamento migliore”**; gli approfondimenti tecnici, incluso
+`docs/diario/17-stessa-forza-comportamento-migliore.md`, vivono in `docs/diario/`.
 
 ## Licenza
 

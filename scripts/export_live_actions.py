@@ -11,8 +11,9 @@ Uso tipico:
 
   DATABASE_URL=... python scripts/export_live_actions.py \
     --ai-agent bc_model_pimc_belief_16x8 \
+    --ai-model-id best_a2c_v13.npz \
     --exclude-client-id loadtest-bot \
-    --out data/live_actions_v11.jsonl
+    --out data/live_actions_v13.jsonl
 
 L'export non stampa DSN e non include `client_id` nel JSONL salvo `--include-client-id`.
 """

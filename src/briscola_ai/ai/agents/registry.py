@@ -63,8 +63,9 @@ BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC = AgentSpec(
     label="Modello locale + value lookahead",
     description_it=(
         "Usa il modello `.npz` scelto dalla UI come policy base, il solver esatto a mazzo vuoto e una lookahead "
-        "depth-1 guidata da una rete di valore quando restano al massimo 8 carte vive ignote. È il nuovo "
-        "avversario avanzato più promettente: più forte del solo modello `.npz`, ma più costoso lato CPU."
+        "depth-1 guidata da una rete di valore quando restano al massimo 8 carte vive ignote. Resta una variante "
+        "storica utile per confronti e ablation: è più forte del solo modello `.npz`, ma il default corrente usa "
+        "PIMC belief 16×8."
     ),
     requires_model_id=VALUE_LOOKAHEAD_MODEL_ID,
 )
@@ -83,11 +84,11 @@ BC_MODEL_PIMC_BELIEF_64X10_SPEC = AgentSpec(
     name="bc_model_pimc_belief_64x10",
     label="Modello locale + PIMC belief (max)",
     description_it=(
-        "L'avversario più forte: usa il modello `.npz` scelto dalla UI come policy di simulazione, il solver "
+        "La variante a massima forza: usa il modello `.npz` scelto dalla UI come policy di simulazione, il solver "
         "esatto a mazzo vuoto e una search PIMC con 64 determinizzazioni PESATE dalla belief network "
         "(stima di quali carte ha in mano l'avversario, dedotta dal suo comportamento) quando restano al "
-        "massimo 10 carte vive ignote. Nei benchmark batte il modello puro di ~4 punti/partita; è il più "
-        "costoso lato CPU (~0.07s per mossa pensata)."
+        "massimo 10 carte vive ignote. Nei benchmark storici batte il modello puro di circa 4 punti/partita; "
+        "è più costosa del default 16×8 e resta selezionabile per chi privilegia la forza alla capacità server."
     ),
     requires_model_id=PIMC_BELIEF_MODEL_ID,
 )

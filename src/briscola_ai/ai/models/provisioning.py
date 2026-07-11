@@ -1,9 +1,10 @@
 """
-Provisioning del modello al deploy: scarica il modello consigliato se assente.
+Provisioning dei modelli al deploy: verifica gli asset ufficiali e li scarica se assenti.
 
-In cloud i file `.npz` non sono nel repo (`data/` è gitignored) e committare un binario da decine
-di MB nella git history è poco desiderabile. Per servire comunque il campione, all'avvio scarichiamo
-il modello da un URL (es. GitHub Release asset) impostato via env, **solo se non è già presente**.
+Gli asset ufficiali piccoli (policy consigliata, value e belief) sono tracciati nel repository per
+evitare download e compilazioni durante i frequenti cold start cloud. Il provisioning resta come
+fallback e come meccanismo di override: scarica da un URL configurato (per esempio un GitHub Release
+asset) **solo se il file richiesto non è già presente**.
 
 Principio anti-fragilità: il provisioning non deve MAI impedire l'avvio dell'app. Se l'URL non è
 impostato o il download fallisce, l'app parte lo stesso (il default agente è `random` e `/version`
@@ -25,7 +26,7 @@ DEFAULT_MODEL_ID = "best_a2c_v13.npz"
 # Id del value model usato dall'agente selezionabile `bc_model_value_lookahead_8x8`.
 VALUE_LOOKAHEAD_MODEL_ID = "value_v0_h128_clean50k_seed20260701.npz"
 
-# Id della belief network usata da `bc_model_pimc_belief_64x10` per pesare le determinizzazioni.
+# Id della belief network usata dalle varianti `bc_model_pimc_belief_*` per pesare le determinizzazioni.
 PIMC_BELIEF_MODEL_ID = "belief_v0_h128_50k_seed20260702.npz"
 
 # Timeout (s) per il download: evita che un endpoint lento/appeso blocchi lo startup dell'app.
