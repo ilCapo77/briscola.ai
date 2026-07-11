@@ -18,6 +18,10 @@
   94.208 rinomine non banali. L'ablation paired v0 su tre seed da 10k non supera il gate: flip medio `18,32% ->
   18,84%` e head-to-head paired-vs-control `-0,15` punti/partita. Il flag resta sperimentale e spento; niente run
   lunga. Metodo, numeri e interpretazione: `docs/plans/suit-augmentation-paired-v0-2026-07-11.md`.
+- La consistency loss separata supera invece lo screening a tre seed: con beta `0.1` il flip medio scende a
+  **15,64%** e la JS da `0,14124` a `0,10402` bit. È neutra contro v13 (`-0,08` punti/partita medi; tutte le CI
+  includono zero) e positiva contro i controlli brevi (`+0,27`). **GO a 50k con checkpoint, non alla promozione.**
+  Protocollo e limiti: `docs/plans/suit-consistency-v0-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -30,18 +34,15 @@
 
 ## Prossima Decisione
 
-La prima diagnostica riproducibile ha identificato una leva concreta: v13 attribuisce significato ai nomi arbitrari
-dei semi. La duplicazione paired del loss A2C non l'ha corretta e ha introdotto un piccolo costo di forza. Non basta
-quindi mostrare alla rete la stessa traiettoria rinominata: serve un obiettivo che chieda direttamente output
-coerenti, senza trattare come on-policy un'azione campionata da un'altra distribuzione. Ipotesi e criteri go/stop
-delle sette piste restano in `docs/plans/prossima-iterazione-modello.md`.
+La consistency loss ha mostrato una relazione dose-risposta senza regressione policy-only misurabile. Non ha ancora
+risolto il difetto: `15,64%` resta lontano dal target operativo `<9%`, e lo screening da 10k non dimostra stabilità
+su un training più lungo né un miglioramento del prodotto PIMC. Ipotesi e criteri delle sette piste restano in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Ablation di consistency loss sui semi.** Usare la trasformazione numerica già verificata, ma lasciare invariato
-   il loss A2C on-policy: aggiungere separatamente una cross-entropy/KL tra la policy sull'osservazione originale
-   (target con stop-gradient) e la policy sulla copia rinominata, dopo aver riallineato le 40 azioni. Prima fare un
-   test di gradiente che dimostri riduzione della divergenza su un batch congelato; poi screening breve a tre seed e
-   piccola griglia del coefficiente. Gate: calo netto di flip e JS, nessuna regressione policy-only; solo allora PIMC
-   16×8 e decision quality. Il paired A2C v0 è chiuso e non va semplicemente allungato.
+1. **Run intermedio consistency beta 0.1.** Allenare tre seed a 50k partendo da v13, con checkpoint 10k/30k/50k e
+   ricetta invariata. Ripetere sonda e policy-only a ogni checkpoint per misurare traiettoria e varianza. STOP se il
+   flip si stabilizza sopra il 12% o compare una regressione coerente; GO ai gate PIMC 16×8 e decision quality solo
+   se la simmetria continua a scendere verso `<9%` senza perdita di forza. Comando pronto nel report dell'ablation.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.

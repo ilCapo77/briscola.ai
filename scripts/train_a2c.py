@@ -81,7 +81,9 @@ from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
 from briscola_ai.ai.training.suit_augmentation import (
+    permute_action_masks,
     permute_action_vectors,
+    permute_encoded_features,
     permute_encoded_trajectory,
     sample_nonidentity_suit_permutation,
 )
@@ -716,6 +718,8 @@ class GradientStats:
     anchor_ce_sum: float
     anchor_ce_count: int
     gbv: float
+    suit_consistency_kl_sum: float = 0.0
+    suit_consistency_count: int = 0
 
 
 def _add_gradient_stats(left: GradientStats, right: GradientStats) -> GradientStats:
@@ -726,6 +730,8 @@ def _add_gradient_stats(left: GradientStats, right: GradientStats) -> GradientSt
         anchor_ce_sum=left.anchor_ce_sum + right.anchor_ce_sum,
         anchor_ce_count=left.anchor_ce_count + right.anchor_ce_count,
         gbv=left.gbv + right.gbv,
+        suit_consistency_kl_sum=left.suit_consistency_kl_sum + right.suit_consistency_kl_sum,
+        suit_consistency_count=left.suit_consistency_count + right.suit_consistency_count,
     )
 
 
@@ -946,6 +952,79 @@ def _accumulate_paired_suit_trajectory_grads(
     )
 
 
+def _accumulate_suit_consistency_grads(
+    *,
+    policy: A2CPolicy,
+    xs: np.ndarray,
+    action_masks: np.ndarray,
+    original_probs: np.ndarray,
+    encoder_version: EncoderVersion,
+    permutation: SuitPermutation,
+    beta: float,
+    gw1: np.ndarray,
+    gb1: np.ndarray,
+    gw2: np.ndarray,
+    gb2: np.ndarray,
+) -> GradientStats:
+    """
+    Aggiunge ``beta * KL(stopgrad(originale) || copia rinominata)`` al gradiente.
+
+    Il loss A2C resta confinato alla traiettoria realmente campionata. Qui l'output
+    originale è un teacher congelato per il solo update corrente; la copia riceve un
+    gradiente di coerenza, senza action id, advantage o critic. I contatori ``steps``
+    restano quindi a zero: la normalizzazione dell'A2C continua a usare i soli N step
+    on-policy e il termine ausiliario viene mediato sugli stessi N step.
+    """
+    coefficient = float(beta)
+    if coefficient <= 0.0:
+        raise ValueError("beta della suit consistency deve essere > 0")
+    if xs.ndim != 2 or action_masks.shape != (xs.shape[0], 40) or original_probs.shape != action_masks.shape:
+        raise ValueError(
+            f"Shape consistency invalide: xs={xs.shape}, masks={action_masks.shape}, probs={original_probs.shape}"
+        )
+    if xs.shape[0] == 0:
+        return GradientStats(steps=0, value_loss_sum=0.0, anchor_ce_sum=0.0, anchor_ce_count=0, gbv=0.0)
+
+    paired_xs = permute_encoded_features(xs, version=encoder_version, permutation=permutation)
+    paired_masks = permute_action_masks(action_masks, permutation=permutation)
+    target_probs = permute_action_vectors(original_probs, permutation=permutation).astype(np.float32, copy=False)
+    z1s, hs, paired_probs, _ = _forward_policy_batch(
+        policy,
+        xs=paired_xs,
+        action_masks=paired_masks,
+    )
+
+    # Gradiente della cross-entropy; con target stop-gradient coincide col gradiente
+    # della forward KL, la metrica che registriamo qui sotto.
+    dlogits = np.float32(coefficient) * (paired_probs - target_probs)
+    gw2 += (hs.T @ dlogits).astype(np.float32, copy=False)
+    gb2 += np.sum(dlogits, axis=0, dtype=np.float32)
+    dh = dlogits @ policy.w2.T
+    dz1 = dh * (z1s > 0.0)
+    gw1 += (paired_xs.T @ dz1).astype(np.float32, copy=False)
+    gb1 += np.sum(dz1, axis=0, dtype=np.float32)
+
+    epsilon = np.float32(1e-12)
+    kl_per_step = np.sum(
+        target_probs
+        * (
+            np.log(np.maximum(target_probs, epsilon))
+            - np.log(np.maximum(paired_probs.astype(np.float32, copy=False), epsilon))
+        ),
+        axis=1,
+        dtype=np.float64,
+    )
+    return GradientStats(
+        steps=0,
+        value_loss_sum=0.0,
+        anchor_ce_sum=0.0,
+        anchor_ce_count=0,
+        gbv=0.0,
+        suit_consistency_kl_sum=float(np.sum(kl_per_step, dtype=np.float64)),
+        suit_consistency_count=int(xs.shape[0]),
+    )
+
+
 def _accumulate_numba_batch_grads(
     *,
     policy: A2CPolicy,
@@ -961,6 +1040,8 @@ def _accumulate_numba_batch_grads(
     gb2: np.ndarray,
     gwv: np.ndarray,
     suit_augmentation_rng: np.random.Generator | None = None,
+    suit_consistency_rng: np.random.Generator | None = None,
+    suit_consistency_beta: float = 0.0,
     encoder_version: EncoderVersion | None = None,
 ) -> GradientStats:
     """
@@ -1023,31 +1104,47 @@ def _accumulate_numba_batch_grads(
         gb2=gb2,
         gwv=gwv,
     )
-    if suit_augmentation_rng is None:
+    if suit_augmentation_rng is None and suit_consistency_rng is None:
         return stats
     if encoder_version is None:
-        raise ValueError("encoder_version obbligatorio con suit augmentation paired")
+        raise ValueError("encoder_version obbligatorio con trasformazioni dei semi")
 
     for trajectory_slice in trajectory_slices:
-        paired_stats = _accumulate_paired_suit_trajectory_grads(
-            policy=policy,
-            xs=xs[trajectory_slice],
-            action_masks=action_masks[trajectory_slice],
-            action_ids=action_ids[trajectory_slice],
-            returns_to_go=returns_to_go[trajectory_slice],
-            encoder_version=encoder_version,
-            permutation=sample_nonidentity_suit_permutation(suit_augmentation_rng),
-            entropy_beta=entropy_beta,
-            value_coef=value_coef,
-            bc_anchor=bc_anchor,
-            bc_anchor_beta=bc_anchor_beta,
-            gw1=gw1,
-            gb1=gb1,
-            gw2=gw2,
-            gb2=gb2,
-            gwv=gwv,
-        )
-        stats = _add_gradient_stats(stats, paired_stats)
+        if suit_augmentation_rng is not None:
+            paired_stats = _accumulate_paired_suit_trajectory_grads(
+                policy=policy,
+                xs=xs[trajectory_slice],
+                action_masks=action_masks[trajectory_slice],
+                action_ids=action_ids[trajectory_slice],
+                returns_to_go=returns_to_go[trajectory_slice],
+                encoder_version=encoder_version,
+                permutation=sample_nonidentity_suit_permutation(suit_augmentation_rng),
+                entropy_beta=entropy_beta,
+                value_coef=value_coef,
+                bc_anchor=bc_anchor,
+                bc_anchor_beta=bc_anchor_beta,
+                gw1=gw1,
+                gb1=gb1,
+                gw2=gw2,
+                gb2=gb2,
+                gwv=gwv,
+            )
+            stats = _add_gradient_stats(stats, paired_stats)
+        if suit_consistency_rng is not None:
+            consistency_stats = _accumulate_suit_consistency_grads(
+                policy=policy,
+                xs=xs[trajectory_slice],
+                action_masks=action_masks[trajectory_slice],
+                original_probs=probs[trajectory_slice],
+                encoder_version=encoder_version,
+                permutation=sample_nonidentity_suit_permutation(suit_consistency_rng),
+                beta=suit_consistency_beta,
+                gw1=gw1,
+                gb1=gb1,
+                gw2=gw2,
+                gb2=gb2,
+            )
+            stats = _add_gradient_stats(stats, consistency_stats)
     return stats
 
 
@@ -1248,6 +1345,15 @@ def main() -> int:
             "con una rinomina non-identità coerente; il rollout e il costo inference non cambiano."
         ),
     )
+    parser.add_argument(
+        "--suit-consistency-beta",
+        type=float,
+        default=0.0,
+        help=(
+            "Peso (>=0) della forward-KL sui semi: l'output originale, con stop-gradient, "
+            "diventa target della copia rinominata. Non duplica il policy gradient A2C."
+        ),
+    )
     parser.add_argument("--update-every", type=int, default=20, help="Aggiorna i pesi ogni N partite (batch).")
     parser.add_argument("--log-every", type=int, default=200, help="Stampa metriche ogni N update.")
     parser.add_argument(
@@ -1296,6 +1402,10 @@ def main() -> int:
         raise ValueError("--overkill-low-lead-points-max deve essere >= 0")
     if float(args.bc_anchor_beta) < 0.0:
         raise ValueError("--bc-anchor-beta deve essere >= 0")
+    if float(args.suit_consistency_beta) < 0.0:
+        raise ValueError("--suit-consistency-beta deve essere >= 0")
+    if str(args.suit_augmentation) == "paired" and float(args.suit_consistency_beta) > 0.0:
+        raise ValueError("Provare separatamente --suit-augmentation paired e --suit-consistency-beta > 0")
     if float(args.bc_anchor_beta) > 0.0 and not str(args.bc_anchor).strip():
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
     if int(args.opponent_value_max_unknown_cards) < 0:
@@ -1341,6 +1451,8 @@ def main() -> int:
     rng_opponent = random.Random(args.seed ^ 0xC0FFEE)
     suit_augmentation = str(args.suit_augmentation)
     rng_suit_augmentation = np.random.default_rng(args.seed ^ 0x51A17A9E) if suit_augmentation == "paired" else None
+    suit_consistency_beta = float(args.suit_consistency_beta)
+    rng_suit_consistency = np.random.default_rng(args.seed ^ 0x0C05157E) if suit_consistency_beta > 0.0 else None
 
     opponent_pool: OpponentPool | None = None
     fast_numba_model_opponent: FastNumbaModelOpponent | None = None
@@ -1522,9 +1634,9 @@ def main() -> int:
     # Inizializzazione policy/critic.
     policy_belief = None
     policy_belief_path = str(args.policy_belief_model).strip()
-    if suit_augmentation == "paired" and policy_belief_path:
+    if (suit_augmentation == "paired" or suit_consistency_beta > 0.0) and policy_belief_path:
         raise ValueError(
-            "--suit-augmentation paired non supporta ancora --policy-belief-model: "
+            "Le trasformazioni dei semi non supportano ancora --policy-belief-model: "
             "manca il contratto di permutazione delle 40 probabilità belief embedded."
         )
     if policy_belief_path:
@@ -1603,6 +1715,7 @@ def main() -> int:
 
     update_every = int(args.update_every)
     metrics: list[TrainMetrics] = []
+    suit_consistency_metrics: list[dict[str, int | float]] = []
 
     # Accumulo grad (batch).
     gw1 = np.zeros_like(policy.w1)
@@ -1621,6 +1734,8 @@ def main() -> int:
     value_loss_sum = 0.0
     anchor_ce_sum = 0.0
     anchor_ce_count = 0
+    suit_consistency_kl_sum = 0.0
+    suit_consistency_count = 0
 
     num_games = int(args.num_games)
     use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba"
@@ -1730,6 +1845,26 @@ def main() -> int:
                 "loss_normalization": "mean_over_original_and_copy",
                 "rng_seed": int(args.seed ^ 0x51A17A9E),
             }
+        if suit_consistency_beta > 0.0:
+            payload["suit_consistency"] = {
+                "mode": "forward_kl_stop_gradient",
+                "beta": suit_consistency_beta,
+                "target": "original_policy_distribution",
+                "student": "nonidentity_suit_permutation",
+                "permutation_scope": "whole_trajectory",
+                "permutation_distribution": "uniform_nonidentity_23",
+                "loss_normalization": "mean_over_original_on_policy_steps",
+                "rng_seed": int(args.seed ^ 0x0C05157E),
+            }
+            if str(args.metrics_mode) == "full":
+                payload["suit_consistency_metrics"] = suit_consistency_metrics
+            else:
+                payload["suit_consistency_metrics_summary"] = {
+                    "mode": "summary",
+                    "count": len(suit_consistency_metrics),
+                    "first": suit_consistency_metrics[0] if suit_consistency_metrics else None,
+                    "last": suit_consistency_metrics[-1] if suit_consistency_metrics else None,
+                }
         if is_checkpoint:
             payload["checkpoint"] = {
                 "games": int(trained_games),
@@ -1961,13 +2096,21 @@ def main() -> int:
                             gb2=gb2,
                             gwv=gwv,
                             suit_augmentation_rng=rng_suit_augmentation,
-                            encoder_version=encoder_version if rng_suit_augmentation is not None else None,
+                            suit_consistency_rng=rng_suit_consistency,
+                            suit_consistency_beta=suit_consistency_beta,
+                            encoder_version=(
+                                encoder_version
+                                if rng_suit_augmentation is not None or rng_suit_consistency is not None
+                                else None
+                            ),
                         )
                         gbv += batch_grad_stats.gbv
                         grad_step_count += batch_grad_stats.steps
                         value_loss_sum += batch_grad_stats.value_loss_sum
                         anchor_ce_sum += batch_grad_stats.anchor_ce_sum
                         anchor_ce_count += batch_grad_stats.anchor_ce_count
+                        suit_consistency_kl_sum += batch_grad_stats.suit_consistency_kl_sum
+                        suit_consistency_count += batch_grad_stats.suit_consistency_count
                         numba_batch_offset = 0
                     assert numba_batch is not None
                     numba_traj = _numba_batch_trajectory_at(numba_batch, numba_batch_offset)
@@ -2162,11 +2305,28 @@ def main() -> int:
                     gwv=gwv,
                 )
                 grad_stats = _add_gradient_stats(grad_stats, paired_stats)
+            if rng_suit_consistency is not None:
+                consistency_stats = _accumulate_suit_consistency_grads(
+                    policy=policy,
+                    xs=numba_traj_for_backprop.xs,
+                    action_masks=numba_traj_for_backprop.action_masks,
+                    original_probs=numba_traj_for_backprop.probs,
+                    encoder_version=encoder_version,
+                    permutation=sample_nonidentity_suit_permutation(rng_suit_consistency),
+                    beta=suit_consistency_beta,
+                    gw1=gw1,
+                    gb1=gb1,
+                    gw2=gw2,
+                    gb2=gb2,
+                )
+                grad_stats = _add_gradient_stats(grad_stats, consistency_stats)
             gbv += grad_stats.gbv
             grad_step_count += grad_stats.steps
             value_loss_sum += grad_stats.value_loss_sum
             anchor_ce_sum += grad_stats.anchor_ce_sum
             anchor_ce_count += grad_stats.anchor_ce_count
+            suit_consistency_kl_sum += grad_stats.suit_consistency_kl_sum
+            suit_consistency_count += grad_stats.suit_consistency_count
         else:
             rewards = [step_rec.reward for step_rec in traj]
             returns_to_go = _compute_returns(rewards, gamma=float(args.gamma))
@@ -2246,6 +2406,22 @@ def main() -> int:
                 value_loss_sum += paired_stats.value_loss_sum
                 anchor_ce_sum += paired_stats.anchor_ce_sum
                 anchor_ce_count += paired_stats.anchor_ce_count
+            if rng_suit_consistency is not None and traj:
+                consistency_stats = _accumulate_suit_consistency_grads(
+                    policy=policy,
+                    xs=np.stack([step_rec.x for step_rec in traj]),
+                    action_masks=np.stack([step_rec.action_mask for step_rec in traj]),
+                    original_probs=np.stack([step_rec.probs for step_rec in traj]),
+                    encoder_version=encoder_version,
+                    permutation=sample_nonidentity_suit_permutation(rng_suit_consistency),
+                    beta=suit_consistency_beta,
+                    gw1=gw1,
+                    gb1=gb1,
+                    gw2=gw2,
+                    gb2=gb2,
+                )
+                suit_consistency_kl_sum += consistency_stats.suit_consistency_kl_sum
+                suit_consistency_count += consistency_stats.suit_consistency_count
 
         # Update ogni `update_every` partite.
         if game_idx % update_every == 0:
@@ -2292,6 +2468,9 @@ def main() -> int:
             avg_ent = float(np.mean(entropies)) if entropies else 0.0
             vloss = float(value_loss_sum) / float(grad_step_count) if grad_step_count > 0 else 0.0
             avg_anchor_ce = float(anchor_ce_sum) / float(anchor_ce_count) if anchor_ce_count > 0 else 0.0
+            avg_suit_consistency_kl = (
+                float(suit_consistency_kl_sum) / float(suit_consistency_count) if suit_consistency_count > 0 else 0.0
+            )
 
             row = TrainMetrics(
                 iter=t,
@@ -2304,14 +2483,23 @@ def main() -> int:
                 avg_anchor_ce=avg_anchor_ce,
             )
             metrics.append(row)
+            if suit_consistency_beta > 0.0:
+                suit_consistency_metrics.append(
+                    {
+                        "iter": t,
+                        "games": game_idx,
+                        "avg_kl": avg_suit_consistency_kl,
+                    }
+                )
 
             if t % int(args.log_every) == 0 or game_idx == update_every:
                 anchor_hint = "" if float(args.bc_anchor_beta) <= 0.0 else f" | anchor_ce {row.avg_anchor_ce:.3f}"
+                consistency_hint = "" if suit_consistency_beta <= 0.0 else f" | suit_kl {avg_suit_consistency_kl:.4f}"
                 print(
                     f"iter {t:04d} | games {game_idx:06d} | "
                     f"avg_return {row.avg_return:+.3f} | win {row.win_rate:.3f} draw {row.draw_rate:.3f} | "
                     f"entropy {row.avg_entropy:.3f} | vloss {row.value_loss:.4f}"
-                    f"{anchor_hint}"
+                    f"{anchor_hint}{consistency_hint}"
                 )
 
             if game_idx in checkpoint_games:
@@ -2325,6 +2513,8 @@ def main() -> int:
             value_loss_sum = 0.0
             anchor_ce_sum = 0.0
             anchor_ce_count = 0
+            suit_consistency_kl_sum = 0.0
+            suit_consistency_count = 0
 
     _save_model(out_path, trained_games=num_games, is_checkpoint=False)
     return 0

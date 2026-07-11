@@ -450,6 +450,10 @@ Tecniche utili (tutte come flag, vedi `--help`):
   rinomina coerente dei semi e media il loss sui `2N` step. Il default è `off`; lo screening v0 su v13 non ha ridotto
   l'asimmetria e non giustifica un run lungo. Contratto, risultato e limiti sono in
   `docs/plans/suit-augmentation-paired-v0-2026-07-11.md`;
+- **suit consistency sperimentale** (`--suit-consistency-beta`): lascia l'A2C on-policy sull'esperienza reale e
+  aggiunge una forward-KL dalla distribuzione originale, fermata come target, alla copia rinominata. Nello screening
+  v0 beta `0.1` riduce il flip medio `18,32% -> 15,64%` senza perdita policy-only misurabile; non è ancora un modello
+  promosso. Protocollo: `docs/plans/suit-consistency-v0-2026-07-11.md`;
 - **league**: allenare contro un campione congelato. L'alias `best_a2c` carica il file locale **legacy**
   `best_a2c.npz`, non il campione ufficiale corrente. Per usare v13 indica `bc_model` nel mix e passa esplicitamente
   `--opponent-model ./data/models/best_a2c_v13.npz` (il fast rollout Numba supporta al più un tipo di

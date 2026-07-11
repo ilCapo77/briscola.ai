@@ -282,6 +282,10 @@ Diecimila partite sono uno screening, non una sentenza matematica su qualunque a
 
 La trasformazione costruita non è sprecata. Il prossimo tentativo sarà più diretto: il modello guarderà la posizione originale e quella rinominata, e riceverà una piccola penalità quando le due risposte non coincidono dopo aver riallineato i nomi delle carte. Questa è una *consistency loss*, cioè un costo che chiede esplicitamente coerenza. L'allenamento normale continuerà a usare soltanto le mosse davvero giocate.
 
+La prima prova di questa seconda strada ha finalmente il segno giusto. Con tre intensità crescenti e tre allenamenti per ciascuna, il cambiamento di carta scende poco alla volta fino al 15,64%, contro il 18,32% dei controlli. La distanza fra le risposte diminuisce ancora più chiaramente. Nei confronti diretti contro la v13 la forza resta invece indistinguibile: la differenza media è -0,08 punti a partita e i margini di incertezza comprendono sempre la parità.
+
+Non è ancora una soluzione e non nasce un nuovo campione. È però la prima prova che chiedere esplicitamente coerenza corregge davvero una parte del difetto senza pagare una perdita evidente nel gioco. Il passo successivo sarà un allenamento intermedio, con soste programmate per controllare se il miglioramento continua oppure si ferma.
+
 <small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
 
 ## Epilogo

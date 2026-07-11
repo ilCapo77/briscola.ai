@@ -146,3 +146,8 @@ ridurre la divergenza senza cambiare la action mask, e coefficiente zero deve es
 identico al trainer storico. Poi basta una piccola griglia di coefficienti su tre seed,
 con lo stesso screening usato qui. Nessun gate PIMC è giustificato finché flip e forza
 policy-only non migliorano entrambi.
+
+**Follow-up completato:** la consistency loss separata supera lo screening con beta `0.1`
+(flip medio `15,64%`, forza diretta neutra contro v13). Non è ancora una promozione; il
+prossimo gate è il run intermedio da 50k descritto in
+[`suit-consistency-v0-2026-07-11.md`](suit-consistency-v0-2026-07-11.md).

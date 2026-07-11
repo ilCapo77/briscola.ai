@@ -12,7 +12,12 @@ import numpy as np
 import pytest
 
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
-from briscola_ai.ai.evaluation.suit_symmetry import IDENTITY_SUIT_PERMUTATION
+from briscola_ai.ai.evaluation.suit_symmetry import IDENTITY_SUIT_PERMUTATION, all_suit_permutations
+from briscola_ai.ai.training.suit_augmentation import (
+    permute_action_masks,
+    permute_action_vectors,
+    permute_encoded_features,
+)
 
 _ROOT = Path(__file__).resolve().parent.parent
 _SCRIPT_PATH = _ROOT / "scripts" / "train_a2c.py"
@@ -26,6 +31,7 @@ _SPEC.loader.exec_module(_TRAIN_A2C)
 A2CPolicy = _TRAIN_A2C.A2CPolicy
 _accumulate_numba_trajectory_grads = _TRAIN_A2C._accumulate_numba_trajectory_grads
 _accumulate_paired_suit_trajectory_grads = _TRAIN_A2C._accumulate_paired_suit_trajectory_grads
+_accumulate_suit_consistency_grads = _TRAIN_A2C._accumulate_suit_consistency_grads
 _forward_policy_batch = _TRAIN_A2C._forward_policy_batch
 
 
@@ -145,6 +151,54 @@ def test_identity_paired_copy_preserves_mean_gradient_and_doubles_step_count() -
     )
 
 
+def _forward_kl(target: np.ndarray, prediction: np.ndarray) -> float:
+    """KL media per riga con clipping coerente col trainer."""
+    epsilon = np.float32(1e-12)
+    values = target * (np.log(np.maximum(target, epsilon)) - np.log(np.maximum(prediction, epsilon)))
+    return float(np.mean(np.sum(values, axis=1, dtype=np.float64)))
+
+
+def test_consistency_gradient_reduces_frozen_target_kl_without_critic_grads() -> None:
+    """Un piccolo update ausiliario deve avvicinare la copia al target originale congelato."""
+    policy, xs, masks, _, _ = _policy_and_trajectory()
+    _, _, original_probs, _ = _forward_policy_batch(policy, xs=xs, action_masks=masks)
+    permutation = all_suit_permutations()[13]
+    paired_xs = permute_encoded_features(xs, version="v4", permutation=permutation)
+    paired_masks = permute_action_masks(masks, permutation=permutation)
+    target_probs = permute_action_vectors(original_probs, permutation=permutation)
+    _, _, before_probs, _ = _forward_policy_batch(policy, xs=paired_xs, action_masks=paired_masks)
+    before_kl = _forward_kl(target_probs, before_probs)
+
+    grads = _zero_grads(policy)
+    stats = _accumulate_suit_consistency_grads(
+        policy=policy,
+        xs=xs,
+        action_masks=masks,
+        original_probs=original_probs,
+        encoder_version="v4",
+        permutation=permutation,
+        beta=1.0,
+        gw1=grads[0],
+        gb1=grads[1],
+        gw2=grads[2],
+        gb2=grads[3],
+    )
+    learning_rate = np.float32(0.01 / stats.suit_consistency_count)
+    policy.w1 -= learning_rate * grads[0]
+    policy.b1 -= learning_rate * grads[1]
+    policy.w2 -= learning_rate * grads[2]
+    policy.b2 -= learning_rate * grads[3]
+
+    _, _, after_probs, _ = _forward_policy_batch(policy, xs=paired_xs, action_masks=paired_masks)
+    after_kl = _forward_kl(target_probs, after_probs)
+    assert stats.steps == 0
+    assert stats.gbv == 0.0
+    assert stats.suit_consistency_count == len(xs)
+    assert stats.suit_consistency_kl_sum / stats.suit_consistency_count == pytest.approx(before_kl)
+    assert after_kl < before_kl
+    np.testing.assert_array_equal(grads[4], np.zeros_like(grads[4]))
+
+
 def _write_synthetic_v4_model(path: Path) -> None:
     """Modello v4 piccolo ma caricabile come init e BC-anchor dello smoke."""
     rng = np.random.default_rng(11)
@@ -172,6 +226,7 @@ def _run_cli_smoke(
     init_path: Path,
     output_path: Path,
     suit_augmentation: str | None,
+    suit_consistency_beta: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Esegue un training minimo; ``None`` lascia al parser il default storico."""
     command = [
@@ -200,6 +255,8 @@ def _run_cli_smoke(
     ]
     if suit_augmentation is not None:
         command.extend(["--suit-augmentation", suit_augmentation])
+    if suit_consistency_beta is not None:
+        command.extend(["--suit-consistency-beta", suit_consistency_beta])
     return subprocess.run(
         command,
         cwd=_ROOT,
@@ -226,6 +283,7 @@ def test_train_a2c_explicit_off_is_identical_to_historical_default(tmp_path: Pat
         init_path=init_path,
         output_path=explicit_off_path,
         suit_augmentation="off",
+        suit_consistency_beta="0",
     )
 
     assert default_result.returncode == 0, default_result.stderr
@@ -239,6 +297,37 @@ def test_train_a2c_explicit_off_is_identical_to_historical_default(tmp_path: Pat
             np.testing.assert_array_equal(default_data[key], off_data[key])
         metadata = json.loads(str(default_data["metadata_json"].item()))
     assert "suit_augmentation" not in metadata
+    assert "suit_consistency" not in metadata
+
+
+@pytest.mark.slow
+def test_train_a2c_consistency_cli_smoke_and_metadata(tmp_path: Path) -> None:
+    """Il trainer deve applicare e dichiarare la KL senza cambiare il conteggio A2C."""
+    init_path = tmp_path / "init_v4.npz"
+    output_path = tmp_path / "consistency_v4.npz"
+    _write_synthetic_v4_model(init_path)
+
+    result = _run_cli_smoke(
+        init_path=init_path,
+        output_path=output_path,
+        suit_augmentation="off",
+        suit_consistency_beta="0.01",
+    )
+
+    assert result.returncode == 0, f"trainer fallito:\n{result.stdout}\n{result.stderr}"
+    assert "suit_kl" in result.stdout
+    with np.load(output_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"].item()))
+    assert metadata["suit_consistency"] == {
+        "mode": "forward_kl_stop_gradient",
+        "beta": 0.01,
+        "target": "original_policy_distribution",
+        "student": "nonidentity_suit_permutation",
+        "permutation_scope": "whole_trajectory",
+        "permutation_distribution": "uniform_nonidentity_23",
+        "loss_normalization": "mean_over_original_on_policy_steps",
+        "rng_seed": 123 ^ 0x0C05157E,
+    }
 
 
 @pytest.mark.slow

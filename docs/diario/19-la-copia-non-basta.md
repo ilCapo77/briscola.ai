@@ -76,3 +76,19 @@ Protocollo, comandi, CI per seed e hash degli artefatti:
 [`docs/plans/suit-augmentation-paired-v0-2026-07-11.md`](../plans/suit-augmentation-paired-v0-2026-07-11.md).
 Evidenza sintetica:
 [`suit_augmentation_paired_v0.v1.json`](../reports/evidence/suit_augmentation_paired_v0.v1.json).
+
+## Esito del tentativo successivo
+
+La consistency loss separata è stata implementata e provata con beta `0.001`, `0.01` e
+`0.1`, sempre su tre seed da 10.000 partite. Il controllo `beta=0` produce un artefatto
+identico al trainer precedente. La risposta è dose-dipendente: il flip medio scende a
+`18,00%`, `17,42%` e infine **`15,64%`**; con beta `0.1` la JS media scende da `0,14124`
+a `0,10402` bit.
+
+Sul gioco non emerge ancora un aumento dimostrato. Beta `0.1` fa `+0,27` punti/partita
+contro i controlli brevi dello stesso seed, ma nel confronto diretto contro v13 fa in
+media `-0,08`; tutte le CI dei tre seed includono zero. Il risultato corretto è quindi:
+**coerenza migliorata, forza conservata, promozione non autorizzata**.
+
+Il prossimo gate è un run intermedio da 50.000 partite con checkpoint. Report completo:
+[`docs/plans/suit-consistency-v0-2026-07-11.md`](../plans/suit-consistency-v0-2026-07-11.md).
