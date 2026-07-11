@@ -91,6 +91,8 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
 - Valutazione offline: `python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random`
   - engine selezionabile: `--engine domain|fast|numba`; modi seat-fair `--seat-fair --seed-suite small|medium`; benchmark `--benchmark medium|big`; carica modello con `--agent0 bc_model --agent0-model ./data/models/best_a2c.npz`
 - Matrix / decision quality: `scripts/evaluate_matrix.py`, `scripts/evaluate_decision_quality.py`
+- Diagnostica simmetria semi: `scripts/probe_suit_symmetry.py` (24 rinomine complete di `PlayerObservation`,
+  mosse forzate escluse, report JSON riproducibile)
 - Benchmark throughput: `python scripts/benchmark_perf.py`
 
 Dataset, run e benchmark in `data/` e `benchmarks/experiments/` sono locali (gitignored), salvo i piccoli asset

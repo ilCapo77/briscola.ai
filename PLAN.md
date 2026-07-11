@@ -14,6 +14,11 @@
 - `best_a2c_v13.npz` usa encoder v4 (`feature_dim=369`, hidden 256). Rispetto a v11 è neutra sulla forza:
   policy-only `-0.03` (CI `-0.38..+0.32`) e default PIMC 16×8 `+0.14` (CI `-0.20..+0.47`). Riduce però l'overkill di
   briscola su piatti poveri da circa `28-31%` a `6-8%`: **stessa forza, comportamento migliore**.
+- La sonda canonica di simmetria dei semi su 4.096 osservazioni v13 trova un flip dell'argmax nel **18,19%** delle
+  94.208 rinomine non banali (CI bootstrap per osservazione `17,38..18,93%`); il 51,17% degli stati cambia scelta
+  almeno una volta; nessuna delle 98.304 distribuzioni sulle 24 rinomine è un quasi-pareggio. Il segnale attraversa
+  fasi e avversari: la prima leva causale da testare è l'augmentation dei semi. Metodo e limiti:
+  `docs/plans/sonda-simmetria-semi-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -21,25 +26,26 @@
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
-- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 17,
-  `docs/diario/17-stessa-forza-comportamento-migliore.md`.
+- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 18,
+  `docs/diario/18-i-semi-non-hanno-nome.md`.
 
 ## Prossima Decisione
 
-Non avviare un altro training lungo finché una sonda riproducibile non identifica la leva. L'obiettivo è capire il
-plateau v11-v13 e recuperare parte del margine della search senza aumentare alla cieca modello o costo runtime.
-Ipotesi, ablation, test e criteri go/stop delle sette piste sono nel piano tecnico
-`docs/plans/prossima-iterazione-modello.md`.
+La prima diagnostica riproducibile ha identificato una leva concreta: v13 attribuisce significato ai nomi arbitrari
+dei semi. Non basta però rendere le probabilità più simmetriche; l'intervento deve conservare o aumentare la forza.
+Ipotesi e criteri go/stop delle sette piste restano in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Formalizzare le diagnostiche della policy.** Trasformare le sonde esplorative su salute delle ReLU ed
-   equivarianza alla rinomina dei semi in script riproducibili su suite fissa. Registrare almeno activation rate per
-   fase, contributo ai logits/flip dell'argmax e agreement/JS sotto le 24 permutazioni dei semi.
-2. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni tenendo la finestra a 8, sugli stessi seed e con
-   CPU media/p95. Se la curva è positiva, provare budget adattivo con stop sul margine top-2; se è piatta, chiudere la
-   pista senza allargare di nuovo la finestra (8→10 è già risultata negativa).
-3. **Aggiungere capacità solo se la diagnosi la giustifica.** Prima ablation: appendere a v13 64/128 neuroni con
-   ingressi ben inizializzati e uscite a zero, così i logits iniziali restano identici. Fare screening su tre seed di
-   training e promuovere solo con gate policy-only, default PIMC 16×8 e decision quality tutti non regressivi.
+1. **Ablation training-only di suit augmentation paired.** Nello stesso update A2C, affiancare alla traiettoria
+   originale una copia con osservazioni e action id rinominati coerentemente; in alternativa, testare separatamente
+   una consistency loss. Sostituire ogni sample con una sola permutazione casuale non basta: il mazzo di training è
+   già simmetrico in distribuzione. Prima servono round-trip, parità esatta col flag off e verifica del pairing; poi
+   screening breve su tre seed. Ogni candidato va ripassato nella sonda e nei gate policy-only, PIMC 16×8 e decision
+   quality. Niente run lunga finché non riduce nettamente il flip senza regressioni.
+2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
+   neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
+   di per sé una prova che serva più capacità.
+3. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
+   curva è positiva, provare budget adattivo; se è piatta, chiudere la pista senza riaprire 8→10, già negativa.
 
 Belief v1 e modifiche strutturali più ampie restano successive: una nuova belief va allenata contro un roster misto
 v13/anchor/euristiche, validata leave-one-opponent-out e poi confrontata v0-vs-v1 nello stesso PIMC 16×8. Le metriche
@@ -113,6 +119,14 @@ uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent0 bc_model --agent0-model data/models/best_a2c_v13.npz \
   --agent1 bc_model --agent1-model data/models/best_a2c_v11.npz
 uv run python scripts/build_model_report.py
+```
+
+Sonda riproducibile di simmetria dei semi:
+
+```bash
+uv run python scripts/probe_suit_symmetry.py \
+  --model data/models/best_a2c_v13.npz \
+  --out-json docs/reports/evidence/suit_symmetry_v13.v1.json
 ```
 
 Avvio locale:

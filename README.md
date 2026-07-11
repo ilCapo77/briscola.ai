@@ -367,6 +367,11 @@ Confronti riproducibili senza UI/server:
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent0 bc_model --agent0-model ./data/models/best_a2c_v13.npz --agent1 heuristic_v1
+
+# Diagnostica: la policy cambia se rinominiamo coerentemente i quattro semi?
+python scripts/probe_suit_symmetry.py \
+  --model ./data/models/best_a2c_v13.npz \
+  --out-json ./docs/reports/evidence/suit_symmetry_v13.v1.json
 ```
 
 Concetti chiave:
@@ -383,6 +388,11 @@ Strumenti aggiuntivi:
 - `scripts/evaluate_pimc.py` – harness offline PIMC/determinizzazione sopra una policy `.npz`: confronta search,
   modello puro, solver-control o un'altra configurazione PIMC, con CI su score/avg diff e metriche di costo per mossa.
   È lo strumento per ablation della search; la distillazione PIMC→policy è invece un ramo storico chiuso.
+- `scripts/probe_suit_symmetry.py` – rinomina semanticamente mano, briscola, tavolo, storia e one-hot pubbliche sotto
+  tutte le 24 permutazioni dei semi, poi rimappa le 40 azioni prima del confronto. Esclude le mosse forzate e usa solo
+  `PlayerObservation`: sulla v13, 4.096 stati bilanciati danno **18,19% di flip dell'argmax** e 51,17% di stati con
+  almeno un flip. La JS usa il softmax dei logits grezzi a temperatura 1 e non è una probabilità calibrata di
+  vittoria. Report e limiti sono in `docs/plans/sonda-simmetria-semi-2026-07-11.md`.
 - **Guard anti‑overkill** (`inference_overkill_guard`): post-processing diagnostico che, da secondo di mano, gioca la
   briscola vincente **minima**. È attivabile dai metadati o con `BRISCOLA_BC_OVERKILL_GUARD=1` per A/B; il default
   v13 non lo usa, perché il comportamento è stato corretto tramite reward shaping e deve restare una scelta appresa.
@@ -532,8 +542,8 @@ non rompere e prossime azioni sono in **`PLAN.md`**.
 
 La storia del progetto — scelte, errori e svolte, raccontati in tono divulgativo — è il **diario di
 bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`). Il racconto arriva al
-**capitolo 17, “Stessa forza, comportamento migliore”**; gli approfondimenti tecnici, incluso
-`docs/diario/17-stessa-forza-comportamento-migliore.md`, vivono in `docs/diario/`.
+**capitolo 18, “I semi non hanno nome”**; gli approfondimenti tecnici, incluso
+`docs/diario/18-i-semi-non-hanno-nome.md`, vivono in `docs/diario/`.
 
 ## Licenza
 

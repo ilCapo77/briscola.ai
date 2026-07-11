@@ -102,30 +102,45 @@ aumenta varianza senza vantaggio ripetibile.
 Il modello cambia decisione quando denari, coppe, spade e bastoni vengono soltanto
 rinominati, rinominando coerentemente anche briscola, tavolo e storia?
 
-### Da implementare
+### Implementato il 2026-07-11
 
-Serve un helper canonico che permuti un'intera `PlayerObservation`:
+`ai/evaluation/suit_symmetry.py` permuta semanticamente un'intera `PlayerObservation`:
 
 - mano, briscola, tavolo e `trick_history`;
 - `seen_cards_onehot` e `out_of_play_cards_onehot`;
 - action mask e action id, usando la convenzione `suit * 10 + rank`;
 - output del modello, rimappato poi nei semi originali prima del confronto.
 
-La suite deve provare tutte le 24 permutazioni. L'identità è un controllo; agreement,
-flip dell'argmax e divergenza Jensen-Shannon vanno calcolati sulle altre 23.
+`scripts/probe_suit_symmetry.py` prova tutte le 24 permutazioni su una suite seat-fair
+bilanciata per avversario e fase. L'identità è un controllo; agreement, flip dell'argmax
+e divergenza Jensen-Shannon sono calcolati sulle altre 23 e sulle 276 coppie dell'orbita.
 
-Test richiesti:
+I test coprono:
 
 - round trip permutazione/inversa senza perdita;
 - carte legali e feature coerenti dopo il remapping;
 - agente sintetico equivariant con agreement 100% e divergenza zero;
-- nessun uso di `GameState` completo.
+- near-tie controllato anche nella distribuzione rinominata e smoke CLI byte-riproducibile.
+
+Il confine anti-cheat è strutturale: l'helper accetta soltanto `PlayerObservation`; il
+`GameState` resta confinato al loop del motore e non viene conservato o serializzato.
+Seed e posto compaiono nel report solo come metadati offline di riproduzione, mai come
+input del modello.
+
+Esito su v13: 4.096 osservazioni non forzate, 94.208 confronti non identità,
+**18,19% di flip** (CI bootstrap per osservazione `17,38..18,93%`) e 51,17% degli
+stati con almeno un cambio. Nessuna delle 98.304 distribuzioni sulle 24 rinomine è un
+quasi-pareggio al threshold `1e-4`.
+Il controllo identità è esatto e il secondo run produce un JSON byte-identico. Numeri,
+metodo e limiti sono in `sonda-simmetria-semi-2026-07-11.md`; evidenza canonica in
+`../reports/evidence/suit_symmetry_v13.v1.json`.
 
 ### Possibili interventi
 
 In ordine di costo:
 
-1. data augmentation con permutazioni casuali durante il training;
+1. data augmentation paired: originale e copia rinominata nello stesso update; una sola
+   sostituzione casuale non cambia l'obiettivo medio di mazzi già simmetrici;
 2. loss di consistenza tra osservazione originale e permutata;
 3. media delle 24 predizioni a inference, solo come upper bound perché costosa;
 4. architettura esplicitamente equivariant, valutata soltanto nella pista 7.
@@ -134,11 +149,23 @@ Embedding assoluti separati per i quattro semi **non** garantiscono la simmetria
 futura architettura deve usare ruoli relativi alla briscola/lead oppure condivisione di
 pesi equivariant.
 
+Per l'augmentation paired, una singola permutazione deve trasformare **l'intera
+traiettoria**: osservazioni, mask e action id; reward, return e advantage restano invariati.
+Il riferimento domain deve passare da `permute_player_observation` e dall'encoder canonico.
+Il collector fast/Numba non deve introdurre scambi ad hoc delle 369 feature: o conserva
+campi strutturati sufficienti, oppure usa una trasformazione v4 esplicita verificata su
+osservazioni casuali contro il riferimento semantico. Il flag disattivato deve essere
+bit-identico al trainer attuale. La loss paired va mediata sui `2N` sample, non sommata,
+per non raddoppiare implicitamente il learning rate; numero di traiettorie ambiente e
+optimizer update restano uguali, mentre il costo extra di forward/backward va registrato.
+
 ### Decisione
 
-**GO** verso augmentation/consistency se la sonda trova asimmetrie ripetibili e
-l'intervento riduce i flip senza regressione di forza. **STOP** se v13 è già quasi
-equivariant o se la regolarizzazione rende le probabilità più simmetriche ma gioca peggio.
+**GO diagnostico** verso la prima ablation di augmentation paired dei semi: l'asimmetria
+è grande, attraversa fasi e avversari e non dipende dai pareggi. Augmentation e consistency
+vanno testate separatamente. Non è ancora un GO alla promozione: l'intervento deve ridurre
+i flip senza regressione nei gate di forza e stile. La media delle 24 predizioni resta solo
+un upper bound costoso, non una proposta runtime.
 
 ## 5. Pista 3: dose e budget adattivo PIMC
 
@@ -335,8 +362,9 @@ segnale oppure se il widening controllato non mostra alcun limite di capacità.
 
 | Ordine | Fase | Costo iniziale | Output richiesto | Stop immediato |
 |---:|---|---|---|---|
-| 1 | Sonda salute MLP | basso | JSON riproducibile per fase/neurone | nessun segnale di capacità |
-| 2 | Sonda simmetria semi | basso | agreement, JS, flip su 24 permutazioni | v13 già quasi equivariant |
+| fatto | Sonda simmetria semi | basso | report su 4.096 osservazioni | GO augmentation paired |
+| 1 | Augmentation paired | medio | tre smoke seed + sonda e gate | flip non cala o forza regredisce |
+| 2 | Sonda salute MLP | basso | JSON riproducibile per fase/neurone | nessun segnale di capacità |
 | 3 | Dose PIMC 16/32/64 | medio | forza + CPU p50/p95 | curva piatta |
 | 4 | Strumentazione/A2C | medio | gradienti, critic, tre ablation separate | segnale non ripetibile |
 | 5 | Training paired | medio | schedule + confronto multi-seed | varianza/forza non migliori |
@@ -363,11 +391,16 @@ uv run python scripts/evaluate_pimc.py \
   --determinizations 16 \
   --max-unknown-cards 8 \
   --num-games 2000
+
+uv run python scripts/probe_suit_symmetry.py \
+  --model data/models/best_a2c_v13.npz \
+  --out-json docs/reports/evidence/suit_symmetry_v13.v1.json
 ```
 
 Il secondo comando è solo una baseline: prima del confronto belief 16/32/64 l'harness
 deve diventare simmetrico e registrare le latenze per decisione.
 
-Non esistono ancora comandi affidabili per sonda MLP, permutazioni dei semi, critic
-reuse/normalizzazione/clipping, schedule paired, roster belief v1 o nuove architetture.
-I relativi flag e script vanno implementati e testati prima di preparare ricette lunghe.
+Non esistono ancora comandi affidabili per sonda MLP, augmentation paired, critic
+reuse/normalizzazione/clipping, schedule seat-paired di training, roster belief v1 o nuove
+architetture. I relativi flag e script vanno implementati e testati prima di preparare
+ricette lunghe.

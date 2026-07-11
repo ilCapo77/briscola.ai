@@ -246,6 +246,26 @@ Per questo la v13 diventa il nuovo default. Non perché sia "più intelligente" 
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/17-stessa-forza-comportamento-migliore.md)*</small>
 
+## Capitolo 18 — I semi non hanno nome <small>(11 luglio 2026)</small>
+
+Dopo la v13 abbiamo resistito alla tentazione di lanciare subito un altro allenamento. Il modello era arrivato a un punto in cui aggiungere partite, neuroni o regole senza sapere dove guardare rischiava di produrre soltanto un'altra variante quasi uguale. Serviva prima una domanda capace di isolare un difetto preciso.
+
+La domanda è semplice da raccontare. Prendiamo una posizione di Briscola e cambiamo i nomi dei quattro semi dappertutto: la mano, la briscola, il tavolo e tutte le carte già viste. I denari diventano coppe, le coppe diventano spade e così via. Non abbiamo cambiato la partita; abbiamo soltanto ristampato gli stessi simboli. La mossa del modello dovrebbe cambiare nome nello stesso modo, ma restare la stessa scelta strategica.
+
+Abbiamo provato tutte le 24 rinomine possibili su 4.096 decisioni della v13, distribuite fra quattro avversari e quattro fasi della partita. Le mosse obbligate sono state escluse: quando resta una sola carta, qualunque modello sembra perfettamente coerente. Anche il controllo più importante ha funzionato: senza rinominare nulla, il risultato torna identico fino all'ultimo numero.
+
+La sorpresa è grande. Nel 18,19% dei confronti la v13 sceglie una carta diversa soltanto perché abbiamo cambiato i nomi dei semi. E in poco più della metà delle posizioni basta almeno una delle 23 rinomine non banali per far cambiare la decisione. Non sono esitazioni sul filo del pareggio: nessuna delle 98.304 versioni esaminate aveva le prime due carte quasi pari secondo il modello.
+
+Il fenomeno attraversa tutta la partita. È un po' più forte quando l'IA apre la presa e quando ha tre carte fra cui scegliere, ma non sparisce nel finale, contro lo specchio o contro le euristiche. In alcuni casi le probabilità restano quasi uguali; in altri il modello passa con decisione quasi totale da una carta a un'altra.
+
+Come può succedere? Per la rete i quattro semi occupano blocchi numerici distinti. Durante l'allenamento ha visto tutti i semi, ma nessuno le ha imposto che i loro nomi fossero intercambiabili. Può quindi aver conservato associazioni accidentali: non una regola della Briscola, ma una preferenza legata alla posizione in cui un seme finisce nel vettore.
+
+Questo risultato non dice ancora che abbiamo trovato una mossa capace di farla vincere di più. Due carte diverse possono valere quasi lo stesso nella partita reale, anche se il modello è molto sicuro. Dice però che abbiamo finalmente una leva concreta e misurabile.
+
+Il prossimo esperimento sarà insegnare la simmetria durante l'allenamento. Nello stesso aggiornamento, alla traiettoria originale affiancheremo una copia con i semi rinominati e con tutte le mosse rinominate nello stesso modo. La coppia è importante: i mazzi casuali mostrano già tutti i semi con la stessa frequenza, quindi cambiare soltanto i nomi di un singolo esempio non aggiungerebbe una regola nuova. Non è un trucco da applicare sul sito e non costa tempo quando si gioca. La prova sarà superata solo se i cambi di scelta diminuiranno senza perdere punti contro gli avversari di controllo.
+
+<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/18-i-semi-non-hanno-nome.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.
