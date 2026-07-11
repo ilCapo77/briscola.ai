@@ -455,6 +455,10 @@ Tecniche utili (tutte come flag, vedi `--help`):
   v0 beta `0.1` riduce il flip medio `18,32% -> 15,64%` senza perdita policy-only misurabile, ma il follow-up 50k
   risale a `16,47%` e perde `-0,77` punti/partita: ramo chiuso, nessun modello promosso. Protocollo:
   `docs/plans/suit-consistency-v0-2026-07-11.md`;
+- **suit margin consistency sperimentale** (`--suit-margin-beta`, `--suit-margin-cap`): una hinge preserva carta
+  argmax e margine teacher nella copia rinominata, escludendo mosse forzate. Beta `0.3` conserva il gap ma si ferma a
+  `14,42%` di flip, sopra il gate `<12%`; ramo chiuso senza run lungo. Report:
+  `docs/plans/suit-margin-v0-2026-07-11.md`;
 - **league**: allenare contro un campione congelato. L'alias `best_a2c` carica il file locale **legacy**
   `best_a2c.npz`, non il campione ufficiale corrente. Per usare v13 indica `bc_model` nel mix e passa esplicitamente
   `--opponent-model ./data/models/best_a2c_v13.npz` (il fast rollout Numba supporta al più un tipo di

@@ -24,6 +24,10 @@
   a 50k risale a `16,47%` e la forza cala **`-0,77`** punti/partita, significativa su tutti i seed. La JS continua a
   scendere, ma il margine top-2 si comprime. **STOP forward-KL v0; nessun gate PIMC e nessuna promozione.** Dettagli:
   `docs/plans/suit-consistency-v0-2026-07-11.md`.
+- La successiva hinge sul margine evita il collasso di sicurezza ma non raggiunge il gate: il migliore beta `0.3`
+  porta il flip a **14,42%**, conserva il gap top-2 (`0,915` vs `0,929` dei controlli) ed è neutro contro v13
+  (`-0,14` punti/partita). Beta `1.0` non migliora: la curva è satura. **STOP margin v0; niente run lungo.** Report:
+  `docs/plans/suit-margin-v0-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -36,16 +40,16 @@
 
 ## Prossima Decisione
 
-La forward-KL ha ridotto la distanza fra distribuzioni, ma non ha stabilizzato la carta scelta: prolungandola rende
-la policy meno decisa e infine più debole. Il prossimo obiettivo deve essere direttamente allineato all'argmax e
-preservare il margine della policy originale, non soltanto avvicinare le probabilità. Ipotesi e criteri delle sette
-piste restano in `docs/plans/prossima-iterazione-modello.md`.
+Le loss ausiliarie hanno migliorato ma non eliminato l'asimmetria: paired peggiora, KL comprime i margini, hinge si
+ferma intorno al 14,4%. Prima di modificare ancora il training conviene rispondere causalmente alla domanda centrale:
+una policy resa **esattamente simmetrica** gioca meglio, uguale o peggio? Ipotesi e criteri delle sette piste restano
+in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Ablation margin-aware sui semi.** Usare come teacher stop-gradient la carta e il margine top-2 originali;
-   sulla copia rinominata applicare una hinge/ranking loss solo quando la carta corrispondente non conserva un
-   margine minimo. Prima dimostrare su batch congelato che un update riduce i flip senza abbassare il gap originale;
-   poi screening a tre seed. Gate: flip `<12%` già a 10k, margine stabile e forza neutra. La forward-KL v0 è chiusa e
-   non va prolungata o combinata con il paired.
+1. **Policy symmetrized per media sulle 24 rinomine.** Per ogni osservazione, valutare v13 su tutte le permutazioni,
+   riallineare i 40 output e mediarli prima dell'argmax. Deve avere flip matematicamente nullo; testare prima
+   policy-only seat-fair contro v13 e baseline, registrando costo CPU. Se la forza migliora o resta neutra, usare il
+   teacher simmetrizzato per distillazione o progettare pesi condivisi; se peggiora, chiudere l'ipotesi che la
+   simmetria dei semi sia una leva di forza. Nessun training prima di questo test causale.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.

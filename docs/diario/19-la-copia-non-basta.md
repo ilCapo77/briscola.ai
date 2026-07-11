@@ -104,3 +104,15 @@ margine medio fra prima e seconda carta scende da circa `0,93` in v13 a `0,80`; 
 piccola differenza residua può cambiare più facilmente l'argmax. La prossima loss dovrà
 proteggere direttamente la carta scelta e il suo margine, non soltanto ridurre una distanza
 fra distribuzioni.
+
+## Esito della loss sul margine
+
+La hinge successiva fa meglio sul difetto specifico e non rende la rete indecisa. Con beta
+`0.3` il flip medio scende a `14,42%`, mentre il gap top-2 resta `0,915` contro `0,929` dei
+controlli. La forza contro v13 è neutra (`-0,14` punti/partita medi). Aumentare beta a `1.0`
+non porta altro beneficio: il flip resta `14,49%`.
+
+Anche questo ramo si ferma, perché manca il gate `<12%` e la curva ha raggiunto un plateau.
+Il prossimo esperimento non allenerà una nuova policy: costruirà una vista di v13 che media
+le 24 rinomine e garantisce simmetria esatta. Questo separerà finalmente la domanda “possiamo
+eliminare il difetto?” dalla domanda più importante “eliminarlo migliora il gioco?”.

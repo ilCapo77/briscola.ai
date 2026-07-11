@@ -32,6 +32,7 @@ A2CPolicy = _TRAIN_A2C.A2CPolicy
 _accumulate_numba_trajectory_grads = _TRAIN_A2C._accumulate_numba_trajectory_grads
 _accumulate_paired_suit_trajectory_grads = _TRAIN_A2C._accumulate_paired_suit_trajectory_grads
 _accumulate_suit_consistency_grads = _TRAIN_A2C._accumulate_suit_consistency_grads
+_accumulate_suit_margin_grads = _TRAIN_A2C._accumulate_suit_margin_grads
 _forward_policy_batch = _TRAIN_A2C._forward_policy_batch
 
 
@@ -199,6 +200,59 @@ def test_consistency_gradient_reduces_frozen_target_kl_without_critic_grads() ->
     np.testing.assert_array_equal(grads[4], np.zeros_like(grads[4]))
 
 
+def test_margin_gradient_increases_student_margin_and_reduces_hinge() -> None:
+    """La hinge deve agire sulla scelta rinominata senza introdurre gradienti del critic."""
+    policy, xs, masks, _, _ = _policy_and_trajectory()
+    _, _, original_probs, _ = _forward_policy_batch(policy, xs=xs, action_masks=masks)
+    permutation = all_suit_permutations()[13]
+
+    grads = _zero_grads(policy)
+    before = _accumulate_suit_margin_grads(
+        policy=policy,
+        xs=xs,
+        action_masks=masks,
+        original_probs=original_probs,
+        encoder_version="v4",
+        permutation=permutation,
+        beta=1.0,
+        margin_cap=2.0,
+        gw1=grads[0],
+        gb1=grads[1],
+        gw2=grads[2],
+        gb2=grads[3],
+    )
+    learning_rate = np.float32(0.01 / before.suit_margin_count)
+    policy.w1 -= learning_rate * grads[0]
+    policy.b1 -= learning_rate * grads[1]
+    policy.w2 -= learning_rate * grads[2]
+    policy.b2 -= learning_rate * grads[3]
+
+    after_grads = _zero_grads(policy)
+    after = _accumulate_suit_margin_grads(
+        policy=policy,
+        xs=xs,
+        action_masks=masks,
+        original_probs=original_probs,
+        encoder_version="v4",
+        permutation=permutation,
+        beta=1.0,
+        margin_cap=2.0,
+        gw1=after_grads[0],
+        gb1=after_grads[1],
+        gw2=after_grads[2],
+        gb2=after_grads[3],
+    )
+
+    assert before.steps == 0
+    assert before.gbv == 0.0
+    assert before.suit_margin_count == len(xs)
+    assert before.suit_margin_violation_count > 0
+    assert after.suit_margin_loss_sum < before.suit_margin_loss_sum
+    assert after.suit_margin_student_sum > before.suit_margin_student_sum
+    assert after.suit_margin_teacher_sum == pytest.approx(before.suit_margin_teacher_sum)
+    np.testing.assert_array_equal(grads[4], np.zeros_like(grads[4]))
+
+
 def _write_synthetic_v4_model(path: Path) -> None:
     """Modello v4 piccolo ma caricabile come init e BC-anchor dello smoke."""
     rng = np.random.default_rng(11)
@@ -227,6 +281,8 @@ def _run_cli_smoke(
     output_path: Path,
     suit_augmentation: str | None,
     suit_consistency_beta: str | None = None,
+    suit_margin_beta: str | None = None,
+    suit_margin_cap: str | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """Esegue un training minimo; ``None`` lascia al parser il default storico."""
     command = [
@@ -257,6 +313,10 @@ def _run_cli_smoke(
         command.extend(["--suit-augmentation", suit_augmentation])
     if suit_consistency_beta is not None:
         command.extend(["--suit-consistency-beta", suit_consistency_beta])
+    if suit_margin_beta is not None:
+        command.extend(["--suit-margin-beta", suit_margin_beta])
+    if suit_margin_cap is not None:
+        command.extend(["--suit-margin-cap", suit_margin_cap])
     return subprocess.run(
         command,
         cwd=_ROOT,
@@ -284,6 +344,7 @@ def test_train_a2c_explicit_off_is_identical_to_historical_default(tmp_path: Pat
         output_path=explicit_off_path,
         suit_augmentation="off",
         suit_consistency_beta="0",
+        suit_margin_beta="0",
     )
 
     assert default_result.returncode == 0, default_result.stderr
@@ -298,6 +359,40 @@ def test_train_a2c_explicit_off_is_identical_to_historical_default(tmp_path: Pat
         metadata = json.loads(str(default_data["metadata_json"].item()))
     assert "suit_augmentation" not in metadata
     assert "suit_consistency" not in metadata
+    assert "suit_margin_consistency" not in metadata
+
+
+@pytest.mark.slow
+def test_train_a2c_margin_cli_smoke_and_metadata(tmp_path: Path) -> None:
+    """Il trainer deve applicare la hinge e serializzarne contratto e diagnostica."""
+    init_path = tmp_path / "init_v4.npz"
+    output_path = tmp_path / "margin_v4.npz"
+    _write_synthetic_v4_model(init_path)
+
+    result = _run_cli_smoke(
+        init_path=init_path,
+        output_path=output_path,
+        suit_augmentation="off",
+        suit_margin_beta="0.01",
+        suit_margin_cap="2.0",
+    )
+
+    assert result.returncode == 0, f"trainer fallito:\n{result.stdout}\n{result.stderr}"
+    assert "suit_hinge" in result.stdout
+    with np.load(output_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"].item()))
+    assert metadata["suit_margin_consistency"] == {
+        "mode": "teacher_argmax_hinge",
+        "beta": 0.01,
+        "margin_cap": 2.0,
+        "teacher": "original_argmax_and_capped_logit_margin",
+        "student": "nonidentity_suit_permutation",
+        "forced_actions": "excluded",
+        "permutation_scope": "whole_trajectory",
+        "permutation_distribution": "uniform_nonidentity_23",
+        "loss_normalization": "mean_over_original_on_policy_steps",
+        "rng_seed": 123 ^ 0x0A461A9E,
+    }
 
 
 @pytest.mark.slow

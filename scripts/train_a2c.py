@@ -81,6 +81,7 @@ from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
 from briscola_ai.ai.training.suit_augmentation import (
+    permute_action_ids,
     permute_action_masks,
     permute_action_vectors,
     permute_encoded_features,
@@ -720,6 +721,11 @@ class GradientStats:
     gbv: float
     suit_consistency_kl_sum: float = 0.0
     suit_consistency_count: int = 0
+    suit_margin_loss_sum: float = 0.0
+    suit_margin_count: int = 0
+    suit_margin_violation_count: int = 0
+    suit_margin_teacher_sum: float = 0.0
+    suit_margin_student_sum: float = 0.0
 
 
 def _add_gradient_stats(left: GradientStats, right: GradientStats) -> GradientStats:
@@ -732,6 +738,11 @@ def _add_gradient_stats(left: GradientStats, right: GradientStats) -> GradientSt
         gbv=left.gbv + right.gbv,
         suit_consistency_kl_sum=left.suit_consistency_kl_sum + right.suit_consistency_kl_sum,
         suit_consistency_count=left.suit_consistency_count + right.suit_consistency_count,
+        suit_margin_loss_sum=left.suit_margin_loss_sum + right.suit_margin_loss_sum,
+        suit_margin_count=left.suit_margin_count + right.suit_margin_count,
+        suit_margin_violation_count=left.suit_margin_violation_count + right.suit_margin_violation_count,
+        suit_margin_teacher_sum=left.suit_margin_teacher_sum + right.suit_margin_teacher_sum,
+        suit_margin_student_sum=left.suit_margin_student_sum + right.suit_margin_student_sum,
     )
 
 
@@ -1025,6 +1036,88 @@ def _accumulate_suit_consistency_grads(
     )
 
 
+def _accumulate_suit_margin_grads(
+    *,
+    policy: A2CPolicy,
+    xs: np.ndarray,
+    action_masks: np.ndarray,
+    original_probs: np.ndarray,
+    encoder_version: EncoderVersion,
+    permutation: SuitPermutation,
+    beta: float,
+    margin_cap: float,
+    gw1: np.ndarray,
+    gb1: np.ndarray,
+    gw2: np.ndarray,
+    gb2: np.ndarray,
+) -> GradientStats:
+    """Aggiunge una hinge loss che preserva carta teacher e margine sotto rinomina."""
+    coefficient = float(beta)
+    cap = float(margin_cap)
+    if coefficient <= 0.0:
+        raise ValueError("beta della suit margin loss deve essere > 0")
+    if cap <= 0.0:
+        raise ValueError("margin_cap deve essere > 0")
+    if xs.ndim != 2 or action_masks.shape != (xs.shape[0], 40) or original_probs.shape != action_masks.shape:
+        raise ValueError(
+            f"Shape margin consistency invalide: xs={xs.shape}, masks={action_masks.shape}, "
+            f"probs={original_probs.shape}"
+        )
+
+    valid_rows = np.flatnonzero(np.sum(action_masks, axis=1) >= 2)
+    if valid_rows.size == 0:
+        return GradientStats(steps=0, value_loss_sum=0.0, anchor_ce_sum=0.0, anchor_ce_count=0, gbv=0.0)
+
+    source_probs = original_probs[valid_rows].astype(np.float32, copy=False)
+    source_masks = action_masks[valid_rows]
+    teacher_ids = np.argmax(source_probs, axis=1).astype(np.int64, copy=False)
+    epsilon = np.float32(1e-12)
+    source_log_probs = np.log(np.maximum(source_probs, epsilon))
+    source_other = np.where(source_masks, source_log_probs, np.float32(-1e9))
+    source_other[np.arange(valid_rows.size), teacher_ids] = np.float32(-1e9)
+    teacher_margins = source_log_probs[np.arange(valid_rows.size), teacher_ids] - np.max(source_other, axis=1)
+    target_margins = np.minimum(teacher_margins, np.float32(cap)).astype(np.float32, copy=False)
+
+    paired_xs = permute_encoded_features(xs[valid_rows], version=encoder_version, permutation=permutation)
+    paired_masks = permute_action_masks(source_masks, permutation=permutation)
+    paired_teacher_ids = permute_action_ids(teacher_ids, permutation=permutation).astype(np.int64, copy=False)
+    z1s, hs, _, _ = _forward_policy_batch(policy, xs=paired_xs, action_masks=paired_masks)
+    paired_logits = (hs @ policy.w2 + policy.b2).astype(np.float32, copy=False)
+    paired_other = np.where(paired_masks, paired_logits, np.float32(-1e9))
+    paired_other[np.arange(valid_rows.size), paired_teacher_ids] = np.float32(-1e9)
+    best_other_ids = np.argmax(paired_other, axis=1).astype(np.int64, copy=False)
+    student_margins = (
+        paired_logits[np.arange(valid_rows.size), paired_teacher_ids]
+        - paired_logits[np.arange(valid_rows.size), best_other_ids]
+    )
+    hinge = np.maximum(target_margins - student_margins, np.float32(0.0))
+    violating = hinge > 0.0
+
+    dlogits = np.zeros_like(paired_logits, dtype=np.float32)
+    violating_rows = np.flatnonzero(violating)
+    dlogits[violating_rows, paired_teacher_ids[violating_rows]] = np.float32(-coefficient)
+    dlogits[violating_rows, best_other_ids[violating_rows]] = np.float32(coefficient)
+    gw2 += (hs.T @ dlogits).astype(np.float32, copy=False)
+    gb2 += np.sum(dlogits, axis=0, dtype=np.float32)
+    dh = dlogits @ policy.w2.T
+    dz1 = dh * (z1s > 0.0)
+    gw1 += (paired_xs.T @ dz1).astype(np.float32, copy=False)
+    gb1 += np.sum(dz1, axis=0, dtype=np.float32)
+
+    return GradientStats(
+        steps=0,
+        value_loss_sum=0.0,
+        anchor_ce_sum=0.0,
+        anchor_ce_count=0,
+        gbv=0.0,
+        suit_margin_loss_sum=float(np.sum(hinge, dtype=np.float64)),
+        suit_margin_count=int(valid_rows.size),
+        suit_margin_violation_count=int(np.count_nonzero(violating)),
+        suit_margin_teacher_sum=float(np.sum(target_margins, dtype=np.float64)),
+        suit_margin_student_sum=float(np.sum(student_margins, dtype=np.float64)),
+    )
+
+
 def _accumulate_numba_batch_grads(
     *,
     policy: A2CPolicy,
@@ -1042,6 +1135,9 @@ def _accumulate_numba_batch_grads(
     suit_augmentation_rng: np.random.Generator | None = None,
     suit_consistency_rng: np.random.Generator | None = None,
     suit_consistency_beta: float = 0.0,
+    suit_margin_rng: np.random.Generator | None = None,
+    suit_margin_beta: float = 0.0,
+    suit_margin_cap: float = 2.0,
     encoder_version: EncoderVersion | None = None,
 ) -> GradientStats:
     """
@@ -1104,7 +1200,7 @@ def _accumulate_numba_batch_grads(
         gb2=gb2,
         gwv=gwv,
     )
-    if suit_augmentation_rng is None and suit_consistency_rng is None:
+    if suit_augmentation_rng is None and suit_consistency_rng is None and suit_margin_rng is None:
         return stats
     if encoder_version is None:
         raise ValueError("encoder_version obbligatorio con trasformazioni dei semi")
@@ -1145,6 +1241,22 @@ def _accumulate_numba_batch_grads(
                 gb2=gb2,
             )
             stats = _add_gradient_stats(stats, consistency_stats)
+        if suit_margin_rng is not None:
+            margin_stats = _accumulate_suit_margin_grads(
+                policy=policy,
+                xs=xs[trajectory_slice],
+                action_masks=action_masks[trajectory_slice],
+                original_probs=probs[trajectory_slice],
+                encoder_version=encoder_version,
+                permutation=sample_nonidentity_suit_permutation(suit_margin_rng),
+                beta=suit_margin_beta,
+                margin_cap=suit_margin_cap,
+                gw1=gw1,
+                gb1=gb1,
+                gw2=gw2,
+                gb2=gb2,
+            )
+            stats = _add_gradient_stats(stats, margin_stats)
     return stats
 
 
@@ -1354,6 +1466,21 @@ def main() -> int:
             "diventa target della copia rinominata. Non duplica il policy gradient A2C."
         ),
     )
+    parser.add_argument(
+        "--suit-margin-beta",
+        type=float,
+        default=0.0,
+        help=(
+            "Peso (>=0) della hinge sui semi: la carta argmax originale deve conservare "
+            "il proprio margine, limitato da --suit-margin-cap, nella copia rinominata."
+        ),
+    )
+    parser.add_argument(
+        "--suit-margin-cap",
+        type=float,
+        default=2.0,
+        help="Massimo margine logit richiesto dalla suit margin loss (default 2.0).",
+    )
     parser.add_argument("--update-every", type=int, default=20, help="Aggiorna i pesi ogni N partite (batch).")
     parser.add_argument("--log-every", type=int, default=200, help="Stampa metriche ogni N update.")
     parser.add_argument(
@@ -1404,8 +1531,19 @@ def main() -> int:
         raise ValueError("--bc-anchor-beta deve essere >= 0")
     if float(args.suit_consistency_beta) < 0.0:
         raise ValueError("--suit-consistency-beta deve essere >= 0")
-    if str(args.suit_augmentation) == "paired" and float(args.suit_consistency_beta) > 0.0:
-        raise ValueError("Provare separatamente --suit-augmentation paired e --suit-consistency-beta > 0")
+    if float(args.suit_margin_beta) < 0.0:
+        raise ValueError("--suit-margin-beta deve essere >= 0")
+    if float(args.suit_margin_cap) <= 0.0:
+        raise ValueError("--suit-margin-cap deve essere > 0")
+    active_suit_losses = sum(
+        (
+            str(args.suit_augmentation) == "paired",
+            float(args.suit_consistency_beta) > 0.0,
+            float(args.suit_margin_beta) > 0.0,
+        )
+    )
+    if active_suit_losses > 1:
+        raise ValueError("Provare separatamente paired, forward-KL e suit margin loss")
     if float(args.bc_anchor_beta) > 0.0 and not str(args.bc_anchor).strip():
         raise ValueError("Se `--bc-anchor-beta > 0` devi impostare anche `--bc-anchor <path.npz>`.")
     if int(args.opponent_value_max_unknown_cards) < 0:
@@ -1453,6 +1591,9 @@ def main() -> int:
     rng_suit_augmentation = np.random.default_rng(args.seed ^ 0x51A17A9E) if suit_augmentation == "paired" else None
     suit_consistency_beta = float(args.suit_consistency_beta)
     rng_suit_consistency = np.random.default_rng(args.seed ^ 0x0C05157E) if suit_consistency_beta > 0.0 else None
+    suit_margin_beta = float(args.suit_margin_beta)
+    suit_margin_cap = float(args.suit_margin_cap)
+    rng_suit_margin = np.random.default_rng(args.seed ^ 0x0A461A9E) if suit_margin_beta > 0.0 else None
 
     opponent_pool: OpponentPool | None = None
     fast_numba_model_opponent: FastNumbaModelOpponent | None = None
@@ -1634,7 +1775,7 @@ def main() -> int:
     # Inizializzazione policy/critic.
     policy_belief = None
     policy_belief_path = str(args.policy_belief_model).strip()
-    if (suit_augmentation == "paired" or suit_consistency_beta > 0.0) and policy_belief_path:
+    if (suit_augmentation == "paired" or suit_consistency_beta > 0.0 or suit_margin_beta > 0.0) and policy_belief_path:
         raise ValueError(
             "Le trasformazioni dei semi non supportano ancora --policy-belief-model: "
             "manca il contratto di permutazione delle 40 probabilità belief embedded."
@@ -1716,6 +1857,7 @@ def main() -> int:
     update_every = int(args.update_every)
     metrics: list[TrainMetrics] = []
     suit_consistency_metrics: list[dict[str, int | float]] = []
+    suit_margin_metrics: list[dict[str, int | float]] = []
 
     # Accumulo grad (batch).
     gw1 = np.zeros_like(policy.w1)
@@ -1736,6 +1878,11 @@ def main() -> int:
     anchor_ce_count = 0
     suit_consistency_kl_sum = 0.0
     suit_consistency_count = 0
+    suit_margin_loss_sum = 0.0
+    suit_margin_count = 0
+    suit_margin_violation_count = 0
+    suit_margin_teacher_sum = 0.0
+    suit_margin_student_sum = 0.0
 
     num_games = int(args.num_games)
     use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba"
@@ -1864,6 +2011,28 @@ def main() -> int:
                     "count": len(suit_consistency_metrics),
                     "first": suit_consistency_metrics[0] if suit_consistency_metrics else None,
                     "last": suit_consistency_metrics[-1] if suit_consistency_metrics else None,
+                }
+        if suit_margin_beta > 0.0:
+            payload["suit_margin_consistency"] = {
+                "mode": "teacher_argmax_hinge",
+                "beta": suit_margin_beta,
+                "margin_cap": suit_margin_cap,
+                "teacher": "original_argmax_and_capped_logit_margin",
+                "student": "nonidentity_suit_permutation",
+                "forced_actions": "excluded",
+                "permutation_scope": "whole_trajectory",
+                "permutation_distribution": "uniform_nonidentity_23",
+                "loss_normalization": "mean_over_original_on_policy_steps",
+                "rng_seed": int(args.seed ^ 0x0A461A9E),
+            }
+            if str(args.metrics_mode) == "full":
+                payload["suit_margin_metrics"] = suit_margin_metrics
+            else:
+                payload["suit_margin_metrics_summary"] = {
+                    "mode": "summary",
+                    "count": len(suit_margin_metrics),
+                    "first": suit_margin_metrics[0] if suit_margin_metrics else None,
+                    "last": suit_margin_metrics[-1] if suit_margin_metrics else None,
                 }
         if is_checkpoint:
             payload["checkpoint"] = {
@@ -2098,9 +2267,16 @@ def main() -> int:
                             suit_augmentation_rng=rng_suit_augmentation,
                             suit_consistency_rng=rng_suit_consistency,
                             suit_consistency_beta=suit_consistency_beta,
+                            suit_margin_rng=rng_suit_margin,
+                            suit_margin_beta=suit_margin_beta,
+                            suit_margin_cap=suit_margin_cap,
                             encoder_version=(
                                 encoder_version
-                                if rng_suit_augmentation is not None or rng_suit_consistency is not None
+                                if (
+                                    rng_suit_augmentation is not None
+                                    or rng_suit_consistency is not None
+                                    or rng_suit_margin is not None
+                                )
                                 else None
                             ),
                         )
@@ -2111,6 +2287,11 @@ def main() -> int:
                         anchor_ce_count += batch_grad_stats.anchor_ce_count
                         suit_consistency_kl_sum += batch_grad_stats.suit_consistency_kl_sum
                         suit_consistency_count += batch_grad_stats.suit_consistency_count
+                        suit_margin_loss_sum += batch_grad_stats.suit_margin_loss_sum
+                        suit_margin_count += batch_grad_stats.suit_margin_count
+                        suit_margin_violation_count += batch_grad_stats.suit_margin_violation_count
+                        suit_margin_teacher_sum += batch_grad_stats.suit_margin_teacher_sum
+                        suit_margin_student_sum += batch_grad_stats.suit_margin_student_sum
                         numba_batch_offset = 0
                     assert numba_batch is not None
                     numba_traj = _numba_batch_trajectory_at(numba_batch, numba_batch_offset)
@@ -2320,6 +2501,22 @@ def main() -> int:
                     gb2=gb2,
                 )
                 grad_stats = _add_gradient_stats(grad_stats, consistency_stats)
+            if rng_suit_margin is not None:
+                margin_stats = _accumulate_suit_margin_grads(
+                    policy=policy,
+                    xs=numba_traj_for_backprop.xs,
+                    action_masks=numba_traj_for_backprop.action_masks,
+                    original_probs=numba_traj_for_backprop.probs,
+                    encoder_version=encoder_version,
+                    permutation=sample_nonidentity_suit_permutation(rng_suit_margin),
+                    beta=suit_margin_beta,
+                    margin_cap=suit_margin_cap,
+                    gw1=gw1,
+                    gb1=gb1,
+                    gw2=gw2,
+                    gb2=gb2,
+                )
+                grad_stats = _add_gradient_stats(grad_stats, margin_stats)
             gbv += grad_stats.gbv
             grad_step_count += grad_stats.steps
             value_loss_sum += grad_stats.value_loss_sum
@@ -2327,6 +2524,11 @@ def main() -> int:
             anchor_ce_count += grad_stats.anchor_ce_count
             suit_consistency_kl_sum += grad_stats.suit_consistency_kl_sum
             suit_consistency_count += grad_stats.suit_consistency_count
+            suit_margin_loss_sum += grad_stats.suit_margin_loss_sum
+            suit_margin_count += grad_stats.suit_margin_count
+            suit_margin_violation_count += grad_stats.suit_margin_violation_count
+            suit_margin_teacher_sum += grad_stats.suit_margin_teacher_sum
+            suit_margin_student_sum += grad_stats.suit_margin_student_sum
         else:
             rewards = [step_rec.reward for step_rec in traj]
             returns_to_go = _compute_returns(rewards, gamma=float(args.gamma))
@@ -2422,6 +2624,26 @@ def main() -> int:
                 )
                 suit_consistency_kl_sum += consistency_stats.suit_consistency_kl_sum
                 suit_consistency_count += consistency_stats.suit_consistency_count
+            if rng_suit_margin is not None and traj:
+                margin_stats = _accumulate_suit_margin_grads(
+                    policy=policy,
+                    xs=np.stack([step_rec.x for step_rec in traj]),
+                    action_masks=np.stack([step_rec.action_mask for step_rec in traj]),
+                    original_probs=np.stack([step_rec.probs for step_rec in traj]),
+                    encoder_version=encoder_version,
+                    permutation=sample_nonidentity_suit_permutation(rng_suit_margin),
+                    beta=suit_margin_beta,
+                    margin_cap=suit_margin_cap,
+                    gw1=gw1,
+                    gb1=gb1,
+                    gw2=gw2,
+                    gb2=gb2,
+                )
+                suit_margin_loss_sum += margin_stats.suit_margin_loss_sum
+                suit_margin_count += margin_stats.suit_margin_count
+                suit_margin_violation_count += margin_stats.suit_margin_violation_count
+                suit_margin_teacher_sum += margin_stats.suit_margin_teacher_sum
+                suit_margin_student_sum += margin_stats.suit_margin_student_sum
 
         # Update ogni `update_every` partite.
         if game_idx % update_every == 0:
@@ -2471,6 +2693,18 @@ def main() -> int:
             avg_suit_consistency_kl = (
                 float(suit_consistency_kl_sum) / float(suit_consistency_count) if suit_consistency_count > 0 else 0.0
             )
+            avg_suit_margin_loss = (
+                float(suit_margin_loss_sum) / float(suit_margin_count) if suit_margin_count > 0 else 0.0
+            )
+            suit_margin_violation_rate = (
+                float(suit_margin_violation_count) / float(suit_margin_count) if suit_margin_count > 0 else 0.0
+            )
+            avg_suit_teacher_margin = (
+                float(suit_margin_teacher_sum) / float(suit_margin_count) if suit_margin_count > 0 else 0.0
+            )
+            avg_suit_student_margin = (
+                float(suit_margin_student_sum) / float(suit_margin_count) if suit_margin_count > 0 else 0.0
+            )
 
             row = TrainMetrics(
                 iter=t,
@@ -2491,15 +2725,31 @@ def main() -> int:
                         "avg_kl": avg_suit_consistency_kl,
                     }
                 )
+            if suit_margin_beta > 0.0:
+                suit_margin_metrics.append(
+                    {
+                        "iter": t,
+                        "games": game_idx,
+                        "avg_hinge": avg_suit_margin_loss,
+                        "violation_rate": suit_margin_violation_rate,
+                        "avg_teacher_margin": avg_suit_teacher_margin,
+                        "avg_student_margin": avg_suit_student_margin,
+                    }
+                )
 
             if t % int(args.log_every) == 0 or game_idx == update_every:
                 anchor_hint = "" if float(args.bc_anchor_beta) <= 0.0 else f" | anchor_ce {row.avg_anchor_ce:.3f}"
                 consistency_hint = "" if suit_consistency_beta <= 0.0 else f" | suit_kl {avg_suit_consistency_kl:.4f}"
+                margin_hint = (
+                    ""
+                    if suit_margin_beta <= 0.0
+                    else f" | suit_hinge {avg_suit_margin_loss:.3f} viol {suit_margin_violation_rate:.3f}"
+                )
                 print(
                     f"iter {t:04d} | games {game_idx:06d} | "
                     f"avg_return {row.avg_return:+.3f} | win {row.win_rate:.3f} draw {row.draw_rate:.3f} | "
                     f"entropy {row.avg_entropy:.3f} | vloss {row.value_loss:.4f}"
-                    f"{anchor_hint}{consistency_hint}"
+                    f"{anchor_hint}{consistency_hint}{margin_hint}"
                 )
 
             if game_idx in checkpoint_games:
@@ -2515,6 +2765,11 @@ def main() -> int:
             anchor_ce_count = 0
             suit_consistency_kl_sum = 0.0
             suit_consistency_count = 0
+            suit_margin_loss_sum = 0.0
+            suit_margin_count = 0
+            suit_margin_violation_count = 0
+            suit_margin_teacher_sum = 0.0
+            suit_margin_student_sum = 0.0
 
     _save_model(out_path, trained_games=num_games, is_checkpoint=False)
     return 0

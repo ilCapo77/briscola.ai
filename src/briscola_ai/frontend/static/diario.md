@@ -290,6 +290,10 @@ Le soste hanno dato una risposta netta. A 30.000 partite il cambiamento di carta
 
 Anche questa strada quindi si ferma prima della promozione. Il prossimo tentativo non dovrà chiedere soltanto probabilità simili: dovrà proteggere direttamente la carta scelta e il vantaggio che la separa dalla seconda scelta.
 
+La penalità sul margine riesce a conservare quella sicurezza e abbassa il cambiamento di carta fino al 14,42%, ma poi si ferma: renderla dieci volte più forte non produce un altro passo avanti. La forza contro la v13 resta indistinguibile, quindi neppure questo esperimento crea un nuovo campione.
+
+A questo punto smettiamo temporaneamente di insegnare. Il prossimo controllo prenderà la v13 così com'è, la farà rispondere a tutte le 24 versioni della stessa posizione e medierà le risposte riallineate. Il risultato sarà perfettamente indipendente dai nomi dei semi. Potremo così chiedere direttamente se eliminare il difetto fa davvero giocare meglio, prima di investire in un'altra architettura.
+
 <small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
 
 ## Epilogo

@@ -125,3 +125,7 @@ Il paradosso JS/flip è spiegato dal margine. Il gap top-2 medio vale circa `0,9
 decisa; più esempi possono attraversare il confine dell'argmax anche con distanze medie
 inferiori. Il prossimo esperimento deve quindi preservare direttamente carta scelta e
 margine, ad esempio con una loss hinge/ranking sulla copia rinominata.
+
+**Follow-up completato:** la hinge margin-aware conserva il gap top-2 ma satura al
+`14,42%` di flip con beta `0.3`; beta `1.0` non migliora e la forza contro v13 resta
+neutra. Nessun run lungo. Report: [`suit-margin-v0-2026-07-11.md`](suit-margin-v0-2026-07-11.md).
