@@ -15,10 +15,9 @@
   policy-only `-0.03` (CI `-0.38..+0.32`) e default PIMC 16×8 `+0.14` (CI `-0.20..+0.47`). Riduce però l'overkill di
   briscola su piatti poveri da circa `28-31%` a `6-8%`: **stessa forza, comportamento migliore**.
 - La sonda canonica di simmetria dei semi su 4.096 osservazioni v13 trova un flip dell'argmax nel **18,19%** delle
-  94.208 rinomine non banali (CI bootstrap per osservazione `17,38..18,93%`); il 51,17% degli stati cambia scelta
-  almeno una volta; nessuna delle 98.304 distribuzioni sulle 24 rinomine è un quasi-pareggio. Il segnale attraversa
-  fasi e avversari: la prima leva causale da testare è l'augmentation dei semi. Metodo e limiti:
-  `docs/plans/sonda-simmetria-semi-2026-07-11.md`.
+  94.208 rinomine non banali. L'ablation paired v0 su tre seed da 10k non supera il gate: flip medio `18,32% ->
+  18,84%` e head-to-head paired-vs-control `-0,15` punti/partita. Il flag resta sperimentale e spento; niente run
+  lunga. Metodo, numeri e interpretazione: `docs/plans/suit-augmentation-paired-v0-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -26,21 +25,23 @@
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
-- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 18,
-  `docs/diario/18-i-semi-non-hanno-nome.md`.
+- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 19,
+  `docs/diario/19-la-copia-non-basta.md`.
 
 ## Prossima Decisione
 
 La prima diagnostica riproducibile ha identificato una leva concreta: v13 attribuisce significato ai nomi arbitrari
-dei semi. Non basta però rendere le probabilità più simmetriche; l'intervento deve conservare o aumentare la forza.
-Ipotesi e criteri go/stop delle sette piste restano in `docs/plans/prossima-iterazione-modello.md`.
+dei semi. La duplicazione paired del loss A2C non l'ha corretta e ha introdotto un piccolo costo di forza. Non basta
+quindi mostrare alla rete la stessa traiettoria rinominata: serve un obiettivo che chieda direttamente output
+coerenti, senza trattare come on-policy un'azione campionata da un'altra distribuzione. Ipotesi e criteri go/stop
+delle sette piste restano in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Ablation training-only di suit augmentation paired.** Nello stesso update A2C, affiancare alla traiettoria
-   originale una copia con osservazioni e action id rinominati coerentemente; in alternativa, testare separatamente
-   una consistency loss. Sostituire ogni sample con una sola permutazione casuale non basta: il mazzo di training è
-   già simmetrico in distribuzione. Prima servono round-trip, parità esatta col flag off e verifica del pairing; poi
-   screening breve su tre seed. Ogni candidato va ripassato nella sonda e nei gate policy-only, PIMC 16×8 e decision
-   quality. Niente run lunga finché non riduce nettamente il flip senza regressioni.
+1. **Ablation di consistency loss sui semi.** Usare la trasformazione numerica già verificata, ma lasciare invariato
+   il loss A2C on-policy: aggiungere separatamente una cross-entropy/KL tra la policy sull'osservazione originale
+   (target con stop-gradient) e la policy sulla copia rinominata, dopo aver riallineato le 40 azioni. Prima fare un
+   test di gradiente che dimostri riduzione della divergenza su un batch congelato; poi screening breve a tre seed e
+   piccola griglia del coefficiente. Gate: calo netto di flip e JS, nessuna regressione policy-only; solo allora PIMC
+   16×8 e decision quality. Il paired A2C v0 è chiuso e non va semplicemente allungato.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.

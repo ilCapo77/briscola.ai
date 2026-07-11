@@ -57,6 +57,7 @@ from briscola_ai.ai.encoding.observation_encoder import (
     encode_player_observation_2p,
     feature_dim_for_encoder_version,
 )
+from briscola_ai.ai.evaluation.suit_symmetry import SuitPermutation
 from briscola_ai.ai.fast.evaluation import FAST_EVALUATION_AGENT_NAMES, choose_fast_card_index
 from briscola_ai.ai.fast.observation_encoder import encode_fast_observation_2p
 from briscola_ai.ai.fast.state_2p import Fast2PState, new_fast_2p_state, step_fast_2p
@@ -79,6 +80,11 @@ from briscola_ai.ai.numba.value_lookahead import (
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
+from briscola_ai.ai.training.suit_augmentation import (
+    permute_action_vectors,
+    permute_encoded_trajectory,
+    sample_nonidentity_suit_permutation,
+)
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
@@ -712,6 +718,58 @@ class GradientStats:
     gbv: float
 
 
+def _add_gradient_stats(left: GradientStats, right: GradientStats) -> GradientStats:
+    """Somma contatori di due accumuli che hanno già aggiornato gli stessi array gradiente."""
+    return GradientStats(
+        steps=left.steps + right.steps,
+        value_loss_sum=left.value_loss_sum + right.value_loss_sum,
+        anchor_ce_sum=left.anchor_ce_sum + right.anchor_ce_sum,
+        anchor_ce_count=left.anchor_ce_count + right.anchor_ce_count,
+        gbv=left.gbv + right.gbv,
+    )
+
+
+def _forward_policy_batch(
+    policy: A2CPolicy,
+    *,
+    xs: np.ndarray,
+    action_masks: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    """Forward vettoriale del trainer: ``z1, h, probs mascherate, value``."""
+    if xs.ndim != 2 or action_masks.shape != (xs.shape[0], 40):
+        raise ValueError(f"Shape batch invalide: xs={xs.shape}, masks={action_masks.shape}")
+    if xs.shape[1] != policy.feature_dim:
+        raise ValueError(f"Feature dim batch={xs.shape[1]} policy={policy.feature_dim}")
+    if not bool(np.all(np.any(action_masks, axis=1))):
+        raise ValueError("Action mask vuota nel batch")
+
+    z1s = xs @ policy.w1 + policy.b1
+    hs = np.maximum(z1s, np.float32(0.0))
+    logits = hs @ policy.w2 + policy.b2
+    masked_logits = np.where(action_masks, logits, np.float32(-1e9))
+    shifted = masked_logits - np.max(masked_logits, axis=1, keepdims=True)
+    exp = np.exp(shifted).astype(np.float32, copy=False)
+    probs = exp / np.sum(exp, axis=1, keepdims=True)
+    value_preds = hs @ policy.wv + np.float32(policy.bv)
+    return (
+        z1s.astype(np.float32, copy=False),
+        hs.astype(np.float32, copy=False),
+        probs.astype(np.float32, copy=False),
+        value_preds.astype(np.float32, copy=False),
+    )
+
+
+def _masked_model_probabilities(model: LoadedBCModel, *, xs: np.ndarray, action_masks: np.ndarray) -> np.ndarray:
+    """Distribuzioni batch di un anchor congelato sulle sole azioni legali."""
+    logits = np.asarray(model.logits(xs), dtype=np.float32)
+    if logits.shape != action_masks.shape:
+        raise ValueError(f"Output anchor {logits.shape} incompatibile con mask {action_masks.shape}")
+    masked = np.where(action_masks, logits, np.float32(-1e9))
+    shifted = masked - np.max(masked, axis=1, keepdims=True)
+    exp = np.exp(shifted).astype(np.float32, copy=False)
+    return (exp / np.sum(exp, axis=1, keepdims=True)).astype(np.float32, copy=False)
+
+
 def _accumulate_numba_trajectory_grads(
     *,
     policy: A2CPolicy,
@@ -727,6 +785,7 @@ def _accumulate_numba_trajectory_grads(
     value_coef: float,
     bc_anchor: LoadedBCModel | None,
     bc_anchor_beta: float,
+    anchor_target_probs: np.ndarray | None = None,
     gw1: np.ndarray,
     gb1: np.ndarray,
     gw2: np.ndarray,
@@ -764,12 +823,20 @@ def _accumulate_numba_trajectory_grads(
     anchor_ce_sum = 0.0
     anchor_ce_count = 0
     anchor_beta = float(bc_anchor_beta)
+    if anchor_target_probs is not None:
+        if anchor_target_probs.shape != probs.shape:
+            raise ValueError(f"Target anchor paired {anchor_target_probs.shape} incompatibile con probs {probs.shape}")
+        if bc_anchor is None:
+            raise ValueError("Target anchor paired fornito senza bc_anchor")
     if anchor_beta > 0.0 and bc_anchor is not None:
         for i in range(steps):
             mask = action_masks[i]
-            anchor_logits = bc_anchor.logits(xs[i])
-            anchor_masked = _masked_logits_1d(anchor_logits, mask)
-            anchor_probs = _softmax_1d(anchor_masked)
+            if anchor_target_probs is None:
+                anchor_logits = bc_anchor.logits(xs[i])
+                anchor_masked = _masked_logits_1d(anchor_logits, mask)
+                anchor_probs = _softmax_1d(anchor_masked)
+            else:
+                anchor_probs = anchor_target_probs[i]
             anchor_ce_sum += cross_entropy_from_probs(target_probs=anchor_probs, pred_probs=probs[i])
             grad_anchor = grad_ce_wrt_logits_from_probs(
                 pred_probs=probs[i],
@@ -807,6 +874,78 @@ def _accumulate_numba_trajectory_grads(
     )
 
 
+def _accumulate_paired_suit_trajectory_grads(
+    *,
+    policy: A2CPolicy,
+    xs: np.ndarray,
+    action_masks: np.ndarray,
+    action_ids: np.ndarray,
+    returns_to_go: np.ndarray,
+    encoder_version: EncoderVersion,
+    permutation: SuitPermutation,
+    entropy_beta: float,
+    value_coef: float,
+    bc_anchor: LoadedBCModel | None,
+    bc_anchor_beta: float,
+    gw1: np.ndarray,
+    gb1: np.ndarray,
+    gw2: np.ndarray,
+    gb2: np.ndarray,
+    gwv: np.ndarray,
+) -> GradientStats:
+    """
+    Accumula il gradiente della copia rinominata di una traiettoria.
+
+    Return e advantage target restano quelli della traiettoria originale: una rinomina
+    globale dei semi non cambia reward o valore strategico. L'anchor, se presente, viene
+    anch'esso trasformato dall'orientamento originale, invece di interrogare il teacher
+    asimmetrico sulla copia.
+    """
+    paired = permute_encoded_trajectory(
+        xs=xs,
+        action_masks=action_masks,
+        action_ids=action_ids,
+        version=encoder_version,
+        permutation=permutation,
+    )
+    z1s, hs, probs, value_preds = _forward_policy_batch(
+        policy,
+        xs=paired.xs,
+        action_masks=paired.action_masks,
+    )
+
+    anchor_targets: np.ndarray | None = None
+    if bc_anchor is not None and float(bc_anchor_beta) > 0.0:
+        original_targets = _masked_model_probabilities(
+            bc_anchor,
+            xs=xs,
+            action_masks=action_masks,
+        )
+        anchor_targets = permute_action_vectors(original_targets, permutation=permutation)
+
+    return _accumulate_numba_trajectory_grads(
+        policy=policy,
+        xs=paired.xs,
+        z1s=z1s,
+        hs=hs,
+        action_masks=paired.action_masks,
+        probs=probs,
+        action_ids=paired.action_ids,
+        value_preds=value_preds,
+        returns_to_go=returns_to_go,
+        entropy_beta=entropy_beta,
+        value_coef=value_coef,
+        bc_anchor=bc_anchor,
+        bc_anchor_beta=bc_anchor_beta,
+        anchor_target_probs=anchor_targets,
+        gw1=gw1,
+        gb1=gb1,
+        gw2=gw2,
+        gb2=gb2,
+        gwv=gwv,
+    )
+
+
 def _accumulate_numba_batch_grads(
     *,
     policy: A2CPolicy,
@@ -821,6 +960,8 @@ def _accumulate_numba_batch_grads(
     gw2: np.ndarray,
     gb2: np.ndarray,
     gwv: np.ndarray,
+    suit_augmentation_rng: np.random.Generator | None = None,
+    encoder_version: EncoderVersion | None = None,
 ) -> GradientStats:
     """
     Appiattisce un batch Numba e accumula i gradienti in una sola chiamata batch.
@@ -844,6 +985,7 @@ def _accumulate_numba_batch_grads(
     value_preds = np.empty((total_steps,), dtype=np.float32)
     returns_to_go = np.empty((total_steps,), dtype=np.float32)
 
+    trajectory_slices: list[slice] = []
     offset = 0
     for game_idx, raw_count in enumerate(batch.step_counts):
         count = int(raw_count)
@@ -858,9 +1000,10 @@ def _accumulate_numba_batch_grads(
         action_ids[sl] = batch.action_ids[game_idx, :count]
         value_preds[sl] = batch.value_preds[game_idx, :count]
         returns_to_go[sl] = _compute_returns_array(batch.rewards[game_idx, :count], gamma=gamma)
+        trajectory_slices.append(sl)
         offset += count
 
-    return _accumulate_numba_trajectory_grads(
+    stats = _accumulate_numba_trajectory_grads(
         policy=policy,
         xs=xs,
         z1s=z1s,
@@ -880,6 +1023,32 @@ def _accumulate_numba_batch_grads(
         gb2=gb2,
         gwv=gwv,
     )
+    if suit_augmentation_rng is None:
+        return stats
+    if encoder_version is None:
+        raise ValueError("encoder_version obbligatorio con suit augmentation paired")
+
+    for trajectory_slice in trajectory_slices:
+        paired_stats = _accumulate_paired_suit_trajectory_grads(
+            policy=policy,
+            xs=xs[trajectory_slice],
+            action_masks=action_masks[trajectory_slice],
+            action_ids=action_ids[trajectory_slice],
+            returns_to_go=returns_to_go[trajectory_slice],
+            encoder_version=encoder_version,
+            permutation=sample_nonidentity_suit_permutation(suit_augmentation_rng),
+            entropy_beta=entropy_beta,
+            value_coef=value_coef,
+            bc_anchor=bc_anchor,
+            bc_anchor_beta=bc_anchor_beta,
+            gw1=gw1,
+            gb1=gb1,
+            gw2=gw2,
+            gb2=gb2,
+            gwv=gwv,
+        )
+        stats = _add_gradient_stats(stats, paired_stats)
+    return stats
 
 
 @dataclass
@@ -1070,6 +1239,15 @@ def main() -> int:
     )
     parser.add_argument("--value-coef", type=float, default=0.5, help="Peso loss critic (MSE).")
     parser.add_argument("--gamma", type=float, default=1.0, help="Fattore di sconto per return-to-go (default: 1.0).")
+    parser.add_argument(
+        "--suit-augmentation",
+        choices=["off", "paired"],
+        default="off",
+        help=(
+            "Augmentation dei semi nel loss A2C. `paired` affianca a ogni traiettoria una copia "
+            "con una rinomina non-identità coerente; il rollout e il costo inference non cambiano."
+        ),
+    )
     parser.add_argument("--update-every", type=int, default=20, help="Aggiorna i pesi ogni N partite (batch).")
     parser.add_argument("--log-every", type=int, default=200, help="Stampa metriche ogni N update.")
     parser.add_argument(
@@ -1161,6 +1339,8 @@ def main() -> int:
     rng_game = np.random.default_rng(args.seed ^ 0x9E3779B9)
     rng_opponent_select = np.random.default_rng(args.seed ^ 0xA5A5A5A5)
     rng_opponent = random.Random(args.seed ^ 0xC0FFEE)
+    suit_augmentation = str(args.suit_augmentation)
+    rng_suit_augmentation = np.random.default_rng(args.seed ^ 0x51A17A9E) if suit_augmentation == "paired" else None
 
     opponent_pool: OpponentPool | None = None
     fast_numba_model_opponent: FastNumbaModelOpponent | None = None
@@ -1342,6 +1522,11 @@ def main() -> int:
     # Inizializzazione policy/critic.
     policy_belief = None
     policy_belief_path = str(args.policy_belief_model).strip()
+    if suit_augmentation == "paired" and policy_belief_path:
+        raise ValueError(
+            "--suit-augmentation paired non supporta ancora --policy-belief-model: "
+            "manca il contratto di permutazione delle 40 probabilità belief embedded."
+        )
     if policy_belief_path:
         if encoder_version != "v4":
             raise ValueError("--policy-belief-model richiede --encoder-version v4 (la belief legge feature v4).")
@@ -1536,6 +1721,15 @@ def main() -> int:
                 "requested_num_games": int(args.num_games),
             },
         }
+        if suit_augmentation == "paired":
+            payload["suit_augmentation"] = {
+                "mode": "paired",
+                "copies_per_trajectory": 1,
+                "permutation_scope": "whole_trajectory",
+                "permutation_distribution": "uniform_nonidentity_23",
+                "loss_normalization": "mean_over_original_and_copy",
+                "rng_seed": int(args.seed ^ 0x51A17A9E),
+            }
         if is_checkpoint:
             payload["checkpoint"] = {
                 "games": int(trained_games),
@@ -1766,6 +1960,8 @@ def main() -> int:
                             gw2=gw2,
                             gb2=gb2,
                             gwv=gwv,
+                            suit_augmentation_rng=rng_suit_augmentation,
+                            encoder_version=encoder_version if rng_suit_augmentation is not None else None,
                         )
                         gbv += batch_grad_stats.gbv
                         grad_step_count += batch_grad_stats.steps
@@ -1946,6 +2142,26 @@ def main() -> int:
                 gb2=gb2,
                 gwv=gwv,
             )
+            if rng_suit_augmentation is not None:
+                paired_stats = _accumulate_paired_suit_trajectory_grads(
+                    policy=policy,
+                    xs=numba_traj_for_backprop.xs,
+                    action_masks=numba_traj_for_backprop.action_masks,
+                    action_ids=numba_traj_for_backprop.action_ids,
+                    returns_to_go=returns_to_go_arr,
+                    encoder_version=encoder_version,
+                    permutation=sample_nonidentity_suit_permutation(rng_suit_augmentation),
+                    entropy_beta=float(args.entropy_beta),
+                    value_coef=float(args.value_coef),
+                    bc_anchor=bc_anchor,
+                    bc_anchor_beta=float(args.bc_anchor_beta),
+                    gw1=gw1,
+                    gb1=gb1,
+                    gw2=gw2,
+                    gb2=gb2,
+                    gwv=gwv,
+                )
+                grad_stats = _add_gradient_stats(grad_stats, paired_stats)
             gbv += grad_stats.gbv
             grad_step_count += grad_stats.steps
             value_loss_sum += grad_stats.value_loss_sum
@@ -2005,6 +2221,31 @@ def main() -> int:
                 dz1 = dh * (step_rec.z1 > 0.0)
                 gw1 += np.outer(step_rec.x, dz1).astype(np.float32)
                 gb1 += dz1.astype(np.float32)
+
+            if rng_suit_augmentation is not None and traj:
+                paired_stats = _accumulate_paired_suit_trajectory_grads(
+                    policy=policy,
+                    xs=np.stack([step_rec.x for step_rec in traj]),
+                    action_masks=np.stack([step_rec.action_mask for step_rec in traj]),
+                    action_ids=np.asarray([step_rec.action_id for step_rec in traj], dtype=np.int64),
+                    returns_to_go=np.asarray(returns_to_go, dtype=np.float32),
+                    encoder_version=encoder_version,
+                    permutation=sample_nonidentity_suit_permutation(rng_suit_augmentation),
+                    entropy_beta=float(args.entropy_beta),
+                    value_coef=float(args.value_coef),
+                    bc_anchor=bc_anchor,
+                    bc_anchor_beta=float(args.bc_anchor_beta),
+                    gw1=gw1,
+                    gb1=gb1,
+                    gw2=gw2,
+                    gb2=gb2,
+                    gwv=gwv,
+                )
+                gbv += paired_stats.gbv
+                grad_step_count += paired_stats.steps
+                value_loss_sum += paired_stats.value_loss_sum
+                anchor_ce_sum += paired_stats.anchor_ce_sum
+                anchor_ce_count += paired_stats.anchor_ce_count
 
         # Update ogni `update_every` partite.
         if game_idx % update_every == 0:

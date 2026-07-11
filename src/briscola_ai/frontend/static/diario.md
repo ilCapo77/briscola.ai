@@ -266,6 +266,24 @@ Il prossimo esperimento sarà insegnare la simmetria durante l'allenamento. Nell
 
 <small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/18-i-semi-non-hanno-nome.md)*</small>
 
+## Capitolo 19 — La copia non basta <small>(11 luglio 2026)</small>
+
+La prova proposta nel capitolo precedente sembrava quasi ovvia: se il modello si lascia influenzare dai nomi dei semi, mostriamogli due volte la stessa partita, prima con i nomi originali e poi con tutti i semi rinominati nello stesso modo. La mossa e il risultato restano gli stessi. In teoria, la rete dovrebbe imparare a ignorare le etichette.
+
+Prima di allenare abbiamo costruito una trasformazione controllata. Non cambia soltanto le carte in mano: rinomina anche briscola, tavolo, carte viste, memoria delle prese e le quaranta possibili mosse. I test confrontano questa scorciatoia numerica con la trasformazione completa della partita per tutte le 24 rinomine. Abbiamo verificato anche che, con l'opzione spenta, il trainer produca esattamente gli stessi pesi e le stesse informazioni di prima.
+
+Poi abbiamo creato sei copie della v13. Tre hanno continuato l'allenamento normale e tre hanno ricevuto, a ogni aggiornamento, anche la versione rinominata. Ogni coppia è partita dallo stesso modello, ha giocato gli stessi 10.000 mazzi e ha affrontato lo stesso gruppo di avversari. In questo modo l'unica differenza era la nuova lezione sui semi.
+
+Il risultato ha segno opposto a quello sperato. Nei tre controlli il cambio di carta dovuto ai nomi dei semi resta in media al 18,32%. Nei tre modelli con la copia sale al 18,84%. Anche la distanza fra le probabilità aumenta. Nei confronti diretti i modelli con la copia perdono in media 0,15 punti a partita rispetto ai loro controlli: poco, ma non c'è nessun guadagno che compensi il peggioramento della misura principale.
+
+Perché una lezione apparentemente corretta può fallire? Durante l'apprendimento per rinforzo una mossa non è soltanto un'etichetta scritta su un esempio: è una scelta che il giocatore ha davvero estratto dalle proprie probabilità. La mossa originale è stata scelta guardando la posizione originale. La sua copia rinominata, invece, non è stata scelta di nuovo dalla rete nella seconda posizione. Finché le due versioni della rete ragionano in modo diverso, trattarle come se avessero prodotto entrambe la stessa esperienza può aggiungere confusione.
+
+Diecimila partite sono uno screening, non una sentenza matematica su qualunque allenamento futuro. Ma lo screening serve proprio a questo: evitare milioni di partite quando tutti i primi segnali vanno nella direzione sbagliata. Nessun nuovo modello viene promosso e la v13 resta invariata.
+
+La trasformazione costruita non è sprecata. Il prossimo tentativo sarà più diretto: il modello guarderà la posizione originale e quella rinominata, e riceverà una piccola penalità quando le due risposte non coincidono dopo aver riallineato i nomi delle carte. Questa è una *consistency loss*, cioè un costo che chiede esplicitamente coerenza. L'allenamento normale continuerà a usare soltanto le mosse davvero giocate.
+
+<small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.

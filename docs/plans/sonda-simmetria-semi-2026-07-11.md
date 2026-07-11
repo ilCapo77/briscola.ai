@@ -189,6 +189,11 @@ trasformazione delle 369 feature deve essere verificata contro il riferimento se
 **Nessun training è stato avviato da questa sonda.** Il risultato autorizza l'esperimento,
 non sceglie ancora tra augmentation e consistency e non modifica il modello ufficiale.
 
+**Esito successivo:** il paired v0 è stato poi provato su tre seed da 10.000 partite e ha
+fallito il gate (flip medio `18,32% -> 18,84%`, direct match `-0,15` punti/partita). Non è
+stato promosso né esteso. Report:
+`docs/plans/suit-augmentation-paired-v0-2026-07-11.md`.
+
 ## Integrità dell'evidenza
 
 - Artefatto: `docs/reports/evidence/suit_symmetry_v13.v1.json`

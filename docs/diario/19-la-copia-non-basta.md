@@ -1,0 +1,78 @@
+# Approfondimento - La copia non basta
+
+**Capitolo del diario:** [Capitolo 19](https://ai.briscola.dev/diario) - **Periodo:** 11 luglio 2026
+
+## Dalla sonda all'ablation
+
+La sonda sui semi aveva trovato una proprietà misurabile: v13 cambia argmax nel 18,19%
+delle rinomine semanticamente equivalenti. La prima ipotesi causale era una data
+augmentation paired: nello stesso update A2C, affiancare alla traiettoria originale una
+copia trasformata con una delle 23 permutazioni non identità.
+
+L'implementazione trasforma feature v1-v4, action mask e action id con una sola
+permutazione per traiettoria. Reward e return restano invariati. La media del loss usa gli
+step originali e quelli copiati, quindi la scala non raddoppia. Un RNG separato evita di
+cambiare mazzi, azioni e avversari del ramo originale.
+
+## Controlli prima del training
+
+I test coprono quattro invarianti:
+
+1. per tutte le 24 permutazioni e gli encoder v1-v4, il vettore trasformato coincide con
+   `PlayerObservation -> permute -> encode`;
+2. trasformazione e inversa ricostruiscono esattamente batch, mask e action id;
+3. originale+copia identità, mediati su `2N`, producono lo stesso gradiente
+   dell'originale mediato su `N`;
+4. default storico e `--suit-augmentation off` producono array e metadata identici.
+
+Il paired è disponibile solo per input v1-v4. Una policy `v4+belief` da 409 feature viene
+rifiutata: le 40 probabilità belief embedded richiedono un contratto di permutazione
+separato e verificato.
+
+## Esperimento controllato
+
+Sono stati allenati tre controlli e tre trattamenti per 10.000 partite ciascuno, con seed
+`20260711..20260713`. Tutti partono da v13 e conservano ricetta, BC anchor v11, reward
+shaping, seat alternata e mix di avversari. Cambia soltanto
+`--suit-augmentation paired`.
+
+| ramo medio su 3 seed | flip | JS media | stati con flip |
+|---|---:|---:|---:|
+| controllo | 18,32% | 0,14124 bit | 51,20% |
+| paired | 18,84% | 0,14575 bit | 52,28% |
+| paired - controllo | **+0,53 pp** | **+0,00451 bit** | **+1,07 pp** |
+
+Ogni modello è poi stato valutato su 10.000 partite seat-fair della suite medium. Il
+paired perde in media `-0,15` punti/partita contro il controllo dello stesso seed. I
+controlli restano sostanzialmente pari a v13 (`-0,01`), mentre i paired fanno `-0,33`
+contro v13. Le differenze sono piccole, ma non esiste un segnale favorevole sulla metrica
+primaria che giustifichi gate più costosi.
+
+## Interpretazione
+
+Nel supervised learning si può duplicare liberamente un esempio se la trasformazione
+preserva l'etichetta. Il policy gradient ha un vincolo ulteriore: l'azione dovrebbe essere
+campionata dalla stessa distribuzione di policy di cui si sta stimando il gradiente. Qui
+l'azione copiata proviene dalla policy sull'osservazione originale, non da quella sulla
+versione rinominata. Proprio perché v13 è asimmetrica, le due distribuzioni differiscono.
+
+Questa osservazione non dimostra da sola la causa del risultato, ma rende la formulazione
+paired v0 un'approssimazione off-policy. Un run più lungo potrebbe teoricamente cambiare
+segno; i tre seed brevi dicono però che non merita il costo senza una formulazione più
+diretta.
+
+## Decisione
+
+**STOP** al paired A2C v0: nessuna promozione e nessun training lungo. Il flag resta
+spento per default per riproducibilità sperimentale.
+
+La prossima ablation separerà i due obiettivi. Il loss A2C resterà on-policy sull'esperienza
+originale. Un termine di consistency confronterà invece la distribuzione originale,
+fermata come target, con quella della copia dopo il riallineamento delle 40 azioni. Prima
+di allenare, un test su batch congelato dovrà mostrare che un update riduce davvero la
+divergenza.
+
+Protocollo, comandi, CI per seed e hash degli artefatti:
+[`docs/plans/suit-augmentation-paired-v0-2026-07-11.md`](../plans/suit-augmentation-paired-v0-2026-07-11.md).
+Evidenza sintetica:
+[`suit_augmentation_paired_v0.v1.json`](../reports/evidence/suit_augmentation_paired_v0.v1.json).
