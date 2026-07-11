@@ -18,8 +18,8 @@ forward normale a inference?
 - conserva il miglioramento comportamentale: overkill su piatto povero `5,5%`, fra v13
   (`8,0%`) e teacher (`3,9%`).
 
-**GO al corpus indipendente da 50.000 partite; nessuna promozione runtime o PIMC prima di
-quel gate.**
+**Il corpus indipendente da 50.000 partite ha poi superato il gate: GO al confronto PIMC
+16x8 medium; nessuna promozione prima di quel risultato.**
 
 ## Pipeline implementata
 
@@ -142,20 +142,73 @@ riaprire il difetto corretto da v13.
 Dataset, modelli candidati e report grezzi restano gitignored. L'evidenza sintetica
 versionata contiene i numeri necessari a riprodurre la decisione.
 
-## Prossimo gate
+## Estensione indipendente a 50.000 partite
 
-Generare un corpus indipendente da 50.000 partite con seed `20260712`, stesso roster e
-stesso split 80/10/10. Produce 1,9 milioni di esempi; il formato monolitico richiede circa
-3,2 GB di RAM durante la raccolta e circa 160 MB su disco. Per iterazioni successive sarà
-preferibile introdurre shard streaming, ma non è un prerequisito per questo gate singolo.
+Il corpus con seed `20260712`, stesso roster e split 80/10/10, contiene 50.000 partite e
+1,9 milioni di esempi. La raccolta ha richiesto `341,75 s`, più `27,57 s` di compressione;
+il file misura `162.757.578` byte. SHA-256:
+`87673a305615d2ced4cb016f7fd26fc44e061803d030101857e20e09e4b8ec30`.
 
-Il run 50k passa soltanto se:
+Il formato monolitico richiede circa 3,2 GB di RAM. Per iterazioni successive sarà
+preferibile introdurre shard streaming; il gate singolo è terminato senza errori.
+
+Stessa ricetta preregistrata del 10k, senza accordare epoche o learning rate sul risultato:
+
+| modello | agreement test | KL test | flip semi | JS media |
+|---|---:|---:|---:|---:|
+| v13 iniziale sul corpus 50k | 86,51% | 0,62683 | 18,19% | 0,14124 |
+| distillato 10k | 92,88% | 0,16861 | 10,23% | 0,06143 |
+| **distillato 50k** | **95,39%** | **0,06633** | **6,04%** | **0,02867** |
+
+Il gap top-2 del 50k resta `0,905`: la simmetria non deriva da una policy resa indecisa.
+Soltanto un confronto su 94.208 mostra near-tie al threshold `1e-4`.
+
+### Forza e comportamento 50k
+
+| agente A | agente B | punti A-B | CI95 |
+|---|---|---:|---:|
+| **distillato 50k** | v13 | **+0,66** | **+0,24..+1,09** |
+| distillato 50k | teacher 24x | -0,22 | -0,53..+0,09 |
+| distillato 50k | distillato 10k | +0,16 | -0,16..+0,48 |
+| distillato 50k | heuristic_v1 | +22,10 | +21,56..+22,64 |
+| distillato 50k | heuristic_trump_saver | +15,78 | +15,26..+16,30 |
+
+Più dati migliorano nettamente imitazione e simmetria; non dimostrano invece forza
+aggiuntiva sul 10k, perché la CI dello scontro diretto include zero. Il confronto causale
+con v13 resta positivo e quello col teacher neutro.
+
+Nel gate qualità contro `heuristic_v1`, overkill complessivo `21,77%`, overkill su piatto
+povero **`4,17%`** e trump waste `0,074%`: il candidato si avvicina ancora al teacher e
+resta migliore di v13 sui comportamenti preregistrati.
+
+Modello locale: `data/models/suit_distilled_v0_50k_seed20260712.npz`, 424.692 byte,
+SHA-256 `c413a704fff42838714baff791f706d6fe4f008e77ea86c750b0c2770d445cec`.
+
+## Gate PIMC
+
+Il probe da 200 partite era inconcludente (`-0,44`, CI `-3,05..+2,17`). Lo screening small
+da 2.000 partite è neutro ma senza regressione evidente: `+0,35`, CI `-0,53..+1,22`.
+Una partita richiede circa `0,076 s` quando entrambi i lati usano PIMC belief 16x8; il
+medium da 10.000 dura quindi circa 12-13 minuti e va lanciato dal maintainer.
+
+Il confronto usa la stessa belief v0, `uniform_mix=0.10`, finestra 8, 16 determinizzazioni
+e solver su entrambi i lati tramite il registry `bc_model_pimc_belief_16x8`; cambia soltanto
+il file policy. È questo il gate che decide se la forza policy-only arriva al default reale.
+
+Il candidato passa se la CI medium non dimostra una regressione contro v13. Un vantaggio
+positivo autorizzerebbe i controlli finali di catalogo/release; una neutralità manterrebbe
+aperta la scelta fra promuovere il comportamento più simmetrico e richiedere altra evidenza.
+Una regressione chiude la promozione PIMC anche se la policy-only è migliore.
+
+## Criteri registrati
+
+L'estensione 50k è passata perché:
 
 1. agreement test e KL migliorano rispetto al 10k;
 2. flip resta sotto 10,23% o almeno non supera il gate 12%;
 3. forza diretta contro v13 resta positiva e contro teacher non peggiora;
 4. overkill povero non supera v13;
-5. solo dopo, il candidato entra nel confronto PIMC 16x8 a pari configurazione.
+5. il probe PIMC small non mostra regressione significativa.
 
-Comando operativo in `PLAN.md`; il job di raccolta supera cinque minuti e va lanciato dal
-maintainer con `nohup`.
+Il comando PIMC medium è in `PLAN.md`; supera cinque minuti e va lanciato dal maintainer
+con `nohup`.

@@ -49,3 +49,18 @@ quel momento resta un candidato locale, non una nuova generazione ufficiale.
 
 Protocollo completo:
 [`docs/plans/suit-distillation-v0-2026-07-11.md`](../plans/suit-distillation-v0-2026-07-11.md).
+
+## Esito delle cinquantamila partite
+
+Il corpus indipendente più grande rafforza il risultato. L'accordo con il maestro sale al
+95,39% e il cambio di carta dovuto ai nomi dei semi scende ancora, dal 10,23% al 6,04%.
+La distanza fra le distribuzioni si riduce di oltre metà rispetto al modello da diecimila
+partite, senza rendere la rete meno decisa.
+
+Sul tavolo batte v13 di 0,66 punti a partita, con intervallo da +0,24 a +1,09. Contro il
+maestro a ventiquattro resta indistinguibile: -0,22, con intervallo da -0,53 a +0,09.
+L'overkill sui piatti poveri scende al 4,17%, ormai vicino al 3,9% del maestro.
+
+Il primo controllo dentro il PIMC, su duemila partite, dà +0,35 ma con un margine largo
+che comprende la parità. Non è una bocciatura e non è una promozione. Serve l'ultimo test
+da diecimila partite nella configurazione esatta del sito.

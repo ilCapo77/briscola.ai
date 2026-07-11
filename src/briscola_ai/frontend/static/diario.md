@@ -332,6 +332,10 @@ Non è ancora una nuova versione ufficiale. Diecimila partite sono lo screening 
 
 <small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/21-una-voce-sola.md)*</small>
 
+L'estensione a cinquantamila partite ha poi rafforzato il risultato. L'accordo con il consiglio sale al 95,39% e la dipendenza dai nomi dei semi scende ancora, dal 10,23% al 6,04%. Sul tavolo batte v13 di 0,66 punti a partita, con un margine d'incertezza da +0,24 a +1,09; l'overkill sui piatti poveri arriva al 4,17%, ormai vicino al maestro.
+
+Il primo controllo dentro il PIMC, su duemila partite, è neutro: +0,35 punti, ma con un intervallo che comprende ampiamente la parità. Resta quindi un ultimo test da diecimila partite nella configurazione esatta usata dal sito.
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.

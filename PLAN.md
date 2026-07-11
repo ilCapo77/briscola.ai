@@ -36,6 +36,10 @@
   **`10,23%`**, direct match vs v13 **`+0,51`** (CI `+0,11..+0,92`) e neutralità vs teacher 24x (`-0,23`, CI
   `-0,59..+0,13`). L'overkill povero resta migliore di v13 (`5,5%` vs `8,0%`). **GO al corpus indipendente 50k;
   candidato ancora locale, nessun catalogo/PIMC.** Report: `docs/plans/suit-distillation-v0-2026-07-11.md`.
+- L'estensione indipendente 50k migliora agreement a **`95,39%`**, KL a `0,0663` e flip a **`6,04%`**. Mantiene
+  forza policy-only (`+0,66` vs v13, CI `+0,24..+1,09`; `-0,22` vs teacher, CI `-0,53..+0,09`) e porta l'overkill
+  povero al `4,17%`. Il PIMC belief 16x8 small è neutro (`+0,35`, CI `-0,53..+1,22`). **GO al PIMC medium;
+  nessuna promozione prima del gate.**
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -48,14 +52,14 @@
 
 ## Prossima Decisione
 
-La distillazione 10k ha trasferito in una singola MLP gran parte del vantaggio del teacher simmetrico. Prima di
-toccare il default PIMC va verificato che il risultato regga su un corpus indipendente cinque volte più ampio.
-Ipotesi e criteri delle altre piste restano in `docs/plans/prossima-iterazione-modello.md`.
+La distillazione 50k ha superato i gate policy-only, simmetria e comportamento. Resta da verificare se il vantaggio
+sopravvive nel default reale PIMC belief 16x8. Ipotesi e criteri delle altre piste restano in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Estendere la distillazione a 50.000 partite indipendenti.** Stesso roster, ricetta e split per partita, seed
-   `20260712`; attesi 1,9M esempi. Il modello deve migliorare agreement/KL, restare sotto il 12% di flip, conservare
-   vantaggio su v13 e neutralità col teacher, senza peggiorare l'overkill povero. Solo dopo eseguire il gate PIMC
-   16x8. Se più dati non aiutano, non aumentare ancora: valutare pesi condivisi fra semi.
+1. **Gate PIMC belief 16x8 medium.** Confrontare distillato 50k e v13 sulla suite medium, stessi policy slot,
+   belief v0, `uniform_mix=0.10`, finestra 8, 16 determinizzazioni e solver. Il probe small è neutro; servono 10.000
+   partite per decidere. Se la CI dimostra regressione, stop promozione; se è neutra o positiva, completare audit
+   catalogo/report e decidere se il miglioramento di simmetria/comportamento giustifica la release.
 2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.
@@ -154,22 +158,26 @@ uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
   --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
 ```
 
-Corpus distillazione 50k (job oltre 5 minuti, circa 3,2 GB RAM durante la raccolta):
+Gate PIMC distillato 50k vs v13 (job circa 12-13 minuti):
 
 ```bash
-mkdir -p data/distillation benchmarks/experiments/suit_distillation_v0_50k_seed20260712
-nohup uv run python scripts/generate_suit_distillation_dataset.py \
-  --model data/models/best_a2c_v13.npz \
-  --out data/distillation/suit_teacher_v13_50k_seed20260712.npz \
-  --num-games 50000 --seed 20260712 --progress-every 500 \
-  > benchmarks/experiments/suit_distillation_v0_50k_seed20260712/generate.log 2>&1 &
+mkdir -p benchmarks/experiments/suit_distillation_v0_50k_seed20260712
+nohup uv run python scripts/evaluate_agents.py \
+  --benchmark medium --engine domain \
+  --agent0 bc_model_pimc_belief_16x8 \
+  --agent0-model data/models/suit_distilled_v0_50k_seed20260712.npz \
+  --agent1 bc_model_pimc_belief_16x8 \
+  --agent1-model data/models/best_a2c_v13.npz \
+  --out-json benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json \
+  > benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.log 2>&1 &
 ```
 
-Controllo avanzamento e artefatto atteso:
+Lo script stampa soltanto al termine; controllo processo e risultato:
 
 ```bash
-tail -f benchmarks/experiments/suit_distillation_v0_50k_seed20260712/generate.log
-ls -lh data/distillation/suit_teacher_v13_50k_seed20260712.npz
+pgrep -af "evaluate_agents.py.*suit_distilled_v0_50k"
+tail -30 benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.log
+cat benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json
 ```
 
 Avvio locale:

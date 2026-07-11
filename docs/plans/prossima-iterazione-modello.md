@@ -179,6 +179,10 @@ La prima distillazione su 10.000 partite supera lo screening: flip `10,23%`, `+0
 punti/partita contro v13 e neutralità col teacher 24x. Il gate successivo è un corpus
 indipendente da 50.000 partite; protocollo in `suit-distillation-v0-2026-07-11.md`.
 
+Il 50k porta il flip a `6,04%` e resta positivo contro v13 (`+0,66`, CI
+`+0,24..+1,09`). Il PIMC belief 16x8 small è neutro (`+0,35`, CI `-0,53..+1,22`):
+prossima e unica decisione del ramo è il confronto PIMC medium a pari configurazione.
+
 ## 5. Pista 3: dose e budget adattivo PIMC
 
 ### Domanda
