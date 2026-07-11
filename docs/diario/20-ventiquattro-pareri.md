@@ -1,6 +1,6 @@
 # Approfondimento - Ventiquattro pareri, una sola mossa
 
-**Capitolo del diario:** [Capitolo 20](https://ai.briscola.dev/diario) - **Periodo:** 11 luglio 2026
+**Approfondimento del diario:** [Capitolo 19](https://ai.briscola.dev/diario) - **Periodo:** 11 luglio 2026
 
 ## Il test che separa causa e sintomo
 

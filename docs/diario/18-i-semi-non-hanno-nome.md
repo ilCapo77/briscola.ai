@@ -69,7 +69,7 @@ PIMC 16x8 e decision quality.
 **Aggiornamento del seguito:** l'ablation paired è stata eseguita su tre seed da 10.000
 partite e non ha superato il primo gate: flip medio `18,32% -> 18,84%` e `-0,15`
 punti/partita contro i controlli corrispondenti. Il risultato e la nuova direzione sono nel
-[capitolo 19](19-la-copia-non-basta.md) e nella
+[secondo approfondimento del capitolo 18](19-la-copia-non-basta.md) e nella
 [nota di ablation](../plans/suit-augmentation-paired-v0-2026-07-11.md).
 
 Metodo completo: [`docs/plans/sonda-simmetria-semi-2026-07-11.md`](../plans/sonda-simmetria-semi-2026-07-11.md).

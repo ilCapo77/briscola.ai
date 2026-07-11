@@ -1,6 +1,6 @@
 # Approfondimento - Una voce sola
 
-**Capitolo del diario:** [Capitolo 21](https://ai.briscola.dev/diario) - **Periodo:** 11 luglio 2026
+**Approfondimento del diario:** [Capitolo 19](https://ai.briscola.dev/diario) - **Periodo:** 11–12 luglio 2026
 
 ## Dal consiglio alla singola rete
 

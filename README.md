@@ -555,8 +555,8 @@ non rompere e prossime azioni sono in **`PLAN.md`**.
 
 La storia del progetto — scelte, errori e svolte, raccontati in tono divulgativo — è il **diario di
 bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`). Il racconto arriva al
-**capitolo 19, “La copia non basta”**; gli approfondimenti tecnici, incluso
-`docs/diario/19-la-copia-non-basta.md`, vivono in `docs/diario/`.
+**capitolo 19, “Ventiquattro pareri, una sola voce”**; gli approfondimenti tecnici delle singole tappe, inclusa la
+distillazione finale in `docs/diario/21-una-voce-sola.md`, vivono in `docs/diario/`.
 
 ## Licenza
 

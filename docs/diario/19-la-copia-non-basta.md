@@ -1,6 +1,6 @@
 # Approfondimento - La copia non basta
 
-**Capitolo del diario:** [Capitolo 19](https://ai.briscola.dev/diario) - **Periodo:** 11 luglio 2026
+**Approfondimento del diario:** [Capitolo 18](https://ai.briscola.dev/diario) - **Periodo:** 11 luglio 2026
 
 ## Dalla sonda all'ablation
 

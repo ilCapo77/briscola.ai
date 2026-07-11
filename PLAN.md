@@ -51,8 +51,8 @@
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
-- Il diario pubblico e gli approfondimenti tecnici arrivano al capitolo 21,
-  `docs/diario/21-una-voce-sola.md`.
+- Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
+  separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 
 ## Prossima Decisione
 

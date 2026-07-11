@@ -248,95 +248,43 @@ Per questo la v13 diventa il nuovo default. Non perché sia "più intelligente" 
 
 ## Capitolo 18 — I semi non hanno nome <small>(11 luglio 2026)</small>
 
-Dopo la v13 abbiamo resistito alla tentazione di lanciare subito un altro allenamento. Il modello era arrivato a un punto in cui aggiungere partite, neuroni o regole senza sapere dove guardare rischiava di produrre soltanto un'altra variante quasi uguale. Serviva prima una domanda capace di isolare un difetto preciso.
+Dopo la v13 abbiamo resistito alla tentazione di lanciare subito un altro allenamento. Aggiungere partite, neuroni o regole senza sapere dove guardare rischiava di produrre soltanto un'altra variante quasi uguale. Serviva una domanda capace di isolare un difetto preciso.
 
-La domanda è semplice da raccontare. Prendiamo una posizione di Briscola e cambiamo i nomi dei quattro semi dappertutto: la mano, la briscola, il tavolo e tutte le carte già viste. I denari diventano coppe, le coppe diventano spade e così via. Non abbiamo cambiato la partita; abbiamo soltanto ristampato gli stessi simboli. La mossa del modello dovrebbe cambiare nome nello stesso modo, ma restare la stessa scelta strategica.
+La domanda è semplice. Prendiamo una posizione di Briscola e cambiamo i nomi dei quattro semi dappertutto: mano, briscola, tavolo e carte già viste. I denari diventano coppe, le coppe diventano spade e così via. La partita non cambia; abbiamo soltanto ristampato i simboli. Anche la scelta strategica dovrebbe restare la stessa, con la carta rinominata di conseguenza.
 
-Abbiamo provato tutte le 24 rinomine possibili su 4.096 decisioni della v13, distribuite fra quattro avversari e quattro fasi della partita. Le mosse obbligate sono state escluse: quando resta una sola carta, qualunque modello sembra perfettamente coerente. Anche il controllo più importante ha funzionato: senza rinominare nulla, il risultato torna identico fino all'ultimo numero.
+Abbiamo provato tutte le 24 rinomine possibili su 4.096 decisioni della v13. Nel **18,19%** dei confronti il modello sceglie una carta diversa soltanto perché sono cambiati i nomi dei semi. In più della metà delle posizioni basta almeno una ristampa per farlo cambiare idea. Non è semplice esitazione: le prime due carte non erano quasi pari secondo il modello.
 
-La sorpresa è grande. Nel 18,19% dei confronti la v13 sceglie una carta diversa soltanto perché abbiamo cambiato i nomi dei semi. E in poco più della metà delle posizioni basta almeno una delle 23 rinomine non banali per far cambiare la decisione. Non sono esitazioni sul filo del pareggio: nessuna delle 98.304 versioni esaminate aveva le prime due carte quasi pari secondo il modello.
+La causa possibile sta nel modo in cui la rete vede il gioco. I quattro semi occupano blocchi numerici distinti; durante l'allenamento nessuno le ha imposto che quei blocchi fossero intercambiabili. Può quindi conservare preferenze accidentali per una posizione del vettore, senza che corrispondano a una regola della Briscola.
 
-Il fenomeno attraversa tutta la partita. È un po' più forte quando l'IA apre la presa e quando ha tre carte fra cui scegliere, ma non sparisce nel finale, contro lo specchio o contro le euristiche. In alcuni casi le probabilità restano quasi uguali; in altri il modello passa con decisione quasi totale da una carta a un'altra.
+Il primo rimedio sembrava ovvio: mostrare al modello la stessa esperienza due volte, prima originale e poi coi semi rinominati. Sei copie della v13, tre controlli e tre trattamenti, stessi 10.000 mazzi. Il risultato andò nella direzione sbagliata: il cambio di carta salì dal 18,32% al 18,84% e i modelli trattati persero 0,15 punti a partita contro i loro controlli.
 
-Come può succedere? Per la rete i quattro semi occupano blocchi numerici distinti. Durante l'allenamento ha visto tutti i semi, ma nessuno le ha imposto che i loro nomi fossero intercambiabili. Può quindi aver conservato associazioni accidentali: non una regola della Briscola, ma una preferenza legata alla posizione in cui un seme finisce nel vettore.
+Il motivo riguarda il tipo di apprendimento. Nell'apprendimento per rinforzo una mossa è stata davvero estratta dalle probabilità della policy nella posizione originale. Copiarla nella posizione rinominata non significa che la policy l'avrebbe scelta anche lì. Finché le due versioni ragionano diversamente, trattare la copia come un'esperienza autentica può aggiungere confusione.
 
-Questo risultato non dice ancora che abbiamo trovato una mossa capace di farla vincere di più. Due carte diverse possono valere quasi lo stesso nella partita reale, anche se il modello è molto sicuro. Dice però che abbiamo finalmente una leva concreta e misurabile.
+Abbiamo allora chiesto coerenza in modo esplicito, con una piccola penalità quando le due risposte non coincidevano. Funzionò solo in parte: il cambio scese al 15,64%, ma prolungando il training tornò al 16,47% e il modello perse 0,77 punti. Le probabilità si avvicinavano soprattutto perché la rete diventava meno decisa. Una penalità successiva protesse il vantaggio della prima carta sulla seconda e arrivò al 14,42%, poi si fermò anche lei.
 
-Il prossimo esperimento sarà insegnare la simmetria durante l'allenamento. Nello stesso aggiornamento, alla traiettoria originale affiancheremo una copia con i semi rinominati e con tutte le mosse rinominate nello stesso modo. La coppia è importante: i mazzi casuali mostrano già tutti i semi con la stessa frequenza, quindi cambiare soltanto i nomi di un singolo esempio non aggiungerebbe una regola nuova. Non è un trucco da applicare sul sito e non costa tempo quando si gioca. La prova sarà superata solo se i cambi di scelta diminuiranno senza perdere punti contro gli avversari di controllo.
+Tre tentativi avevano chiarito il problema senza risolverlo. A quel punto abbiamo smesso di modificare il training e cambiato domanda: prima di cercare un altro modo per insegnare la simmetria, dovevamo sapere se eliminarne il difetto avrebbe fatto davvero giocare meglio.
 
-<small>🔬 *Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/18-i-semi-non-hanno-nome.md)*</small>
+<small>🔬 *Per chi vuole i dettagli: [la sonda iniziale](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/18-i-semi-non-hanno-nome.md) e [le ablation di training](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
 
-## Capitolo 19 — La copia non basta <small>(11 luglio 2026)</small>
+## Capitolo 19 — Ventiquattro pareri, una sola voce <small>(11–12 luglio 2026)</small>
 
-La prova proposta nel capitolo precedente sembrava quasi ovvia: se il modello si lascia influenzare dai nomi dei semi, mostriamogli due volte la stessa partita, prima con i nomi originali e poi con tutti i semi rinominati nello stesso modo. La mossa e il risultato restano gli stessi. In teoria, la rete dovrebbe imparare a ignorare le etichette.
+Il test decisivo non allenava nulla. Per ogni posizione la v13 guardava tutte le 24 ristampe possibili, riportava le risposte ai nomi originali e ne faceva la media. È come chiedere ventiquattro pareri allo stesso giocatore dopo aver cambiato soltanto le etichette sul tavolo. Per costruzione, il risultato non può più dipendere dal nome dei semi.
 
-Prima di allenare abbiamo costruito una trasformazione controllata. Non cambia soltanto le carte in mano: rinomina anche briscola, tavolo, carte viste, memoria delle prese e le quaranta possibili mosse. I test confrontano questa scorciatoia numerica con la trasformazione completa della partita per tutte le 24 rinomine. Abbiamo verificato anche che, con l'opzione spenta, il trainer produca esattamente gli stessi pesi e le stesse informazioni di prima.
+Ventiquattro pareri non significano ventiquattro volte il tempo. Le copie entrano nella rete tutte insieme, in un *batch*: la latenza media passa da 0,051 a 0,074 millisecondi, circa una volta e mezza. Era abbastanza poco per una prova, ma non ancora la soluzione ideale dentro il PIMC, dove la policy viene consultata molte volte per ogni mossa.
 
-Poi abbiamo creato sei copie della v13. Tre hanno continuato l'allenamento normale e tre hanno ricevuto, a ogni aggiornamento, anche la versione rinominata. Ogni coppia è partita dallo stesso modello, ha giocato gli stessi 10.000 mazzi e ha affrontato lo stesso gruppo di avversari. In questo modo l'unica differenza era la nuova lezione sui semi.
+Il confronto diretto rispose alla domanda rimasta aperta. Su 10.000 partite, con gli stessi mazzi e i posti scambiati, la versione perfettamente simmetrica batteva v13 di **0,90 punti a partita**. L'overkill sui piatti poveri scendeva dall'8,0% al 3,9%. Le associazioni accidentali con i nomi dei semi non erano soltanto disordine interno: costavano davvero forza.
 
-Il risultato ha segno opposto a quello sperato. Nei tre controlli il cambio di carta dovuto ai nomi dei semi resta in media al 18,32%. Nei tre modelli con la copia sale al 18,84%. Anche la distanza fra le probabilità aumenta. Nei confronti diretti i modelli con la copia perdono in media 0,15 punti a partita rispetto ai loro controlli: poco, ma non c'è nessun guadagno che compensi il peggioramento della misura principale.
+Per conservare il vantaggio con una sola valutazione abbiamo usato la risposta media come maestro. Questa tecnica si chiama *distillazione*: un sistema più costoso corregge direttamente un modello compatto. Non servivano milioni di nuove partite di apprendimento per rinforzo, perché v13 sapeva già giocare; servivano esempi precisi della correzione. Il corpus finale contiene 50.000 partite e **1,9 milioni di decisioni etichettate**, ciascuna derivata dai 24 pareri del maestro.
 
-Perché una lezione apparentemente corretta può fallire? Durante l'apprendimento per rinforzo una mossa non è soltanto un'etichetta scritta su un esempio: è una scelta che il giocatore ha davvero estratto dalle proprie probabilità. La mossa originale è stata scelta guardando la posizione originale. La sua copia rinominata, invece, non è stata scelta di nuovo dalla rete nella seconda posizione. Finché le due versioni della rete ragionano in modo diverso, trattarle come se avessero prodotto entrambe la stessa esperienza può aggiungere confusione.
+Le partite intere vengono separate fra allenamento, verifica ed esame finale. Nessuna mossa della stessa partita può attraversare quel confine. Durante il training ogni gruppo riceve anche una ristampa coerente: qui la copia è valida, perché posizione e risposta esplicita del maestro vengono trasformate insieme.
 
-Diecimila partite sono uno screening, non una sentenza matematica su qualunque allenamento futuro. Ma lo screening serve proprio a questo: evitare milioni di partite quando tutti i primi segnali vanno nella direzione sbagliata. Nessun nuovo modello viene promosso e la v13 resta invariata.
+La singola rete arriva a scegliere la stessa carta del maestro nel **95,39%** delle decisioni d'esame. La dipendenza dai nomi dei semi scende dal 18,19% della v13 al **6,04%**, senza rendere il modello meno deciso. Sulla sola policy batte v13 di 0,66 punti a partita e porta l'overkill sui piatti poveri al 4,17%.
 
-La trasformazione costruita non è sprecata. Il prossimo tentativo sarà più diretto: il modello guarderà la posizione originale e quella rinominata, e riceverà una piccola penalità quando le due risposte non coincidono dopo aver riallineato i nomi delle carte. Questa è una *consistency loss*, cioè un costo che chiede esplicitamente coerenza. L'allenamento normale continuerà a usare soltanto le mosse davvero giocate.
+Restava il controllo che conta per il sito. In 10.000 partite entrambi i giocatori hanno usato lo stesso PIMC belief 16x8, la stessa stima delle carte nascoste, lo stesso numero di mondi simulati e lo stesso solver. Cambiava soltanto la policy. Il distillato ha guadagnato **0,43 punti a partita**; il margine d'incertezza va da +0,03 a +0,84. Il vantaggio è piccolo, ma arriva fino al giocatore completo.
 
-La prima prova di questa seconda strada ha finalmente il segno giusto. Con tre intensità crescenti e tre allenamenti per ciascuna, il cambiamento di carta scende poco alla volta fino al 15,64%, contro il 18,32% dei controlli. La distanza fra le risposte diminuisce ancora più chiaramente. Nei confronti diretti contro la v13 la forza resta invece indistinguibile: la differenza media è -0,08 punti a partita e i margini di incertezza comprendono sempre la parità.
+Questa è la quattordicesima generazione. Non nasce da più forza bruta né da un nuovo enorme allenamento. Nasce da un'invariante del gioco, da tre rimedi bocciati, da un test che ha separato il difetto dalla sua importanza e infine da una rete che ha condensato ventiquattro pareri in una sola voce.
 
-Non è ancora una soluzione e non nasce un nuovo campione. È però la prima prova che chiedere esplicitamente coerenza corregge davvero una parte del difetto senza pagare una perdita evidente nel gioco. Il passo successivo sarà un allenamento intermedio, con soste programmate per controllare se il miglioramento continua oppure si ferma.
-
-Le soste hanno dato una risposta netta. A 30.000 partite il cambiamento di carta resta quasi fermo al 15,46% e la forza è ancora pari alla v13. A 50.000, invece, il cambiamento risale al 16,47% e tutti e tre gli allenamenti diventano più deboli, perdendo in media 0,77 punti a partita. Le probabilità delle versioni rinominate sono più vicine, ma il modello è anche meno deciso: la distanza fra la prima e la seconda carta si restringe, e basta una differenza più piccola per scambiarle.
-
-Anche questa strada quindi si ferma prima della promozione. Il prossimo tentativo non dovrà chiedere soltanto probabilità simili: dovrà proteggere direttamente la carta scelta e il vantaggio che la separa dalla seconda scelta.
-
-La penalità sul margine riesce a conservare quella sicurezza e abbassa il cambiamento di carta fino al 14,42%, ma poi si ferma: renderla dieci volte più forte non produce un altro passo avanti. La forza contro la v13 resta indistinguibile, quindi neppure questo esperimento crea un nuovo campione.
-
-A questo punto smettiamo temporaneamente di insegnare. Il prossimo controllo prenderà la v13 così com'è, la farà rispondere a tutte le 24 versioni della stessa posizione e medierà le risposte riallineate. Il risultato sarà perfettamente indipendente dai nomi dei semi. Potremo così chiedere direttamente se eliminare il difetto fa davvero giocare meglio, prima di investire in un'altra architettura.
-
-<small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
-
-## Capitolo 20 — Ventiquattro pareri, una sola mossa <small>(11 luglio 2026)</small>
-
-Dopo tre tentativi di insegnare la coerenza, la domanda più importante era ancora aperta. Il modello cambiava carta quando cambiavamo soltanto i nomi dei semi, ma non sapevamo se questo gli facesse davvero perdere partite. Due mosse diverse possono avere lo stesso valore, e correggere un difetto interno non garantisce un giocatore più forte.
-
-Questa volta non abbiamo allenato nulla. Abbiamo preso la v13 così com'è e, per ogni decisione, le abbiamo mostrato tutte le 24 ristampe possibili della stessa posizione. Ogni risposta è stata riportata ai nomi originali delle carte; poi abbiamo fatto la media e scelto la carta col valore più alto. È come chiedere ventiquattro pareri allo stesso giocatore dopo aver cambiato soltanto le etichette sul tavolo.
-
-Per costruzione, il risultato non può più dipendere dai nomi dei semi. Il controllo su 160 posizioni reali e 3.680 rinomine non banali ha trovato zero cambi di carta. E il costo è molto più piccolo di quanto suggerisca il numero ventiquattro: le copie entrano nella rete tutte insieme, in un *batch*, quindi la latenza media passa da circa 0,051 a 0,074 millisecondi. Una volta e mezza, non ventiquattro.
-
-Il confronto diretto ha finalmente separato il sintomo dalla causa. Su diecimila partite con gli stessi mazzi e i posti scambiati, la versione simmetrica batte la v13 originale di 0,90 punti a partita. Il margine d'incertezza va da +0,47 a +1,33: questa volta la parità resta fuori. Anche contro le due euristiche di controllo il vantaggio cresce di circa sette decimi.
-
-Non abbiamo ricomprato quei punti tornando a sprecare briscole. L'overkill sui piatti poveri, il comportamento corretto dalla v13, scende ancora: dall'8,0% al 3,9% nel controllo contro l'euristica storica. Le volte in cui usa una briscola anche se una carta normale avrebbe già vinto scendono da 99 a 41.
-
-Ora sappiamo qualcosa che prima mancava: le associazioni accidentali con i nomi dei semi non erano soltanto disordine nella testa del modello. Gli costavano davvero forza.
-
-La versione a ventiquattro pareri non diventa subito il giocatore del sito. Il default usa la ricerca PIMC e richiama la policy molte volte dentro le sue simulazioni; quel costo va studiato nel contesto giusto. Il prossimo passo sarà invece usare la risposta media come maestro e insegnarla a una sola rete. Il termine tecnico è *distillazione*: trasferire il comportamento di un sistema più costoso in un modello più compatto. Se funziona, una sola risposta conserverà ciò che oggi otteniamo chiedendone ventiquattro.
-
-<small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/20-ventiquattro-pareri.md)*</small>
-
-## Capitolo 21 — Una voce sola <small>(11 luglio 2026)</small>
-
-Il consiglio a ventiquattro aveva risposto alla domanda scientifica, ma non era ancora la soluzione più semplice da mettere in campo. Per ogni mossa chiedeva alla v13 di guardare tutte le ristampe della posizione e poi mediava le risposte. Funzionava e costava meno del previsto, ma il giocatore del sito usa quella policy molte volte dentro le simulazioni PIMC. Portare lì ventiquattro pareri per ogni scelta interna sarebbe un cambiamento più grande.
-
-Abbiamo quindi provato a trasferire il risultato in una sola rete. Il metodo si chiama *distillazione*: un sistema più costoso fa da maestro, un modello compatto osserva le sue risposte e impara a riprodurle. Il nuovo corpus contiene diecimila partite, pari a 380.000 decisioni non obbligate. Metà nasce da v13 contro se stessa; l'altra metà mescola quattro avversari con stili diversi.
-
-Questa volta le partite intere vengono assegnate all'allenamento, alla verifica oppure all'esame finale. Nessuna mossa della stessa partita può attraversare quel confine. È un dettaglio importante: separare a caso le singole decisioni permetterebbe alla rete di studiare una parte di una partita e ritrovarne un'altra nell'esame.
-
-Prima dell'allenamento v13 sceglie la stessa carta del consiglio nel 86,83% delle decisioni dell'esame. Dopo cinque passaggi sul corpus arriva al 92,88%. La dipendenza dai nomi dei semi scende dal 18,19% al 10,23%, sotto la soglia del 12% che i tentativi precedenti non erano riusciti a superare.
-
-La prova sul gioco conserva il segnale. Su diecimila partite con gli stessi mazzi e i posti scambiati, la singola rete batte v13 di 0,51 punti a partita; il margine d'incertezza va da +0,11 a +0,92. Contro il consiglio a ventiquattro perde 0,23 punti, ma l'intervallo comprende la parità. In altre parole, con questa misura non riusciamo a distinguerli nettamente.
-
-Anche il comportamento finisce nel punto giusto. L'overkill di briscola sui piatti poveri era all'8,0% per v13 e al 3,9% per il maestro; l'allievo distillato arriva al 5,5%. Ha assorbito una parte del miglioramento senza tornare al vecchio difetto.
-
-Non è ancora una nuova versione ufficiale. Diecimila partite sono lo screening che autorizza il passo successivo: un corpus indipendente da cinquantamila partite. Se il risultato regge, il modello verrà finalmente provato dentro il PIMC usato dal sito. Fino ad allora resta un candidato locale.
-
-<small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/21-una-voce-sola.md)*</small>
-
-L'estensione a cinquantamila partite ha poi rafforzato il risultato. L'accordo con il consiglio sale al 95,39% e la dipendenza dai nomi dei semi scende ancora, dal 10,23% al 6,04%. Sul tavolo batte v13 di 0,66 punti a partita, con un margine d'incertezza da +0,24 a +1,09; l'overkill sui piatti poveri arriva al 4,17%, ormai vicino al maestro.
-
-Il primo controllo dentro il PIMC, su duemila partite, è neutro: +0,35 punti, ma con un intervallo che comprende ampiamente la parità. Resta quindi un ultimo test da diecimila partite nella configurazione esatta usata dal sito.
-
-Anche l'ultimo test ha ora un risultato. Con lo stesso PIMC belief 16x8 su entrambi i lati, il distillato guadagna 0,43 punti a partita sulla v13; il margine d'incertezza va da +0,03 a +0,84. Per poco, ma la parità resta fuori anche nel giocatore completo del sito. Il candidato ha quindi superato tutti i criteri tecnici per diventare la quattordicesima generazione; restano il confezionamento della release e i controlli del catalogo online.
+<small>🔬 *Per chi vuole i dettagli: [il teacher a 24 pareri](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/20-ventiquattro-pareri.md) e [la distillazione della v14](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/21-una-voce-sola.md)*</small>
 
 ## Epilogo
 
