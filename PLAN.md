@@ -6,48 +6,24 @@
 
 ## Stato Corrente
 
-- Release corrente del repository: `0.35.1`. Il push di `master` attiva automaticamente il deploy su
+- Release corrente del repository: `0.36.0`. Il push di `master` attiva automaticamente il deploy su
   <https://ai.briscola.dev>; dopo ogni release verificare `/version`, asset ausiliari ed event log Postgres.
-- Il default effettivo della UI è `bc_model_pimc_belief_16x8` su `best_a2c_v13.npz`, senza guard runtime
+- Il default effettivo della UI è `bc_model_pimc_belief_16x8` su `best_a2c_v14.npz`, senza guard runtime
   anti-overkill. La 64×10 resta selezionabile come variante a budget massimo: nei gate storici a parità di policy era
-  più forte ma circa 6× più costosa; il confronto non è stato ripetuto sulla v13.
-- `best_a2c_v13.npz` usa encoder v4 (`feature_dim=369`, hidden 256). Rispetto a v11 è neutra sulla forza:
-  policy-only `-0.03` (CI `-0.38..+0.32`) e default PIMC 16×8 `+0.14` (CI `-0.20..+0.47`). Riduce però l'overkill di
-  briscola su piatti poveri da circa `28-31%` a `6-8%`: **stessa forza, comportamento migliore**.
-- La sonda canonica di simmetria dei semi su 4.096 osservazioni v13 trova un flip dell'argmax nel **18,19%** delle
-  94.208 rinomine non banali. L'ablation paired v0 su tre seed da 10k non supera il gate: flip medio `18,32% ->
-  18,84%` e head-to-head paired-vs-control `-0,15` punti/partita. Il flag resta sperimentale e spento; niente run
-  lunga. Metodo, numeri e interpretazione: `docs/plans/suit-augmentation-paired-v0-2026-07-11.md`.
-- La consistency loss separata supera invece lo screening a tre seed: con beta `0.1` il flip medio scende a
-  **15,64%** e la JS da `0,14124` a `0,10402` bit. È neutra contro v13 (`-0,08` punti/partita medi; tutte le CI
-  includono zero). Il follow-up chiude però il ramo: a 30k il flip si ferma a `15,46%` con forza neutra (`-0,02`),
-  a 50k risale a `16,47%` e la forza cala **`-0,77`** punti/partita, significativa su tutti i seed. La JS continua a
-  scendere, ma il margine top-2 si comprime. **STOP forward-KL v0; nessun gate PIMC e nessuna promozione.** Dettagli:
-  `docs/plans/suit-consistency-v0-2026-07-11.md`.
-- La successiva hinge sul margine evita il collasso di sicurezza ma non raggiunge il gate: il migliore beta `0.3`
-  porta il flip a **14,42%**, conserva il gap top-2 (`0,915` vs `0,929` dei controlli) ed è neutro contro v13
-  (`-0,14` punti/partita). Beta `1.0` non migliora: la curva è satura. **STOP margin v0; niente run lungo.** Report:
-  `docs/plans/suit-margin-v0-2026-07-11.md`.
-- La media esatta dei logits v13 sulle 24 rinomine chiude la domanda causale: flip `0`, costo inference solo `1,45x`
-  grazie al batch e vantaggio diretto **`+0,90` punti/partita** su v13 (CI `+0,47..+1,33`). Migliora anche sulle
-  due baseline e dimezza l'overkill su piatti poveri (`8,0% -> 3,9%`). **GO alla distillazione; nessuna promozione
-  runtime/PIMC del wrapper 24x.** Report: `docs/plans/suit-symmetrized-v13-2026-07-11.md`.
-- La distillazione v0 su 10.000 partite trasferisce il beneficio in una singola MLP: agreement test `92,88%`, flip
-  **`10,23%`**, direct match vs v13 **`+0,51`** (CI `+0,11..+0,92`) e neutralità vs teacher 24x (`-0,23`, CI
-  `-0,59..+0,13`). L'overkill povero resta migliore di v13 (`5,5%` vs `8,0%`). **GO al corpus indipendente 50k;
-  candidato ancora locale, nessun catalogo/PIMC.** Report: `docs/plans/suit-distillation-v0-2026-07-11.md`.
-- L'estensione indipendente 50k migliora agreement a **`95,39%`**, KL a `0,0663` e flip a **`6,04%`**. Mantiene
-  forza policy-only (`+0,66` vs v13, CI `+0,24..+1,09`; `-0,22` vs teacher, CI `-0,53..+0,09`) e porta l'overkill
-  povero al `4,17%`. Il PIMC belief 16x8 small è neutro (`+0,35`, CI `-0,53..+1,22`). **GO al PIMC medium;
-  nessuna promozione prima del gate.**
-- Il gate finale nel default reale passa: distillato 50k PIMC belief 16x8 vs v13 PIMC belief 16x8 fa **`+0,43`**
-  punti/partita su 10.000 partite, CI **`+0,03..+0,84`**. Score rate `50,89%` (CI `50,07..51,71%`). Il vantaggio
-  è piccolo ma sopravvive alla search a configurazione identica. **GO tecnico alla promozione come
-  `best_a2c_v14.npz`; bump minor proposto `0.36.0`.**
+  più forte ma circa 6× più costosa; il confronto non è stato ripetuto sulla v14.
+- `best_a2c_v14.npz` usa encoder v4 (`feature_dim=369`, hidden 256) e un solo forward normale. È distillata dalla
+  media esatta dei logits v13 sulle 24 rinomine dei semi, su 50.000 partite e 1,9 milioni di decisioni. Il flip
+  dell'argmax scende da `18,19%` a **`6,04%`** e l'overkill sui piatti poveri da `8,01%` a **`4,17%`**.
+- I gate di promozione v14 sono positivi: policy-only vs v13 **`+0,66`** punti/partita (CI `+0,24..+1,09`) e default
+  PIMC belief 16×8 vs v13 **`+0,43`** (CI `+0,03..+0,84`) su 10.000 partite seat-fair. Il controllo omogeneo big
+  100k Numba contro `heuristic_v1` fa `+21,76` (CI `+21,59..+21,93`) ed è l'ultima riga del grafico del report.
+- I tentativi precedenti paired-RL, forward-KL e margin hinge restano chiusi: non hanno raggiunto insieme il gate di
+  simmetria e quello di forza. Cronologia, criteri e artefatti sono in `docs/plans/suit-*.md`; il resoconto completo
+  della policy promossa è `docs/plans/suit-distillation-v0-2026-07-11.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
-- Il catalogo modelli espone v13 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
-  che sono asset interni. Policy v10/v11/v13, value e belief necessari al runtime sono tracciati in Git; gli altri
+- Il catalogo modelli espone v14 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
+  che sono asset interni. Policy v10/v11/v13/v14, value e belief necessari al runtime sono tracciati in Git; gli altri
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
@@ -56,22 +32,19 @@
 
 ## Prossima Decisione
 
-La distillazione 50k ha superato policy-only, simmetria, comportamento e PIMC belief 16x8. La prossima decisione è
-la promozione del candidato e la release. Ipotesi e criteri delle altre piste restano in
-`docs/plans/prossima-iterazione-modello.md`.
+La promozione v14 chiude la pista di simmetria. Le prossime prove devono cercare un limite nuovo e misurabile;
+ipotesi e criteri completi restano in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Promuovere v14 e preparare la release 0.36.0.** Copiare il candidato verificato come `best_a2c_v14.npz`,
-   aggiornare provisioning/default/catalogo e descrizioni UI, nascondendo sempre belief/value. Rigenerare
-   `model_progress.xlsx`, verificare il grafico fino alla riga v14, eseguire gate completo, bump `pyproject.toml` +
-   `uv.lock`, commit, tag annotato e push. Dopo il deploy verificare `/version`, catalogo e default PIMC.
-2. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
+1. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
    neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
    di per sé una prova che serva più capacità.
-3. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
+2. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
    curva è positiva, provare budget adattivo; se è piatta, chiudere la pista senza riaprire 8→10, già negativa.
+3. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
+   versione e filtrate dai bot, prima di usare osservazioni aneddotiche per proporre un nuovo obiettivo di training.
 
 Belief v1 e modifiche strutturali più ampie restano successive: una nuova belief va allenata contro un roster misto
-v13/anchor/euristiche, validata leave-one-opponent-out e poi confrontata v0-vs-v1 nello stesso PIMC 16×8. Le metriche
+v14/anchor/euristiche, validata leave-one-opponent-out e poi confrontata v0-vs-v1 nello stesso PIMC 16×8. Le metriche
 offline da sole non bastano per la promozione.
 
 ## Audit Di Campo
@@ -79,7 +52,7 @@ offline da sole non bastano per la promozione.
 - Le piste carichi guidati, timing dell'asso di briscola e cavata con mano lunga sono chiuse dalle ablation
   controfattuali: non riaprirle sulla base di singoli aneddoti. Riferimenti:
   `docs/plans/audit-campo-2026-07-07.md` e capitolo 17.
-- Ripetere l'audit solo con qualche centinaio di partite umane complete contro v13, separando per data/versione e
+- Ripetere l'audit solo con qualche centinaio di partite umane complete contro v14, separando per data/versione e
   filtrando bot/load test. I dati umani restano diagnostici: niente training prima di rivalutare volume, consenso,
   qualità e privacy.
 
@@ -124,23 +97,23 @@ curl -sS https://ai.briscola.dev/version
 curl -sS https://ai.briscola.dev/api/ai/models
 ```
 
-Export live v13 per il prossimo audit:
+Export live v14 per il prossimo audit:
 
 ```bash
 DATABASE_URL=... uv run python scripts/export_live_actions.py \
-  --code-version 0.35.1 \
+  --code-version 0.36.0 \
   --ai-agent bc_model_pimc_belief_16x8 \
-  --ai-model-id best_a2c_v13.npz \
+  --ai-model-id best_a2c_v14.npz \
   --exclude-client-id loadtest-bot \
-  --out data/prod_live_actions_v13.jsonl
+  --out data/prod_live_actions_v14.jsonl
 ```
 
 Gate locale e report:
 
 ```bash
 uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model data/models/best_a2c_v13.npz \
-  --agent1 bc_model --agent1-model data/models/best_a2c_v11.npz
+  --agent0 bc_model --agent0-model data/models/best_a2c_v14.npz \
+  --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
 uv run python scripts/build_model_report.py
 ```
 
@@ -148,34 +121,8 @@ Sonda riproducibile di simmetria dei semi:
 
 ```bash
 uv run python scripts/probe_suit_symmetry.py \
-  --model data/models/best_a2c_v13.npz \
-  --out-json docs/reports/evidence/suit_symmetry_v13.v1.json
-```
-
-Policy simmetrizzata, costo e direct match:
-
-```bash
-uv run python scripts/benchmark_suit_symmetrized.py \
-  --model data/models/best_a2c_v13.npz --observations 160 --decisions 10000
-uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model_suit_symmetrized --agent0-model data/models/best_a2c_v13.npz \
-  --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
-```
-
-Gate PIMC distillato 50k vs v13 completato:
-
-```bash
-cat benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json
-```
-
-Risultato atteso registrato:
-
-```bash
-uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model_pimc_belief_16x8 \
-  --agent0-model data/models/suit_distilled_v0_50k_seed20260712.npz \
-  --agent1 bc_model_pimc_belief_16x8 \
-  --agent1-model data/models/best_a2c_v13.npz
+  --model data/models/best_a2c_v14.npz \
+  --out-json data/suit_symmetry_v14.json
 ```
 
 Avvio locale:

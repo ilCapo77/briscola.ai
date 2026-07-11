@@ -838,8 +838,8 @@ def _parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--model",
         type=Path,
-        default=root / "data" / "models" / "best_a2c_v13.npz",
-        help="Policy .npz da analizzare (default: best_a2c_v13.npz)",
+        default=root / "data" / "models" / "best_a2c_v14.npz",
+        help="Policy .npz da analizzare (default: best_a2c_v14.npz)",
     )
     parser.add_argument(
         "--seed-suite",

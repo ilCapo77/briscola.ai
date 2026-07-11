@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "docs" / "reports" / "model_progress.xlsx"
 EVIDENCE_PATH = ROOT / "docs" / "reports" / "evidence" / "model_progress.v1.json"
 EVIDENCE_SCHEMA_VERSION = 1
-EVIDENCE_SNAPSHOT_DATE = "2026-07-11"
+EVIDENCE_SNAPSHOT_DATE = "2026-07-12"
 _XLSX_ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 
 
@@ -245,6 +245,27 @@ MODEL_SPECS: list[ModelSpec] = [
             "trump_saver or heuristic_v1 performance. Summary: same strength, better behavior."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v14",
+        path=_rel("data/models/best_a2c_v14.npz"),
+        role="official best",
+        status="promoted",
+        order=12,
+        progress_source=(
+            "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/eval_v14_vs_heuristic_v1_big_numba.json"
+        ),
+        progress_score=21.75808,
+        h2h_source="benchmarks/experiments/suit_distillation_v0_50k_seed20260712/eval_vs_v13_medium.json",
+        h2h_score=0.6626,
+        decision="Promoted as recommended model for the v0.36.0 release.",
+        notes=(
+            "A single MLP distilled from the exact average of v13 logits over all 24 suit renamings, "
+            "using 50k games and 1.9M labelled decisions. It reduces suit-dependent argmax flips from "
+            "18.19% to 6.04% while preserving decisiveness. It beats v13 policy-only by +0.66 "
+            "(CI +0.24..+1.09) and in the real PIMC belief 16x8 stack by +0.43 "
+            "(CI +0.03..+0.84). The homogeneous big 100k control vs heuristic_v1 reaches +21.76."
+        ),
+    ),
 ]
 
 
@@ -298,18 +319,24 @@ METRIC_PROTOCOLS: dict[str, dict[str, str]] = {
         "progress": "policy, guard off; medium 10k; suite medium; Numba; vs heuristic_v1",
         "h2h": "policy, guard off; medium 10k; suite medium; Numba; vs best_a2c_v11",
     },
+    "best_a2c_v14": {
+        "progress": "policy, guard off; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy, guard off; medium 10k; suite medium; domain; vs best_a2c_v13",
+    },
 }
 
 # Only these rows share the same benchmark/engine/seed protocol and therefore form the
 # chart. They use each model's promoted runtime configuration: v8-v10 include the guard,
-# v11 does not, so the series is not presented as pure architectural progress. v13 is
-# deliberately absent because its available promotion gate is medium 10k; its direct
-# policy and PIMC gates remain separately labelled in the evidence sheets.
+# v11 and v14 do not, so the series is not presented as pure architectural progress.
+# v13 is deliberately absent because its available promotion gate is medium 10k; its
+# direct policy and PIMC gates remain separately labelled in the evidence sheets. The
+# dedicated v14 big control lets the latest promoted model rejoin the comparable series.
 HOMOGENEOUS_CHART_MODEL_IDS = (
     "best_a2c_v8",
     "best_a2c_v9",
     "best_a2c_v10",
     "best_a2c_v11",
+    "best_a2c_v14",
 )
 
 
@@ -680,6 +707,26 @@ MILESTONES: list[dict[str, Any]] = [
         ),
         "source": "data/models/best_a2c_v13.npz + v13_overkill_gap_beta0300_5M_seed20260709 gates",
     },
+    {
+        "order": 19,
+        "date": "2026-07-12",
+        "model_id": "best_a2c_v14",
+        "type": "promoted",
+        "decision": "Promote the 50k suit-symmetry distillation as the recommended model for v0.36.0.",
+        "why": (
+            "The distilled policy keeps one normal forward pass while transferring most of the exact 24-view "
+            "teacher's suit invariance and its playing-strength benefit."
+        ),
+        "evidence": (
+            "Suit flips 18.19% -> 6.04%; policy-only +0.66 vs v13 (CI +0.24..+1.09); default PIMC belief "
+            "16x8 +0.43 vs v13 (CI +0.03..+0.84); big 100k Numba +21.76 vs heuristic_v1."
+        ),
+        "impact": (
+            "Default remains bc_model_pimc_belief_16x8, now backed by best_a2c_v14.npz; inference cost and "
+            "the no-guard runtime configuration remain unchanged."
+        ),
+        "source": "docs/plans/suit-distillation-v0-2026-07-11.md + suit_distillation_v0_50k_seed20260712 gates",
+    },
 ]
 
 
@@ -850,6 +897,11 @@ def _decision_quality_rows_from_local_sources() -> list[dict[str, Any]]:
             "Best A2C v13",
             "benchmarks/experiments/v13_overkill_gap_beta0300_5M_seed20260709/quality_v13_vs_heuristic_v1_medium.json",
         ),
+        (
+            "best_a2c_v14",
+            "Best A2C v14",
+            "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/quality_vs_heuristic_v1_medium.json",
+        ),
     ]
     rows = []
     for model_id, label, source in sources:
@@ -892,6 +944,7 @@ _PROMOTED_GUARD_BY_MODEL = {
     "best_a2c_v11_guard_on": True,
     "best_a2c_v12": False,
     "best_a2c_v13": False,
+    "best_a2c_v14": False,
 }
 
 
@@ -1219,6 +1272,30 @@ def _promotion_rows_from_local_sources() -> list[dict[str, Any]]:
             opponent="heuristic_v1",
         )
     )
+    rows.extend(
+        h2h_rows(
+            ("benchmarks/experiments/suit_distillation_v0_50k_seed20260712/eval_v14_vs_heuristic_v1_big_numba.json"),
+            model_id="best_a2c_v14",
+            label="Best A2C v14 policy",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/eval_vs_v13_medium.json",
+            model_id="best_a2c_v14",
+            label="Best A2C v14 policy",
+            opponent="best_a2c_v13_policy",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json",
+            model_id="best_a2c_v14",
+            label="Best A2C v14 PIMC 16x8",
+            opponent="best_a2c_v13_pimc16x8",
+        )
+    )
     return rows
 
 
@@ -1296,6 +1373,13 @@ def sources_rows() -> list[dict[str, Any]]:
             "path": "docs/diario/17-stessa-forza-comportamento-migliore.md",
             "data_quality": "curated_experiment_log",
             "note": "v13 policy/PIMC strength gates and behavior-quality evidence.",
+        },
+        {
+            "kind": "stable_narrative",
+            "id": "v14",
+            "path": "docs/plans/suit-distillation-v0-2026-07-11.md",
+            "data_quality": "curated_experiment_log",
+            "note": "v14 suit-distillation pipeline, policy/PIMC gates, and promotion decision.",
         },
     ]
     for spec in MODEL_SPECS:
@@ -1449,13 +1533,12 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v13 is the recommended .npz policy in current v0.35.1 (first promoted in v0.34.0) "
-                "and backs the default "
-                "bc_model_pimc_belief_16x8 stack without an overkill guard. Its medium 10k gates show no "
-                "material strength change from v11: policy-only -0.03 and PIMC 16x8 +0.14 head-to-head, "
-                "both confidence intervals crossing zero. The promotion is behavioral: low-lead trump "
-                "overkill falls from about 28-31% to 6-8%. v13 is excluded from the chart because no "
-                "homogeneous big 100k result is available."
+                "best_a2c_v14 is the recommended .npz policy in current v0.36.0 and backs the default "
+                "bc_model_pimc_belief_16x8 stack without an overkill guard. Distillation reduces suit-name "
+                "argmax flips from 18.19% on v13 to 6.04%. Medium 10k gates show a small strength gain: "
+                "policy-only +0.66 (CI +0.24..+1.09) and PIMC 16x8 +0.43 (CI +0.03..+0.84) against v13. "
+                "The homogeneous big 100k control vs heuristic_v1 is +21.76, so v14 is included as the "
+                "last chart row. v13 remains outside that chart because it has no big 100k result."
             ],
             [],
             ["Quick comparison"],

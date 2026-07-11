@@ -77,5 +77,6 @@ perde 4.758 e ne pareggia 306.
 
 Questo chiude la catena iniziata dai nomi dei semi: difetto misurato, causa verificata,
 maestro simmetrico, distillazione compatta e infine vantaggio conservato dentro la search.
-Il modello ha superato i criteri tecnici per diventare la quattordicesima generazione;
-restano il confezionamento della release e i controlli del catalogo online.
+Il modello ha superato i criteri tecnici ed è stato promosso come `best_a2c_v14.npz` nella
+release `0.36.0`. Il catalogo lo riconosce come policy compatibile e continua a nascondere
+gli asset interni value e belief.

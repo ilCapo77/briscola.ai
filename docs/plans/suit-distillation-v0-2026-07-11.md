@@ -1,6 +1,6 @@
 # Distillazione del teacher simmetrico v0 (2026-07-11)
 
-> Screening da 10.000 partite superato, nessuna promozione. Evidenza:
+> Pipeline completata e promossa come `best_a2c_v14.npz` nella release `0.36.0`. Evidenza:
 > [suit_distillation_v0.v1.json](../reports/evidence/suit_distillation_v0.v1.json).
 
 ## Domanda e verdetto
@@ -210,10 +210,14 @@ Non va sommato aritmeticamente al `+0,66` policy-only: sono due configurazioni e
 diversi. Entrambi rispondono però nella stessa direzione, senza regressioni sulle baseline
 o sui comportamenti di conservazione delle briscole.
 
-**Decisione tecnica: GO alla promozione.** Il modello va nominato `best_a2c_v14.npz`; la
-release è un cambiamento visibile del default e merita un bump minor pre-1.0, proposto
-`0.36.0`. Prima del push servono catalogo/UI, provisioning, report Excel, quality gate,
-tag annotato e verifica del deploy come previsto da `AGENTS.md`.
+**Decisione eseguita: promozione a `best_a2c_v14.npz` nella release `0.36.0`.** L'asset
+ufficiale conserva esattamente i quattro array del candidato e aggiunge metadati sintetici;
+SHA-256 `a67ed1d7f01ba1019f157134ade23fa9f822e442b671c83684bd4500e97695a8`.
+
+Il controllo aggiuntivo col protocollo storico omogeneo big 100k, seat-fair, Numba e seed
+`0..49.999` ottiene **`+21,75808` punti/partita** contro `heuristic_v1`, CI95
+`+21,59..+21,93`. Questo risultato non sostituisce il confronto causale con v13: serve a
+inserire v14 nel grafico di progressione senza mescolare il gate medium con i big precedenti.
 
 ## Criteri registrati
 

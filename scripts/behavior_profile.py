@@ -22,7 +22,7 @@ Regole misurate (tutte in fase pescate, salvo dove indicato):
                         durante le pescate ("l'asso di briscola si tiene per la fine").
 
 Esempio:
-  python scripts/behavior_profile.py --model data/models/best_a2c_v13.npz \\
+  python scripts/behavior_profile.py --model data/models/best_a2c_v14.npz \\
       --opponents heuristic_trump_saver,mirror,heuristic_v1 --num-games 2000
 """
 

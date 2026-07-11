@@ -43,8 +43,8 @@ def main() -> int:
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilita')")
     parser.add_argument(
         "--policy-model",
-        default="data/models/best_a2c_v13.npz",
-        help="Modello .npz che gioca entrambi i lati (default: best_a2c_v13)",
+        default="data/models/best_a2c_v14.npz",
+        help="Modello .npz che gioca entrambi i lati (default: best_a2c_v14)",
     )
     parser.add_argument(
         "--epsilon",

@@ -232,7 +232,7 @@ Lo stesso stato lecito può essere codificato a livelli crescenti di “memoria/
 - **v3** (`310`): v2 + 22 feature **strategiche aggregate**, leggibili: briscole/carichi ignoti, assi/tre usciti per seme, fase partita (`deck_size`, carte in mano, endgame flag), e info sulla presa corrente. Usa `out_of_play_cards_onehot` per distinguere “visto” da “fuori gioco”.
 - **v4** (`369`): v3 + 59 feature di **memoria delle prese** (`trick_history`): aggregati sul comportamento avversario
   (semi giocati, tagli, risposte, uscite con briscola/carichi) + dettaglio delle ultime 4 prese. È l'encoder della linea
-  promossa da v8 fino all'attuale `best_a2c_v13`; quando fu introdotto, il suo contributo isolato fu +0.27
+  promossa da v8 fino all'attuale `best_a2c_v14`; quando fu introdotto, il suo contributo isolato fu +0.27
   punti/partita (CI +0.12..+0.42).
 - **v4+belief** (`409`, solo policy sperimentali): v4 + 40 probabilità della belief network embedded. Come input
   diretto della policy è risultato negativo (−0.56: informazione ridondante); la belief resta invece utile per pesare
@@ -259,7 +259,7 @@ Il catalogo della UI espone:
   circa un sesto del costo della configurazione massima;
 - `bc_model_pimc_belief_64x10` – variante **massima** con 64 determinizzazioni e finestra 10: è la più forte nei
   benchmark storici a parità di policy, ma è sensibilmente più costosa, resta una scelta avanzata e non è stata
-  nuovamente confrontata con 16×8 sulla policy v13.
+  nuovamente confrontata con 16×8 sulla policy v14.
 
 Factory e strumenti offline supportano inoltre nomi diagnostici non mostrati nella UI: `heuristic_trump_saver`
 (sonda di exploitability), l'alias locale `best_a2c` e `bc_model_pimc_belief_16x10` (ablation eval-only della
@@ -318,7 +318,7 @@ Audit aggregato delle partite per versione/agente/modello, utile per capire se l
 log contiene anche eventi IA auditabili:
 
 ```bash
-DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.35.1 --show-games
+DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.36.0 --show-games
 DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_belief_16x8 --json
 ```
 
@@ -337,9 +337,9 @@ Export unico action-by-action per audit di campo (mosse umane + IA nello stesso 
 ```bash
 DATABASE_URL=... python scripts/export_live_actions.py \
   --ai-agent bc_model_pimc_belief_16x8 \
-  --ai-model-id best_a2c_v13.npz \
+  --ai-model-id best_a2c_v14.npz \
   --exclude-client-id loadtest-bot \
-  --out ./data/prod_live_actions_v13.jsonl
+  --out ./data/prod_live_actions_v14.jsonl
 ```
 
 **Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la
@@ -366,12 +366,12 @@ Confronti riproducibili senza UI/server:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v13.npz --agent1 heuristic_v1
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v14.npz --agent1 heuristic_v1
 
 # Diagnostica: la policy cambia se rinominiamo coerentemente i quattro semi?
 python scripts/probe_suit_symmetry.py \
-  --model ./data/models/best_a2c_v13.npz \
-  --out-json ./docs/reports/evidence/suit_symmetry_v13.v1.json
+  --model ./data/models/best_a2c_v14.npz \
+  --out-json ./data/suit_symmetry_v14.json
 ```
 
 Concetti chiave:
@@ -390,12 +390,12 @@ Strumenti aggiuntivi:
   È lo strumento per ablation della search; la distillazione PIMC→policy è invece un ramo storico chiuso.
 - `scripts/probe_suit_symmetry.py` – rinomina semanticamente mano, briscola, tavolo, storia e one-hot pubbliche sotto
   tutte le 24 permutazioni dei semi, poi rimappa le 40 azioni prima del confronto. Esclude le mosse forzate e usa solo
-  `PlayerObservation`: sulla v13, 4.096 stati bilanciati danno **18,19% di flip dell'argmax** e 51,17% di stati con
-  almeno un flip. La JS usa il softmax dei logits grezzi a temperatura 1 e non è una probabilità calibrata di
-  vittoria. Report e limiti sono in `docs/plans/sonda-simmetria-semi-2026-07-11.md`.
+  `PlayerObservation`: sulla v13 la sonda trovava **18,19% di flip dell'argmax**; la distillazione v14 li porta al
+  **6,04%**. La JS usa il softmax dei logits grezzi a temperatura 1 e non è una probabilità calibrata di vittoria.
+  Metodo e limiti sono in `docs/plans/sonda-simmetria-semi-2026-07-11.md` e nel report della distillazione v0.
 - **Guard anti‑overkill** (`inference_overkill_guard`): post-processing diagnostico che, da secondo di mano, gioca la
   briscola vincente **minima**. È attivabile dai metadati o con `BRISCOLA_BC_OVERKILL_GUARD=1` per A/B; il default
-  v13 non lo usa, perché il comportamento è stato corretto tramite reward shaping e deve restare una scelta appresa.
+  v14 non lo usa: la conservazione delle briscole resta una scelta appresa dalla policy, non una correzione runtime.
 
 ### Performance (fast path Python/Numba)
 
@@ -436,7 +436,7 @@ Il codice rimane per riproducibilità e didattica:
 
 Le ricette v6-v8 e i relativi risultati sono deliberatamente storici e vivono in
 `docs/plans/belief-expert-iteration.md`, nel report modelli e in `--help` degli script; non vanno interpretati come
-comandi per rigenerare l'attuale best v13.
+comandi per rigenerare gli esperimenti storici; l'attuale best v14 deriva invece dalla distillazione simmetrica.
 
 **Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
 - **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.
@@ -460,11 +460,11 @@ Tecniche utili (tutte come flag, vedi `--help`):
   `14,42%` di flip, sopra il gate `<12%`; ramo chiuso senza run lungo. Report:
   `docs/plans/suit-margin-v0-2026-07-11.md`;
 - **league**: allenare contro un campione congelato. L'alias `best_a2c` carica il file locale **legacy**
-  `best_a2c.npz`, non il campione ufficiale corrente. Per usare v13 indica `bc_model` nel mix e passa esplicitamente
-  `--opponent-model ./data/models/best_a2c_v13.npz` (il fast rollout Numba supporta al più un tipo di
+  `best_a2c.npz`, non il campione ufficiale corrente. Per usare v14 indica `bc_model` nel mix e passa esplicitamente
+  `--opponent-model ./data/models/best_a2c_v14.npz` (il fast rollout Numba supporta al più un tipo di
   opponent-modello per mix);
 - **value-lookahead opponent**: nel fast rollout Numba puoi allenare contro `bc_model_value_lookahead_8x8` passando sia
-  `--opponent-model ./data/models/best_a2c_v13.npz` sia
+  `--opponent-model ./data/models/best_a2c_v14.npz` sia
   `--opponent-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz`. Questo path usa lo stato numerico
   già determinizzato del rollout come singola determinizzazione: è un avversario di training forte, non una replica
   bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
@@ -477,20 +477,20 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-La policy ufficiale è **`data/models/best_a2c_v13.npz`** (encoder v4, hidden 256). È un warm-start da v11 allenato
-per 5M partite con reward shaping anti-overkill `gap`, `beta=0.3`. Non ha dimostrato un salto di forza su v11:
-policy-only `-0.03` (CI `-0.38..+0.32`) e stack PIMC belief 16×8 `+0.14` (CI `-0.20..+0.47`). Riduce però
-l'overkill di briscola sui piatti poveri da circa `28-31%` a `6-8%`. La descrizione corretta è quindi **stessa
-forza, comportamento migliore**, non “modello più forte”.
+La policy ufficiale è **`data/models/best_a2c_v14.npz`** (encoder v4, hidden 256). È una singola MLP distillata
+dalla media dei logits di v13 sulle 24 rinomine coerenti dei semi, usando 50.000 partite e 1,9 milioni di decisioni
+etichettate. Rispetto a v13 riduce il flip dell'argmax sotto rinomina dal `18,19%` al `6,04%`; nei gate medium da
+10.000 partite ottiene `+0,66` punti/partita come policy diretta (CI `+0,24..+1,09`) e `+0,43` nello stack PIMC
+belief 16×8 (CI `+0,03..+0,84`). L'overkill di briscola sui piatti poveri scende ulteriormente al `4,17%`.
 
-Il default effettivo della UI è **`bc_model_pimc_belief_16x8` su `best_a2c_v13.npz`**, senza guard runtime. Nel gate
+Il default effettivo della UI è **`bc_model_pimc_belief_16x8` su `best_a2c_v14.npz`**, senza guard runtime. Nel gate
 di scelta della configurazione, eseguito su v10, la 16×8 conservava l'87% del vantaggio della search (+3.37
 punti/partita rispetto alla policy pura) a circa 1/6 del costo CPU della 64×10. La
 `bc_model_pimc_belief_64x10` resta selezionabile come variante massima: nei gate storici a parità di policy aveva il
-miglior risultato grezzo, ma non è stata nuovamente confrontata sulla v13 e non è il default per ragioni di capacità
+miglior risultato grezzo, ma non è stata nuovamente confrontata sulla v14 e non è il default per ragioni di capacità
 e latenza. Anche `bc_model_value_lookahead_8x8` resta selezionabile come ramo storico più leggero.
 
-Gli asset runtime necessari al sito sono **tracciati in Git**: policy v10, v11 e v13, value model e belief network.
+Gli asset runtime necessari al sito sono **tracciati in Git**: policy v10, v11, v13 e v14, value model e belief network.
 Gli altri `.npz` in `data/models/`, i dataset e gli artefatti in `benchmarks/experiments/` restano locali e
 gitignored. Questa distinzione è intenzionale: il repository contiene ciò che serve a riprodurre il runtime e le
 milestone ufficiali, non l'intera storia dei run.
@@ -502,9 +502,9 @@ Gli asset versionati sono già inclusi nell'immagine di deploy. Il provisioning 
 se un file manca, può riscaricarlo dai Release asset configurati tramite env:
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v13.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.34.0/best_a2c_v13.npz
-BRISCOLA_MODEL_SHA256=5b1c6ea0bca7fd2c868e01d4d583cbc5df7bbef2ab86bbb3ded4b18b14c9f1cf
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v14.npz
+BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.36.0/best_a2c_v14.npz
+BRISCOLA_MODEL_SHA256=a67ed1d7f01ba1019f157134ade23fa9f822e442b671c83684bd4500e97695a8
 BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
 BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
 BRISCOLA_BELIEF_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.23.0/belief_v0_h128_50k_seed20260702.npz
@@ -525,9 +525,9 @@ uv run python scripts/build_model_report.py
 ```
 
 Serve a tracciare solo i modelli **significativi**: best ufficiali, teacher/anchor importanti e candidati scartati
-che spiegano una decisione. La Dashboard traccia soltanto la serie recente confrontabile v8-v11 (big 100k, stessi
-seed e configurazione promossa); i gate medium di v13 sono mostrati separatamente, senza mescolarli nel grafico. Le
-altre tab riportano milestone, dettagli modello, prove di promozione, decision quality, candidati scartati e fonti.
+che spiegano una decisione. La Dashboard traccia la serie confrontabile v8-v11 e v14 (big 100k, stessi seed e
+configurazione promossa); v13 resta fuori dal grafico perché dispone soltanto dei gate medium, riportati nelle tabelle
+di evidenza. Le altre tab contengono milestone, dettagli modello, prove di promozione, decision quality e fonti.
 
 Il build normale legge il manifest canonico versionato
 `docs/reports/evidence/model_progress.v1.json`, quindi funziona anche senza gli artefatti storici locali. Solo quando
@@ -542,13 +542,13 @@ Esempio di confronto testa-a-testa tra policy ufficiale e anchor precedente:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v13.npz \
-  --agent1 bc_model --agent1-model ./data/models/best_a2c_v11.npz
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v14.npz \
+  --agent1 bc_model --agent1-model ./data/models/best_a2c_v13.npz
 ```
 
 ## Stato e roadmap
 
-La release corrente del repository è `0.35.1`; ogni push di `master` viene distribuito automaticamente su
+La release corrente del repository è `0.36.0`; ogni push di `master` viene distribuito automaticamente su
 <https://ai.briscola.dev> tramite FastAPI Cloud, con stato partita su Redis, realtime via pub/sub ed event log
 Postgres in modalità `dataset`. Il deploy effettivo va controllato tramite `/version`. Stato corrente, invarianti da
 non rompere e prossime azioni sono in **`PLAN.md`**.

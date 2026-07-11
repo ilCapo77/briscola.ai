@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
-  "date": "2026-07-11",
-  "decision": "GO tecnico alla promozione come best_a2c_v14; release proposta 0.36.0",
+  "date": "2026-07-12",
+  "decision": "Promosso come best_a2c_v14 nella release 0.36.0",
   "dataset": {
     "path_local": "data/distillation/suit_teacher_v13_10k_seed20260711.npz",
     "sha256": "cdcfb37ec20b32deb76fa785e118c1083a60d6e7cc8dba474787eec6ec443275",
@@ -81,6 +81,13 @@
       "test_before": {"kl": 0.626825278640538, "argmax_agreement": 0.8650947368421052},
       "test_after": {"kl": 0.06633231871648775, "argmax_agreement": 0.9539}
     },
+    "official_asset": {
+      "path": "data/models/best_a2c_v14.npz",
+      "sha256": "a67ed1d7f01ba1019f157134ade23fa9f822e442b671c83684bd4500e97695a8",
+      "bytes": 429388,
+      "weights_identical_to_candidate": true,
+      "promotion_version": "0.36.0"
+    },
     "suit_symmetry": {
       "observations": 4096,
       "nonidentity_comparisons": 94208,
@@ -99,6 +106,16 @@
         {"opponent": "heuristic_v1", "avg_point_diff": 22.0978, "ci95": [21.56, 22.64]},
         {"opponent": "heuristic_trump_saver", "avg_point_diff": 15.7778, "ci95": [15.26, 16.30]}
       ]
+    },
+    "homogeneous_big_vs_heuristic_v1": {
+      "num_games": 100000,
+      "engine": "numba",
+      "seed_range": [0, 49999],
+      "avg_point_diff": 21.75808,
+      "ci95": [21.59, 21.93],
+      "wins": 77417,
+      "losses": 20561,
+      "draws": 2022
     },
     "decision_quality_medium_vs_heuristic_v1": {
       "trump_waste_rate": 0.0007389908534738628,
