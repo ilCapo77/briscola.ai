@@ -286,6 +286,10 @@ La prima prova di questa seconda strada ha finalmente il segno giusto. Con tre i
 
 Non è ancora una soluzione e non nasce un nuovo campione. È però la prima prova che chiedere esplicitamente coerenza corregge davvero una parte del difetto senza pagare una perdita evidente nel gioco. Il passo successivo sarà un allenamento intermedio, con soste programmate per controllare se il miglioramento continua oppure si ferma.
 
+Le soste hanno dato una risposta netta. A 30.000 partite il cambiamento di carta resta quasi fermo al 15,46% e la forza è ancora pari alla v13. A 50.000, invece, il cambiamento risale al 16,47% e tutti e tre gli allenamenti diventano più deboli, perdendo in media 0,77 punti a partita. Le probabilità delle versioni rinominate sono più vicine, ma il modello è anche meno deciso: la distanza fra la prima e la seconda carta si restringe, e basta una differenza più piccola per scambiarle.
+
+Anche questa strada quindi si ferma prima della promozione. Il prossimo tentativo non dovrà chiedere soltanto probabilità simili: dovrà proteggere direttamente la carta scelta e il vantaggio che la separa dalla seconda scelta.
+
 <small>*Per chi vuole i numeri e i dettagli: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/19-la-copia-non-basta.md)*</small>
 
 ## Epilogo

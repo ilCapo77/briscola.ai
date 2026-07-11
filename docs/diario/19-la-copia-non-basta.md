@@ -92,3 +92,15 @@ media `-0,08`; tutte le CI dei tre seed includono zero. Il risultato corretto è
 
 Il prossimo gate è un run intermedio da 50.000 partite con checkpoint. Report completo:
 [`docs/plans/suit-consistency-v0-2026-07-11.md`](../plans/suit-consistency-v0-2026-07-11.md).
+
+## Esito del run intermedio
+
+Il risultato a 50.000 partite impedisce la promozione. A 30k il flip medio resta quasi
+fermo a `15,46%` e la forza è ancora pari a v13. A 50k la JS scende ulteriormente, ma il
+flip risale a `16,47%` e tutti e tre i seed perdono forza: `-0,77` punti/partita medi.
+
+La rete sta rendendo le probabilità più vicine soprattutto diventando meno decisa. Il
+margine medio fra prima e seconda carta scende da circa `0,93` in v13 a `0,80`; così una
+piccola differenza residua può cambiare più facilmente l'argmax. La prossima loss dovrà
+proteggere direttamente la carta scelta e il suo margine, non soltanto ridurre una distanza
+fra distribuzioni.

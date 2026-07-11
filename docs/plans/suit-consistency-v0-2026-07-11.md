@@ -11,10 +11,12 @@ on-policy e aggiunto un obiettivo separato:
 
 `beta * KL(stopgrad(policy(originale)) || policy(copia rinominata))`.
 
-**Verdetto: GO a un run intermedio da 50k, non alla promozione.** La risposta è
-dose-dipendente. Beta `0.1` riduce il flip medio da `18,32%` a **`15,64%`** e la JS da
-`0,14124` a **`0,10402` bit**. Contro v13 resta neutro (`-0,08` punti/partita medi, CI di
-ogni seed compatibile con zero). Il difetto è migliorato ma non risolto.
+**Verdetto finale: STOP alla forward-KL v0, nessuna promozione.** Lo screening breve era
+dose-dipendente: beta `0.1` riduceva il flip medio da `18,32%` a **`15,64%`** senza perdita
+misurabile. Il follow-up mostra però che l'effetto non prosegue: a 30k il flip è `15,46%`,
+mentre a 50k risale a `16,47%` e la policy perde `-0,77` punti/partita contro v13. La JS
+continua a scendere, quindi il loss ottimizza la distanza numerica ma non la stabilità
+dell'argmax né la forza.
 
 ## Contratto implementato
 
@@ -69,11 +71,10 @@ seed sono `[-0,49; +0,21]`, `[-0,34; +0,35]`, `[-0,46; +0,25]`. Non c'è una reg
 misurabile, ma nemmeno una prova di maggiore forza. Il `+0,27` contro i controlli brevi va
 trattato come segnale secondario, non sommato aritmeticamente ai match contro v13.
 
-## Prossimo run
+## Run intermedio eseguito
 
-Il run 50k complessivo supera il limite operativo per una sessione agente. Questo comando
-esegue i tre seed **in sequenza**, salva checkpoint e log separati e può essere lanciato dal
-maintainer senza saturare la CPU con tre training contemporanei:
+Il run è stato eseguito sui tre seed **in sequenza**, con checkpoint e log separati. Il
+comando seguente resta come ricetta di riproduzione:
 
 ```bash
 mkdir -p benchmarks/experiments/suit_consistency_v0_50k
@@ -102,8 +103,25 @@ done
 ' > benchmarks/experiments/suit_consistency_v0_50k/driver.log 2>&1 &
 ```
 
-Artefatti attesi per seed: checkpoint `10k`, `30k`, `50k`, modello finale e log. Nel log
-controllare assenza di traceback/NaN, presenza di `Saved model` e andamento di `suit_kl`.
-Il passo successivo è sondare tutti i checkpoint: serve capire la traiettoria, non soltanto
-il valore finale. Solo un calo continuo verso `<9%` senza regressione policy-only autorizza
-PIMC 16x8 e decision quality.
+Sono stati prodotti tutti i checkpoint e i finali; i checkpoint 10k coincidono esattamente
+con lo screening precedente e tutti i tensori sono finiti. `suit_kl` scende indicativamente
+da `0,9-1,1` a `0,25-0,35` verso 50k.
+
+## Esito per checkpoint
+
+| checkpoint | flip medio | JS media (bit) | stati con flip | punti vs v13 |
+|---:|---:|---:|---:|---:|
+| 10k | 15,64% | 0,10402 | 44,94% | -0,08 |
+| 30k | **15,46%** | 0,08656 | **44,21%** | -0,02 |
+| 50k | 16,47% | **0,07605** | 47,16% | **-0,77** |
+
+A 30k la forza è neutra su tutti i seed (`+0,01`, `-0,12`, `+0,05`) ma il flip resta
+lontano dal gate `<12%`. A 50k la regressione è coerente (`-0,78`, `-0,88`, `-0,65`) e
+ogni CI95 esclude zero. Il ramo fallisce quindi sia il gate di simmetria sia quello di
+forza; PIMC 16x8 e decision quality non sono giustificati.
+
+Il paradosso JS/flip è spiegato dal margine. Il gap top-2 medio vale circa `0,93` in v13,
+`0,86` a 30k e `0,80` a 50k. La KL avvicina le distribuzioni ma rende la policy meno
+decisa; più esempi possono attraversare il confine dell'argmax anche con distanze medie
+inferiori. Il prossimo esperimento deve quindi preservare direttamente carta scelta e
+margine, ad esempio con una loss hinge/ranking sulla copia rinominata.
