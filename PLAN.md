@@ -20,6 +20,10 @@
 - I tentativi precedenti paired-RL, forward-KL e margin hinge restano chiusi: non hanno raggiunto insieme il gate di
   simmetria e quello di forza. Cronologia, criteri e artefatti sono in `docs/plans/suit-*.md`; il resoconto completo
   della policy promossa è `docs/plans/suit-distillation-v0-2026-07-11.md`.
+- La diagnostica ReLU su 4.096 stati trova **123/256 unità v14 quasi inattive** (`48,05%`; v13 `139/256`), nessuna
+  coppia quasi duplicata e nessuna dipendenza fragile da una singola unità (massimo `4,03%` di scelte cambiate).
+  Togliere la migliore unità per la simmetria riduce i flip solo `6,06% -> 5,57%`: il residuo è distribuito.
+  **STOP widening 320/384.** Report: `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v14 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -29,15 +33,18 @@
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
+- La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
+  ma chi conosce un game id può leggere mani e prossima carta. Il codice resta chiuso per default; rimuovere l'override
+  quando il debug pubblico non serve più.
 
 ## Prossima Decisione
 
-La promozione v14 chiude la pista di simmetria. Le prossime prove devono cercare un limite nuovo e misurabile;
-ipotesi e criteri completi restano in `docs/plans/prossima-iterazione-modello.md`.
+La promozione v14 chiude la pista di simmetria e la diagnostica non giustifica una rete più larga. Le prossime prove
+devono distinguere capacità dormiente da stati rari; ipotesi generali in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Completare la diagnostica delle ReLU.** Misurare activation rate, contributo ai logits e flip per ablation del
-   neurone. Il widening `256→320/384` resta subordinato a un collo di bottiglia misurato; la simmetria trovata non è
-   di per sé una prova che serva più capacità.
+1. **Confermare le unità dormienti su holdout.** Su seed indipendenti azzerare insieme le 123 unità quasi inattive e
+   verificare agreement, simmetria e un direct match. Solo se l'effetto resta nullo provare a reinizializzarne una
+   piccola parte durante nuova distillazione; niente potatura o modifica di v14 live.
 2. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
    curva è positiva, provare budget adattivo; se è piatta, chiudere la pista senza riaprire 8→10, già negativa.
 3. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
@@ -123,6 +130,12 @@ Sonda riproducibile di simmetria dei semi:
 uv run python scripts/probe_suit_symmetry.py \
   --model data/models/best_a2c_v14.npz \
   --out-json data/suit_symmetry_v14.json
+```
+
+Diagnostica delle unità ReLU:
+
+```bash
+uv run python scripts/diagnose_hidden_units.py
 ```
 
 Avvio locale:

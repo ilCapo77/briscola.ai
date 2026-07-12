@@ -393,6 +393,9 @@ Strumenti aggiuntivi:
   `PlayerObservation`: sulla v13 la sonda trovava **18,19% di flip dell'argmax**; la distillazione v14 li porta al
   **6,04%**. La JS usa il softmax dei logits grezzi a temperatura 1 e non è una probabilità calibrata di vittoria.
   Metodo e limiti sono in `docs/plans/sonda-simmetria-semi-2026-07-11.md` e nel report della distillazione v0.
+- `scripts/diagnose_hidden_units.py` – confronta v14 e v13 sugli stessi 4.096 stati e misura attivazioni, rango
+  effettivo, correlazioni e ablation esatta di ogni unità ReLU. Il primo audit trova 123/256 unità v14 quasi inattive
+  e non giustifica il widening 320/384; protocollo e limiti in `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md`.
 - **Guard anti‑overkill** (`inference_overkill_guard`): post-processing diagnostico che, da secondo di mano, gioca la
   briscola vincente **minima**. È attivabile dai metadati o con `BRISCOLA_BC_OVERKILL_GUARD=1` per A/B; il default
   v14 non lo usa: la conservazione delle briscole resta una scelta appresa dalla policy, non una correzione runtime.
