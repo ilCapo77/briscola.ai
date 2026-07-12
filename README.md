@@ -537,6 +537,16 @@ Il build normale legge il manifest canonico versionato
 si aggiornano le prove a partire dai `.npz` e benchmark originali si usa
 `uv run python scripts/build_model_report.py --refresh-evidence`, revisionando insieme manifest e foglio generato.
 
+Il gate documentale completo è ermetico e non controlla URL esterni:
+
+```bash
+make docs-check
+```
+
+Valida JSON rigoroso, link locali e link GitHub interni, coerenza fra versione/modello/documenti, sequenza dei
+capitoli e uguaglianza byte-per-byte del report Excel rigenerato in una directory temporanea. Il comando canonico
+sottostante è `uv run python scripts/check_docs.py` ed è eseguito anche dalla CI.
+
 Aggiornalo quando promuovi un nuovo best o quando un esperimento importante cambia una decisione. Non usarlo come dump
 di tutti i run: gli esperimenti locali restano in `benchmarks/experiments/` (gitignored), mentre il report conserva la
 narrazione sintetica e verificabile.

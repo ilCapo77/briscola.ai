@@ -1,5 +1,5 @@
 # CI del progetto: replica il quality gate documentato in AGENTS.md
-# (ruff format/check, mypy, pytest) su ogni push/PR, così nessun commit
+# (ruff format/check, mypy, docs-check, pytest) su ogni push/PR, così nessun commit
 # può arrivare su GitHub senza essere stato eseguito e testato.
 name: CI
 
@@ -36,6 +36,9 @@ jobs:
 
       - name: Mypy
         run: uv run mypy src
+
+      - name: Documentazione ed evidenze
+        run: make docs-check
 
       - name: Pytest (con coverage)
         run: uv run pytest --cov=briscola_ai --cov-report=term-missing:skip-covered

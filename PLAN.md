@@ -94,6 +94,7 @@ Quality gate:
 uv run ruff format src tests scripts
 uv run ruff check --fix src tests scripts
 uv run mypy src
+make docs-check
 uv run pytest
 ```
 

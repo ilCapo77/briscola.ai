@@ -104,13 +104,15 @@ Se le modifiche toccano Python (codice/test), esegui e correggi:
 
 - `ruff format src tests scripts` e `ruff check --fix src tests scripts` (import sorting incluso via regole `I`; **niente** `black`/`isort`)
 - `mypy src`
+- `make docs-check` (JSON rigoroso, link locali, versione/modello, capitoli diario e report Excel aggiornato)
 - `pytest`
   - singolo file: `pytest tests/test_trick_rules.py`
   - singolo test: `pytest tests/test_trick_rules.py::test_name` (o `pytest -k "pattern"`)
   - ciclo rapido (salta subprocess e compilazioni JIT): `pytest -m "not slow and not numba"`
   - coverage: `pytest --cov=briscola_ai`
 
-La CI GitHub Actions (`.github/workflows/ci.yml`) replica lo stesso gate (ruff format/check, mypy, pytest+coverage) su ogni push/PR: deve restare allineata a questa sezione.
+La CI GitHub Actions (`.github/workflows/ci.yml`) replica lo stesso gate (ruff format/check, mypy, docs-check,
+pytest+coverage) su ogni push/PR: deve restare allineata a questa sezione.
 
 Aggiorna `PLAN.md` se necessario (deve riflettere lo stato reale del repo). Il badge coverage in `README.md` è aggiornato automaticamente dalla CI sui push a `master`: non toccarlo a mano. Tieni aggiornato questo file quando cambiano tooling/convenzioni.
 
