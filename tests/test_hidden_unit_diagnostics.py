@@ -16,6 +16,7 @@ from briscola_ai.ai.evaluation.hidden_units import (
     ablate_mlp_hidden_units,
     analyze_hidden_unit_arrays,
     analyze_suit_ablation_arrays,
+    reinitialize_mlp_hidden_units,
 )
 from briscola_ai.ai.models.bc_model import MLPBCModel
 
@@ -93,7 +94,6 @@ def test_joint_ablation_zeros_only_selected_output_rows() -> None:
         rng.normal(size=(4, 40)),
         rng.normal(size=40),
     )
-
     ablated = ablate_mlp_hidden_units(model, (1, 3), metadata={"label": "ablated"})
 
     assert np.array_equal(ablated.w1, model.w1)
@@ -108,6 +108,29 @@ def test_joint_ablation_zeros_only_selected_output_rows() -> None:
         ablate_mlp_hidden_units(model, (1, 1))
     with pytest.raises(ValueError, match="fuori range"):
         ablate_mlp_hidden_units(model, (4,))
+
+
+def test_reinitialization_is_nested_deterministic_and_matches_ablation_logits() -> None:
+    """La stessa unità deve ricevere gli stessi ingressi e partire con contributo nullo."""
+    rng = np.random.default_rng(7)
+    model = _model(
+        rng.normal(size=(3, 4)),
+        rng.normal(size=4),
+        rng.normal(size=(4, 40)),
+        rng.normal(size=40),
+    )
+    original_w2 = model.w2.copy()
+    reset_one = reinitialize_mlp_hidden_units(model, (1,), seed=17)
+    reset_nested = reinitialize_mlp_hidden_units(model, (1, 3), seed=17)
+    ablated_nested = ablate_mlp_hidden_units(model, (1, 3))
+    inputs = rng.normal(size=(12, 3)).astype(np.float32)
+
+    np.testing.assert_array_equal(reset_one.w1[:, 1], reset_nested.w1[:, 1])
+    np.testing.assert_array_equal(reset_nested.w1[:, [0, 2]], model.w1[:, [0, 2]])
+    assert not np.array_equal(reset_nested.w1[:, 1], model.w1[:, 1])
+    assert np.count_nonzero(reset_nested.w2[[1, 3]]) == 0
+    np.testing.assert_array_equal(reset_nested.logits(inputs), ablated_nested.logits(inputs))
+    np.testing.assert_array_equal(model.w2, original_w2)
 
 
 @pytest.mark.slow

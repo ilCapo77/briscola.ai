@@ -14,6 +14,7 @@ L'ablation è esatta per questa architettura: togliere l'unità ``j`` equivale a
 
 from __future__ import annotations
 
+import hashlib
 from dataclasses import dataclass
 from typing import Any
 
@@ -324,6 +325,23 @@ def analyze_suit_ablation_arrays(
     }
 
 
+def _normalize_hidden_unit_indices(
+    model: MLPBCModel,
+    unit_indices: list[int] | tuple[int, ...],
+) -> tuple[int, ...]:
+    """Normalizza e valida un insieme non vuoto di indici del livello nascosto."""
+    normalized = tuple(int(index) for index in unit_indices)
+    if not normalized:
+        raise ValueError("Specificare almeno una unità nascosta")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("Gli indici delle unità devono essere unici")
+    hidden_dim = int(model.b1.shape[0])
+    invalid = [index for index in normalized if index < 0 or index >= hidden_dim]
+    if invalid:
+        raise ValueError(f"Indici unità fuori range 0..{hidden_dim - 1}: {invalid}")
+    return normalized
+
+
 def ablate_mlp_hidden_units(
     model: MLPBCModel,
     unit_indices: list[int] | tuple[int, ...],
@@ -336,15 +354,7 @@ def ablate_mlp_hidden_units(
     forward risultante è esattamente quello ottenuto ponendo a zero quelle attivazioni,
     mentre i pesi di ingresso restano disponibili per audit e confronti.
     """
-    normalized = tuple(int(index) for index in unit_indices)
-    if not normalized:
-        raise ValueError("Specificare almeno una unità da rimuovere")
-    if len(set(normalized)) != len(normalized):
-        raise ValueError("Gli indici delle unità devono essere unici")
-    hidden_dim = int(model.b1.shape[0])
-    invalid = [index for index in normalized if index < 0 or index >= hidden_dim]
-    if invalid:
-        raise ValueError(f"Indici unità fuori range 0..{hidden_dim - 1}: {invalid}")
+    normalized = _normalize_hidden_unit_indices(model, unit_indices)
 
     w2 = np.asarray(model.w2, dtype=np.float32).copy()
     w2[list(normalized), :] = 0.0
@@ -361,9 +371,50 @@ def ablate_mlp_hidden_units(
     )
 
 
+def reinitialize_mlp_hidden_units(
+    model: MLPBCModel,
+    unit_indices: list[int] | tuple[int, ...],
+    *,
+    seed: int,
+    metadata: dict[str, Any] | None = None,
+) -> MLPBCModel:
+    """Riattiva capacità nascosta con ingressi He e uscite inizialmente nulle.
+
+    Ogni unità usa un RNG derivato da ``seed`` e dal proprio indice: una stessa unità
+    riceve quindi pesi identici anche in esperimenti annidati, per esempio reset 8 e
+    reset 16. Azzerare la riga ``w2`` rende i logits iniziali uguali all'ablation della
+    stessa unità; non garantisce uguaglianza col modello originale fuori dalle suite in
+    cui l'unità era davvero inattiva.
+    """
+    normalized = _normalize_hidden_unit_indices(model, unit_indices)
+    w1 = np.asarray(model.w1, dtype=np.float32).copy()
+    b1 = np.asarray(model.b1, dtype=np.float32).copy()
+    w2 = np.asarray(model.w2, dtype=np.float32).copy()
+    scale = float(np.sqrt(2.0 / model.feature_dim))
+    for unit_index in normalized:
+        material = f"briscola.dormant_reinit.v1:{int(seed)}:{unit_index}".encode("ascii")
+        unit_seed = int.from_bytes(hashlib.sha256(material).digest()[:8], "big")
+        rng = np.random.default_rng(unit_seed)
+        w1[:, unit_index] = rng.normal(0.0, scale, size=model.feature_dim).astype(np.float32)
+        b1[unit_index] = 0.0
+        w2[unit_index, :] = 0.0
+    return MLPBCModel(
+        w1=w1,
+        b1=b1,
+        w2=w2,
+        b2=np.asarray(model.b2, dtype=np.float32).copy(),
+        metadata=dict(metadata if metadata is not None else model.metadata),
+        belief_w1=None if model.belief_w1 is None else np.asarray(model.belief_w1, dtype=np.float32).copy(),
+        belief_b1=None if model.belief_b1 is None else np.asarray(model.belief_b1, dtype=np.float32).copy(),
+        belief_w2=None if model.belief_w2 is None else np.asarray(model.belief_w2, dtype=np.float32).copy(),
+        belief_b2=None if model.belief_b2 is None else np.asarray(model.belief_b2, dtype=np.float32).copy(),
+    )
+
+
 __all__ = [
     "HiddenUnitThresholds",
     "ablate_mlp_hidden_units",
     "analyze_hidden_unit_arrays",
     "analyze_suit_ablation_arrays",
+    "reinitialize_mlp_hidden_units",
 ]

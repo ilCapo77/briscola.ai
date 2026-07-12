@@ -73,16 +73,15 @@ il gruppo conta. Il candidato resta quindi locale, diagnostico e non selezionabi
 
 ## Decisione
 
-Tutti e quattro i gate preregistrati passano. Possiamo testare se una **piccola** parte
-delle unità quasi inutilizzate possa essere reinizializzata e addestrata durante una nuova
-distillazione. Questo risultato non dimostra che una rete potata sia equivalente in ogni
-stato, non migliora v14 e non autorizza cambi del modello live.
+Tutti e quattro i gate preregistrati passano e hanno autorizzato un piccolo screening con
+8 e 16 unità. Lo screening è ora concluso: le unità reinizializzate diventano attive e
+imparano pesi in uscita, ma la migliore variante riduce la KL validation soltanto dello
+`0,328%` rispetto allo stesso training senza reset, sotto il gate dell'`1%`.
 
-Lo screening successivo deve cambiare una sola variabile: stessa teacher v13 mediata sulle
-24 rinomine e stesso contratto della distillazione v14, con poche unità dormienti
-reinizializzate nella student. Le dimensioni e i seed vanno congelati prima del training;
-la prima fase deve essere economica e servire soltanto a scegliere se chiudere la pista o
-portare un singolo candidato ai gate completi.
+La pista è quindi chiusa senza potatura, widening o modifica di v14 live. Protocollo e
+risultati completi sono in
+`docs/plans/dormant-reinitialization-screen-v0-2026-07-12.md`; il piano passa alla dose
+PIMC 16/32/64.
 
 ## Comandi
 

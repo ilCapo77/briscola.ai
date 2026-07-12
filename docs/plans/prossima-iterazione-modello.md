@@ -95,6 +95,16 @@ Test richiesti:
 **STOP** se attivazioni e ablation non mostrano un collo di bottiglia oppure il widening
 aumenta varianza senza vantaggio ripetibile.
 
+### Esito 2026-07-12
+
+La pista è chiusa con **STOP** prima del widening. V14 ha 123/256 unità quasi inattive;
+l'ablation congiunta è neutra su 10.000 partite. Un controllo successivo ha
+reinizializzato gruppi annidati di 8 e 16 unità: tutte diventano attive e apprendono, ma
+reset 16 riduce la KL validation solo dello `0,328%` rispetto alla stessa continuazione
+senza reset, sotto il gate preregistrato dell'`1%`. Report:
+`hidden-unit-diagnostic-v0-2026-07-12.md` e
+`dormant-reinitialization-screen-v0-2026-07-12.md`.
+
 ## 4. Pista 2: simmetria alla rinomina dei semi
 
 ### Domanda

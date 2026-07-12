@@ -20,14 +20,10 @@
 - I tentativi precedenti paired-RL, forward-KL e margin hinge restano chiusi: non hanno raggiunto insieme il gate di
   simmetria e quello di forza. Cronologia, criteri e artefatti sono in `docs/plans/suit-*.md`; il resoconto completo
   della policy promossa è `docs/plans/suit-distillation-v0-2026-07-11.md`.
-- La diagnostica ReLU su 4.096 stati trova **123/256 unità v14 quasi inattive** (`48,05%`; v13 `139/256`), nessuna
-  coppia quasi duplicata e nessuna dipendenza fragile da una singola unità (massimo `4,03%` di scelte cambiate).
-  Togliere la migliore unità per la simmetria riduce i flip solo `6,06% -> 5,57%`: il residuo è distribuito.
-  **STOP widening 320/384.** Report: `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md`.
-- L'ablation congiunta delle 123 unità su holdout indipendente concorda con v14 nel **`99,9512%`** delle scelte e
-  cambia il flip dei semi di soli `-0,038` punti percentuali. Nel direct match da 10.000 partite è neutra:
-  `+0,031` punti/partita (CI95 `-0,018..+0,080`). I quattro gate passano, ma 86 stati attivano almeno una unità:
-  niente potatura o cambio live. Report: `docs/plans/dormant-unit-ablation-v0-2026-07-12.md`.
+- La pista capacità ReLU è chiusa. V14 ha 123/256 unità quasi inattive; l'ablation congiunta è neutra su 10.000
+  partite. Reset 8/16 le riattiva davvero, ma reset 16 migliora la KL validation solo dello **`0,328%`** rispetto
+  allo stesso training senza reset, sotto il gate dell'`1%`. **STOP widening, potatura e altri reset.** Report:
+  `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md` e `docs/plans/dormant-reinitialization-screen-v0-2026-07-12.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v14 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -43,17 +39,12 @@
 
 ## Prossima Decisione
 
-La promozione v14 chiude la pista di simmetria e la diagnostica non giustifica una rete più larga. Il holdout mostra
-che parte della capacità esistente può essere riutilizzata sperimentalmente; ipotesi generali in
-`docs/plans/prossima-iterazione-modello.md`.
+La promozione v14 chiude la pista di simmetria; diagnostica, ablation e training controllato chiudono anche la pista
+della capacità dormiente. Ipotesi generali e rami già esclusi sono in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Screening minimo di riattivazione.** Congelare prima del training dimensioni e seed, poi reinizializzare soltanto
-   piccoli sottoinsiemi delle unità dormienti in copie della student e ripetere la distillazione v14 a budget ridotto.
-   Portare un solo candidato ai gate completi soltanto se migliora il holdout senza perdere forza o simmetria; v14
-   live resta immutata.
-2. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
+1. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
    curva è positiva, provare budget adattivo; se è piatta, chiudere la pista senza riaprire 8→10, già negativa.
-3. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
+2. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
    versione e filtrate dai bot, prima di usare osservazioni aneddotiche per proporre un nuovo obiettivo di training.
 
 Belief v1 e modifiche strutturali più ampie restano successive: una nuova belief va allenata contro un roster misto
@@ -137,14 +128,6 @@ Sonda riproducibile di simmetria dei semi:
 uv run python scripts/probe_suit_symmetry.py \
   --model data/models/best_a2c_v14.npz \
   --out-json data/suit_symmetry_v14.json
-```
-
-Diagnostica delle unità ReLU:
-
-```bash
-uv run python scripts/diagnose_hidden_units.py
-uv run python scripts/evaluate_dormant_unit_ablation.py \
-  --match-json benchmarks/experiments/dormant_unit_ablation_v14_v0/match_vs_v14_holdout10k.json
 ```
 
 Avvio locale:

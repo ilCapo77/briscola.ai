@@ -89,10 +89,11 @@ congiunta concorda con v14 nel `99,9512%` delle 4.096 decisioni e il direct matc
 partite è neutro (`+0,031`, CI95 `-0,018..+0,080`). Tutti i gate passano, ma 86 stati
 attivano almeno una delle unità selezionate: non è una prova di potabilità universale.
 
-Il risultato autorizza una sola prova successiva: **riattivare poca capacità esistente**
-con una reinizializzazione controllata e nuova distillazione, invece di aggiungere neuroni.
-Protocollo, numeri e limiti sono in
-`docs/plans/dormant-unit-ablation-v0-2026-07-12.md`.
+Anche la prova autorizzata di riattivazione è conclusa. Le unità reinizializzate imparano,
+ma reset 16 migliora la KL validation solo dello `0,328%` rispetto al controllo continuato,
+sotto il gate dell'`1%`. La capacità dormiente non è quindi una leva pratica misurabile con
+questo protocollo. Catena completa in `docs/plans/dormant-unit-ablation-v0-2026-07-12.md`
+e `docs/plans/dormant-reinitialization-screen-v0-2026-07-12.md`.
 
 ## Riproduzione
 
