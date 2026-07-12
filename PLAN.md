@@ -9,8 +9,8 @@
 - Release corrente del repository: `0.36.0`. Il push di `master` attiva automaticamente il deploy su
   <https://ai.briscola.dev>; dopo ogni release verificare `/version`, asset ausiliari ed event log Postgres.
 - Il default effettivo della UI è `bc_model_pimc_belief_16x8` su `best_a2c_v14.npz`, senza guard runtime
-  anti-overkill. La 64×10 resta selezionabile come variante a budget massimo: nei gate storici a parità di policy era
-  più forte ma circa 6× più costosa; il confronto non è stato ripetuto sulla v14.
+  anti-overkill. Il probe v14 32×8 vs 16×8 fa solo `+0,298` punti (CI95 `-0,025..+0,621`) a costo search
+  `1,995×`: **STOP dose, 64×8 e budget adattivo; confermato 16×8**. La 64×10 resta solo variante selezionabile.
 - `best_a2c_v14.npz` usa encoder v4 (`feature_dim=369`, hidden 256) e un solo forward normale. È distillata dalla
   media esatta dei logits v13 sulle 24 rinomine dei semi, su 50.000 partite e 1,9 milioni di decisioni. Il flip
   dell'argmax scende da `18,19%` a **`6,04%`** e l'overkill sui piatti poveri da `8,01%` a **`4,17%`**.
@@ -39,17 +39,15 @@
 
 ## Prossima Decisione
 
-La promozione v14 chiude la pista di simmetria; diagnostica, ablation e training controllato chiudono anche la pista
-della capacità dormiente. Ipotesi generali e rami già esclusi sono in `docs/plans/prossima-iterazione-modello.md`.
+La promozione v14 chiude la pista di simmetria; diagnostica e training controllato chiudono la capacità dormiente;
+storico e probe v14 chiudono anche la dose PIMC. Rami esclusi in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
-   curva è positiva, provare budget adattivo; se è piatta, chiudere la pista senza riaprire 8→10, già negativa.
-2. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
+1. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
    versione e filtrate dai bot, prima di usare osservazioni aneddotiche per proporre un nuovo obiettivo di training.
+2. **Preparare il gate belief v1.** Prima di un training lungo congelare roster misto, split leave-one-opponent-out e
+   confronto v0-vs-v1 nello stesso PIMC 16×8; le metriche offline da sole non autorizzano la promozione.
 
-Belief v1 e modifiche strutturali più ampie restano successive: una nuova belief va allenata contro un roster misto
-v14/anchor/euristiche, validata leave-one-opponent-out e poi confrontata v0-vs-v1 nello stesso PIMC 16×8. Le metriche
-offline da sole non bastano per la promozione.
+Modifiche strutturali più ampie restano successive al gate belief e all'audit di campo.
 
 ## Audit Di Campo
 

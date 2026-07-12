@@ -10,7 +10,9 @@ Esempio:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import sys
 import time
 from dataclasses import asdict
 from pathlib import Path
@@ -20,6 +22,27 @@ from briscola_ai.ai.evaluation import evaluate_seat_fair_match_2p
 from briscola_ai.ai.evaluation.round_robin import seat_fair_avg_point_diff_ci, seat_fair_score_rate_ci
 from briscola_ai.ai.models import BCModelAgent
 from briscola_ai.ai.models.belief_model import load_belief_model_npz
+from briscola_ai.versioning import get_code_version, get_rules_version
+
+SCHEMA = "briscola.pimc_evaluation.v1"
+
+
+def _sha256_file(path: Path) -> str:
+    """Calcola l'hash degli asset per rendere auditabile il confronto offline."""
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for block in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(block)
+    return digest.hexdigest()
+
+
+def _artifact(path: Path) -> dict[str, str | int]:
+    """Descrive un asset locale senza incorporarne il contenuto nel report."""
+    return {
+        "path": str(path),
+        "sha256": _sha256_file(path),
+        "size_bytes": path.stat().st_size,
+    }
 
 
 def main() -> int:
@@ -81,6 +104,20 @@ def main() -> int:
         help="Frazione di uniforme mescolata ai pesi belief (pavimento anti punti-ciechi). Default: 0.10.",
     )
     parser.add_argument(
+        "--opponent-belief-model",
+        default="",
+        help=(
+            "Belief model .npz dell'opponent `pimc`. Vuoto conserva il comportamento storico uniforme; "
+            "passare lo stesso file di --belief-model rende il confronto simmetrico."
+        ),
+    )
+    parser.add_argument(
+        "--opponent-belief-uniform-mix",
+        type=float,
+        default=None,
+        help="Mix uniforme dell'opponent. Default: stesso valore di --belief-uniform-mix.",
+    )
+    parser.add_argument(
         "--numba-search",
         action="store_true",
         help="Usa il kernel JIT per la search dell'agente A (stessa semantica, ~20-50x piu' veloce).",
@@ -90,8 +127,16 @@ def main() -> int:
     args = parser.parse_args()
     model_path = Path(args.model)
     model_agent = BCModelAgent.from_npz(model_path)
-    belief_model = load_belief_model_npz(args.belief_model) if args.belief_model.strip() else None
-    belief_label = f",belief={Path(args.belief_model).name},mix={args.belief_uniform_mix}" if belief_model else ""
+    belief_path = Path(args.belief_model) if args.belief_model.strip() else None
+    belief_model = load_belief_model_npz(belief_path) if belief_path is not None else None
+    belief_label = f",belief={belief_path.name},mix={args.belief_uniform_mix}" if belief_path is not None else ""
+    opponent_belief_path = Path(args.opponent_belief_model) if args.opponent_belief_model.strip() else None
+    if opponent_belief_path is not None and args.opponent != "pimc":
+        raise ValueError("--opponent-belief-model richiede --opponent pimc")
+    opponent_belief_model = load_belief_model_npz(opponent_belief_path) if opponent_belief_path is not None else None
+    opponent_belief_uniform_mix = (
+        args.belief_uniform_mix if args.opponent_belief_uniform_mix is None else float(args.opponent_belief_uniform_mix)
+    )
     pimc_agent = PIMCAgent(
         rollout_agent=model_agent,
         fallback=model_agent,
@@ -101,7 +146,7 @@ def main() -> int:
         belief_model=belief_model,
         belief_uniform_mix=args.belief_uniform_mix,
         use_numba_search=bool(args.numba_search),
-        name=f"pimc({model_path.name}{belief_label})",
+        name=f"pimc({model_path.name},d={args.determinizations},u={args.max_unknown_cards}{belief_label})",
     )
     if args.opponent == "control":
         opponent_determinizations = args.determinizations
@@ -121,13 +166,23 @@ def main() -> int:
         opponent_max_unknown_cards = (
             args.opponent_max_unknown_cards if args.opponent_max_unknown_cards is not None else args.max_unknown_cards
         )
+        opponent_belief_label = (
+            f",belief={opponent_belief_path.name},mix={opponent_belief_uniform_mix}"
+            if opponent_belief_path is not None
+            else ""
+        )
         opponent_agent = PIMCAgent(
             rollout_agent=model_agent,
             fallback=model_agent,
             num_determinizations=opponent_determinizations,
             max_unknown_cards=opponent_max_unknown_cards,
             use_endgame_solver=not args.disable_endgame_solver,
-            name=f"pimc({model_path.name},d={opponent_determinizations},u={opponent_max_unknown_cards})",
+            belief_model=opponent_belief_model,
+            belief_uniform_mix=opponent_belief_uniform_mix,
+            name=(
+                f"pimc({model_path.name},d={opponent_determinizations},u={opponent_max_unknown_cards}"
+                f"{opponent_belief_label})"
+            ),
         )
     else:
         opponent_determinizations = None
@@ -195,6 +250,7 @@ def main() -> int:
 
     if args.out_json:
         payload = {
+            "schema": SCHEMA,
             "model": str(model_path),
             "opponent": args.opponent,
             "num_games": args.num_games,
@@ -203,6 +259,12 @@ def main() -> int:
             "max_unknown_cards": args.max_unknown_cards,
             "opponent_determinizations": opponent_determinizations,
             "opponent_max_unknown_cards": opponent_max_unknown_cards,
+            "belief_model": str(belief_path) if belief_path is not None else None,
+            "belief_uniform_mix": float(args.belief_uniform_mix),
+            "opponent_belief_model": str(opponent_belief_path) if opponent_belief_path is not None else None,
+            "opponent_belief_uniform_mix": opponent_belief_uniform_mix,
+            "numba_search": bool(args.numba_search),
+            "opponent_numba_search": False,
             "use_endgame_solver": not args.disable_endgame_solver,
             "elapsed_seconds": elapsed,
             "seconds_per_game": elapsed / max(1, args.num_games),
@@ -222,6 +284,18 @@ def main() -> int:
                 else None
             ),
             "stats": asdict(stats),
+            "artifacts": {
+                "model": _artifact(model_path),
+                "belief_model": _artifact(belief_path) if belief_path is not None else None,
+                "opponent_belief_model": (
+                    _artifact(opponent_belief_path) if opponent_belief_path is not None else None
+                ),
+            },
+            "versions": {
+                "code": get_code_version(),
+                "rules": get_rules_version(),
+                "python": sys.version.split()[0],
+            },
         }
         out_path = Path(args.out_json)
         out_path.parent.mkdir(parents=True, exist_ok=True)

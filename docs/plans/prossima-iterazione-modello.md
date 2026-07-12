@@ -243,6 +243,14 @@ Test richiesti:
 CPU media/p95 inferiori. **STOP** se la curva 16/32/64 è piatta; non riaprire la finestra
 10, già chiusa negativa.
 
+### Esito 2026-07-12
+
+Lo storico rendeva superfluo un nuovo sweep completo; è stato eseguito soltanto un probe
+simmetrico v14 da 2.000 partite. PIMC belief 32×8 contro 16×8 fa `+0,298` punti, ma la CI95
+paired `-0,025..+0,621` include zero, mentre la latenza media search raddoppia
+(`28,93` vs `14,50 ms`). **STOP** a conferma 10k, 64×8 e budget adattivo; 16×8 resta il
+default. Dettagli in `pimc-dose-v14-probe-2026-07-12.md`.
+
 ## 6. Pista 4: rendere A2C meno rumoroso
 
 ### Stato reale del trainer
