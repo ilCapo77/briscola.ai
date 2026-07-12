@@ -24,6 +24,10 @@
   coppia quasi duplicata e nessuna dipendenza fragile da una singola unità (massimo `4,03%` di scelte cambiate).
   Togliere la migliore unità per la simmetria riduce i flip solo `6,06% -> 5,57%`: il residuo è distribuito.
   **STOP widening 320/384.** Report: `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md`.
+- L'ablation congiunta delle 123 unità su holdout indipendente concorda con v14 nel **`99,9512%`** delle scelte e
+  cambia il flip dei semi di soli `-0,038` punti percentuali. Nel direct match da 10.000 partite è neutra:
+  `+0,031` punti/partita (CI95 `-0,018..+0,080`). I quattro gate passano, ma 86 stati attivano almeno una unità:
+  niente potatura o cambio live. Report: `docs/plans/dormant-unit-ablation-v0-2026-07-12.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
 - Il catalogo modelli espone v14 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
@@ -39,12 +43,14 @@
 
 ## Prossima Decisione
 
-La promozione v14 chiude la pista di simmetria e la diagnostica non giustifica una rete più larga. Le prossime prove
-devono distinguere capacità dormiente da stati rari; ipotesi generali in `docs/plans/prossima-iterazione-modello.md`.
+La promozione v14 chiude la pista di simmetria e la diagnostica non giustifica una rete più larga. Il holdout mostra
+che parte della capacità esistente può essere riutilizzata sperimentalmente; ipotesi generali in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Confermare le unità dormienti su holdout.** Su seed indipendenti azzerare insieme le 123 unità quasi inattive e
-   verificare agreement, simmetria e un direct match. Solo se l'effetto resta nullo provare a reinizializzarne una
-   piccola parte durante nuova distillazione; niente potatura o modifica di v14 live.
+1. **Screening minimo di riattivazione.** Congelare prima del training dimensioni e seed, poi reinizializzare soltanto
+   piccoli sottoinsiemi delle unità dormienti in copie della student e ripetere la distillazione v14 a budget ridotto.
+   Portare un solo candidato ai gate completi soltanto se migliora il holdout senza perdere forza o simmetria; v14
+   live resta immutata.
 2. **Isolare la dose PIMC.** Confrontare 16/32/64 determinizzazioni con finestra 8, stessi seed e CPU media/p95. Se la
    curva è positiva, provare budget adattivo; se è piatta, chiudere la pista senza riaprire 8→10, già negativa.
 3. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
@@ -137,6 +143,8 @@ Diagnostica delle unità ReLU:
 
 ```bash
 uv run python scripts/diagnose_hidden_units.py
+uv run python scripts/evaluate_dormant_unit_ablation.py \
+  --match-json benchmarks/experiments/dormant_unit_ablation_v14_v0/match_vs_v14_holdout10k.json
 ```
 
 Avvio locale:

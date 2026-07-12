@@ -13,6 +13,7 @@ import pytest
 from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
 from briscola_ai.ai.evaluation.hidden_units import (
     HiddenUnitThresholds,
+    ablate_mlp_hidden_units,
     analyze_hidden_unit_arrays,
     analyze_suit_ablation_arrays,
 )
@@ -81,6 +82,32 @@ def test_threshold_validation_rejects_overlapping_dead_and_always_active_bands()
     """Etichette incompatibili devono fallire prima dell'analisi."""
     with pytest.raises(ValueError, match="dead"):
         HiddenUnitThresholds(dead_activation_rate_max=0.8, always_active_rate_min=0.7).validate()
+
+
+def test_joint_ablation_zeros_only_selected_output_rows() -> None:
+    """La copia deve conservare ogni peso tranne le righe w2 causalmente rimosse."""
+    rng = np.random.default_rng(42)
+    model = _model(
+        rng.normal(size=(3, 4)),
+        rng.normal(size=4),
+        rng.normal(size=(4, 40)),
+        rng.normal(size=40),
+    )
+
+    ablated = ablate_mlp_hidden_units(model, (1, 3), metadata={"label": "ablated"})
+
+    assert np.array_equal(ablated.w1, model.w1)
+    assert np.array_equal(ablated.b1, model.b1)
+    assert np.array_equal(ablated.b2, model.b2)
+    assert np.array_equal(ablated.w2[[0, 2]], model.w2[[0, 2]])
+    assert np.count_nonzero(ablated.w2[[1, 3]]) == 0
+    assert np.count_nonzero(model.w2[[1, 3]]) > 0
+    assert ablated.metadata == {"label": "ablated"}
+
+    with pytest.raises(ValueError, match="unici"):
+        ablate_mlp_hidden_units(model, (1, 1))
+    with pytest.raises(ValueError, match="fuori range"):
+        ablate_mlp_hidden_units(model, (4,))
 
 
 @pytest.mark.slow

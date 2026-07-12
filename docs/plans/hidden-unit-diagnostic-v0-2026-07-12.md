@@ -84,12 +84,15 @@ dalla sonda: la sua rimozione cambia il `3,39%` delle scelte normali.
 non c'è evidenza che la larghezza impedisca a v14 di migliorare. Non bisogna neppure
 potare subito: gli stati rari e fuori distribuzione non sono coperti da una singola suite.
 
-Il prossimo controllo causale, prima di proporre un nuovo training, è verificare su seed
-indipendenti l'ablation congiunta delle 123 unità quasi inattive. Se la policy resta
-identica o neutra, potremo provare a **riattivare capacità esistente** con una piccola
-reinizializzazione controllata e nuova distillazione, invece di aggiungere neuroni. Se il
-controllo mostra effetti su stati rari, chiudiamo anche questa pista e passiamo alla dose
-PIMC 16/32/64 già prevista dal piano.
+Il controllo causale successivo è stato completato su seed indipendenti: l'ablation
+congiunta concorda con v14 nel `99,9512%` delle 4.096 decisioni e il direct match da 10.000
+partite è neutro (`+0,031`, CI95 `-0,018..+0,080`). Tutti i gate passano, ma 86 stati
+attivano almeno una delle unità selezionate: non è una prova di potabilità universale.
+
+Il risultato autorizza una sola prova successiva: **riattivare poca capacità esistente**
+con una reinizializzazione controllata e nuova distillazione, invece di aggiungere neuroni.
+Protocollo, numeri e limiti sono in
+`docs/plans/dormant-unit-ablation-v0-2026-07-12.md`.
 
 ## Riproduzione
 

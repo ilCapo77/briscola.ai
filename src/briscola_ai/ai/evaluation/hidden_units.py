@@ -324,8 +324,46 @@ def analyze_suit_ablation_arrays(
     }
 
 
+def ablate_mlp_hidden_units(
+    model: MLPBCModel,
+    unit_indices: list[int] | tuple[int, ...],
+    *,
+    metadata: dict[str, Any] | None = None,
+) -> MLPBCModel:
+    """Crea una copia della policy che ignora congiuntamente le unità richieste.
+
+    Azzeriamo le righe corrispondenti di ``w2`` invece di toccare ``w1``/``b1``: il
+    forward risultante è esattamente quello ottenuto ponendo a zero quelle attivazioni,
+    mentre i pesi di ingresso restano disponibili per audit e confronti.
+    """
+    normalized = tuple(int(index) for index in unit_indices)
+    if not normalized:
+        raise ValueError("Specificare almeno una unità da rimuovere")
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("Gli indici delle unità devono essere unici")
+    hidden_dim = int(model.b1.shape[0])
+    invalid = [index for index in normalized if index < 0 or index >= hidden_dim]
+    if invalid:
+        raise ValueError(f"Indici unità fuori range 0..{hidden_dim - 1}: {invalid}")
+
+    w2 = np.asarray(model.w2, dtype=np.float32).copy()
+    w2[list(normalized), :] = 0.0
+    return MLPBCModel(
+        w1=np.asarray(model.w1, dtype=np.float32).copy(),
+        b1=np.asarray(model.b1, dtype=np.float32).copy(),
+        w2=w2,
+        b2=np.asarray(model.b2, dtype=np.float32).copy(),
+        metadata=dict(metadata if metadata is not None else model.metadata),
+        belief_w1=None if model.belief_w1 is None else np.asarray(model.belief_w1, dtype=np.float32).copy(),
+        belief_b1=None if model.belief_b1 is None else np.asarray(model.belief_b1, dtype=np.float32).copy(),
+        belief_w2=None if model.belief_w2 is None else np.asarray(model.belief_w2, dtype=np.float32).copy(),
+        belief_b2=None if model.belief_b2 is None else np.asarray(model.belief_b2, dtype=np.float32).copy(),
+    )
+
+
 __all__ = [
     "HiddenUnitThresholds",
+    "ablate_mlp_hidden_units",
     "analyze_hidden_unit_arrays",
     "analyze_suit_ablation_arrays",
 ]
