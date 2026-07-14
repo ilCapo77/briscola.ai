@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import tomllib
 import zipfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -31,6 +32,15 @@ EVIDENCE_PATH = ROOT / "docs" / "reports" / "evidence" / "model_progress.v1.json
 EVIDENCE_SCHEMA_VERSION = 1
 EVIDENCE_SNAPSHOT_DATE = "2026-07-12"
 _XLSX_ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
+
+
+def project_version() -> str:
+    """Read the canonical package version used in the Dashboard conclusion."""
+    payload = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    version = payload.get("project", {}).get("version")
+    if not isinstance(version, str) or not version:
+        raise ValueError("pyproject.toml does not contain project.version")
+    return version
 
 
 @dataclass(frozen=True, slots=True)
@@ -1533,7 +1543,8 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v14 is the recommended .npz policy in current v0.36.0 and backs the default "
+                "best_a2c_v14 was promoted in v0.36.0 and remains the recommended .npz policy in current "
+                f"v{project_version()}; it backs the default "
                 "bc_model_pimc_belief_16x8 stack without an overkill guard. Distillation reduces suit-name "
                 "argmax flips from 18.19% on v13 to 6.04%. Medium 10k gates show a small strength gain: "
                 "policy-only +0.66 (CI +0.24..+1.09) and PIMC 16x8 +0.43 (CI +0.03..+0.84) against v13. "

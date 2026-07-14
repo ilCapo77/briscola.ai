@@ -389,7 +389,9 @@ Strumenti aggiuntivi:
 - `scripts/evaluate_matrix.py` – valuta un modello contro una lista di avversari su due suite (`standard` e `holdout`).
 - `scripts/evaluate_decision_quality.py` – metriche di **stile**, non solo forza:
   - `trump_waste_rate`: gioca briscola pur avendo una risposta vincente **non‑briscola**;
-  - `trump_overkill_rate`: quando vince con briscola, usa una briscola più costosa del necessario.
+  - `trump_overkill_rate`: quando vince con briscola, usa una briscola più costosa del necessario;
+  - a parità di seed, `--workers` cambia solo la velocità anche con agenti stocastici. Contratto e riproduzione del
+    difetto corretto: `docs/plans/decision-quality-rng-2026-07-14.md`.
 - `scripts/evaluate_pimc.py` – harness offline PIMC/determinizzazione sopra una policy `.npz`: confronta search,
   modello puro, solver-control o un'altra configurazione PIMC, con CI su score/avg diff e metriche di costo per mossa.
   È lo strumento per ablation della search; la distillazione PIMC→policy è invece un ramo storico chiuso.
@@ -596,15 +598,15 @@ python scripts/evaluate_agents.py --benchmark medium --engine domain \
 
 ## Stato e roadmap
 
-La release corrente del repository è `0.36.0`; ogni push di `master` viene distribuito automaticamente su
+La release corrente del repository è `0.37.0`; ogni push di `master` viene distribuito automaticamente su
 <https://ai.briscola.dev> tramite FastAPI Cloud, con stato partita su Redis, realtime via pub/sub ed event log
 Postgres in modalità `dataset`. Il deploy effettivo va controllato tramite `/version`. Stato corrente, invarianti da
 non rompere e prossime azioni sono in **`PLAN.md`**.
 
 La storia del progetto — scelte, errori e svolte, raccontati in tono divulgativo — è il **diario di
 bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`). Il racconto arriva al
-**capitolo 19, “Ventiquattro pareri, una sola voce”**; gli approfondimenti tecnici delle singole tappe, inclusa la
-distillazione finale in `docs/diario/21-una-voce-sola.md`, vivono in `docs/diario/`.
+**capitolo 20, “Il limite della strada che conosciamo”**; gli approfondimenti tecnici delle singole tappe, incluso il
+bilancio del plateau in `docs/diario/22-il-limite-della-strada.md`, vivono in `docs/diario/`.
 
 ## Licenza
 

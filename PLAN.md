@@ -6,7 +6,7 @@
 
 ## Stato Corrente
 
-- Release corrente del repository: `0.36.0`. Il push di `master` attiva automaticamente il deploy su
+- Release corrente del repository: `0.37.0`. Il push di `master` attiva automaticamente il deploy su
   <https://ai.briscola.dev>; dopo ogni release verificare `/version`, asset ausiliari ed event log Postgres.
 - Il default effettivo della UI è `bc_model_pimc_belief_16x8` su `best_a2c_v14.npz`, senza guard runtime
   anti-overkill. Il probe v14 32×8 vs 16×8 fa solo `+0,298` punti (CI95 `-0,025..+0,621`) a costo search
@@ -55,8 +55,11 @@
 - Lo split supervisionato BC/value e' ora per partita, non per record: default 80/10/10, test finale separato,
   provenance con conteggi/digest e rifiuto degli NPZ storici senza `game_ids`. Anche il value pairwise raggruppa
   tutte le root della stessa partita. Protocollo: `docs/plans/dataset-split-per-partita-2026-07-14.md`.
-- Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
-  separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
+- `decision_quality` assegna ora lo stesso stream RNG a ogni coppia seat-fair nel percorso seriale e parallelo:
+  `--workers` cambia solo la velocita', anche con agenti stocastici. Riproduzione e compatibilita':
+  `docs/plans/decision-quality-rng-2026-07-14.md`.
+- Il diario pubblico arriva al capitolo 20 e distingue il plateau dell'attuale ricetta dal limite strategico del
+  gioco. L'approfondimento e' `docs/diario/22-il-limite-della-strada.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
   ma chi conosce un game id può leggere mani e prossima carta. Il codice resta chiuso per default; rimuovere l'override
   quando il debug pubblico non serve più.
@@ -70,6 +73,9 @@ Le sette piste e l'audit degli errori residui hanno ora un esito chiuso. Rami e 
    risultato corrente autorizza v15, una nuova architettura o un altro training lungo.
 2. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
+3. **Prima di riaprire la forza, misurare il soffitto.** Serve un cluster di errori ripetibile oppure un benchmark
+   ridotto a informazione nascosta con riferimento piu' forte di PIMC. Solo un gap dimostrato autorizza a progettare
+   ricerca sull'information set/regret; non partire direttamente da v15 o da un training piu' lungo.
 
 Critic reuse, normalizzazione, clipping, nuove architetture e Q Monte Carlo restano sospesi finché una misura non
 mostra il problema specifico che dovrebbero risolvere.
@@ -98,7 +104,6 @@ mostra il problema specifico che dovrebbero risolvere.
 
 ## Debito Aperto
 
-- RNG seriale e parallelo di `decision_quality` non è riproducibile cross-`workers`.
 - Cold start residuo (~13.7s) è il pavimento della piattaforma; leve reali: keep-alive sotto l'idle timeout o piano
   diverso. Il runtime applicativo non ha più compilazione JIT.
 
@@ -125,7 +130,7 @@ Export live v14 per il prossimo audit:
 
 ```bash
 DATABASE_URL=... uv run python scripts/export_live_actions.py \
-  --code-version 0.36.0 \
+  --code-version 0.37.0 \
   --ai-agent bc_model_pimc_belief_16x8 \
   --ai-model-id best_a2c_v14.npz \
   --exclude-client-id loadtest-bot \

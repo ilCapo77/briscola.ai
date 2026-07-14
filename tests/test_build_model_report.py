@@ -119,6 +119,7 @@ def test_dashboard_uses_one_explicit_protocol_and_ends_with_v14() -> None:
     conclusion_index = dashboard.index(["Current conclusion"])
     conclusion = dashboard[conclusion_index + 1][0]
     assert "best_a2c_v14" in conclusion
+    assert f"current v{build_model_report.project_version()}" in conclusion
     assert "last chart row" in conclusion
     assert "policy-only +0.66" in conclusion
     assert "PIMC 16x8 +0.43" in conclusion

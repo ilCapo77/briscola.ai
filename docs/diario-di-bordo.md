@@ -17,4 +17,6 @@ cronologia tecnica completa vive nei messaggi di commit e in `docs/plans/`.
   *apprendimento per rinforzo*)"), così il lettore impara anche il vocabolario.
 - Piccoli dettagli tecnici concreti nei punti dove sono la storia (Python/Numba, seme,
   sensori della rete), con link esterni per approfondire.
-- I numeri dettagliati vivono negli approfondimenti `docs/diario/*.md`, uno per capitolo.
+- I numeri dettagliati vivono negli approfondimenti `docs/diario/*.md`. La loro numerazione segue l'ordine di
+  scrittura: dopo condensazioni editoriali più approfondimenti possono riferirsi allo stesso capitolo pubblico,
+  quindi numero del file e numero del capitolo non devono necessariamente coincidere.

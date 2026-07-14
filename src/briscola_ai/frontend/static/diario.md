@@ -286,6 +286,30 @@ Questa è la quattordicesima generazione. Non nasce da più forza bruta né da u
 
 <small>🔬 *Per chi vuole i dettagli: [il teacher a 24 pareri](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/20-ventiquattro-pareri.md) e [la distillazione della v14](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/21-una-voce-sola.md)*</small>
 
+## Capitolo 20 — Il limite della strada che conosciamo <small>(12–14 luglio 2026)</small>
+
+Dopo una promozione viene naturale cercare subito la successiva. V14 aveva corretto un difetto preciso e guadagnato un piccolo vantaggio; sembrava ragionevole provare più simulazioni, più neuroni, una stima migliore delle carte nascoste o un altro modo di organizzare l'allenamento. Questa volta, però, quasi tutte le porte vicine si sono chiuse.
+
+Raddoppiare da sedici a trentadue i mondi immaginati dal PIMC costava quasi il doppio e dava un vantaggio troppo piccolo per distinguerlo con sicurezza dal caso. Dentro la rete, 123 neuroni su 256 si accendevano raramente, ma spegnerli tutti insieme non cambiava praticamente il gioco. Riattivarne una parte insegnava loro a lavorare, senza migliorare abbastanza il risultato finale. Il giocatore non sembrava fermo perché la sua rete era troppo stretta.
+
+Anche una nuova stima delle carte nascoste sembrava promettente: negli esami dedicati indovinava meglio della versione in uso. Inserita nel giocatore completo, però, perdeva punti. È una distinzione che il progetto aveva già incontrato: svolgere meglio un compito intermedio non garantisce di prendere decisioni migliori al tavolo.
+
+Abbiamo poi controllato il motore dell'allenamento. Il giudice interno che stima l'esito delle posizioni imparava davvero, i gradienti restavano regolari e gli aggiornamenti non mostravano scosse sospette. Far rivedere allo stesso allenamento ogni mazzo dai due posti, una variante apparentemente più equa, non lo rese più stabile: su tre prove produsse risultati più dispersi. Non c'era un guasto semplice da riparare.
+
+Restava la domanda più importante: v14 commette errori strategici riconoscibili? Una nuova sonda ha raccolto 192 decisioni bilanciate per fase, posto e avversario. Per ogni posizione ha provato tutte le carte lecite negli stessi futuri plausibili, scegliendo un'alternativa su una metà dei campioni e giudicandola sull'altra. Nelle 96 decisioni di inizio e metà partita affidate direttamente alla rete non ha trovato un solo errore abbastanza netto e ripetibile. I quattordici casi certi erano tutti nelle fasi in cui il sito usa già il PIMC o il risolutore esatto del finale.
+
+Questo non dimostra che v14 giochi la migliore Briscola possibile. Perdere una partita non indica necessariamente una mossa sbagliata: ci sono carte nascoste, pescate future e avversari diversi. Il progetto non possiede una soluzione matematica dell'intero gioco con cui misurare la distanza dal giocatore perfetto. Inoltre v14 conserva piccoli difetti, fra cui un residuo di dipendenza dai nomi dei semi. Le possibilità strategiche non sono finite; è finito, per ora, il segnale che giustifica un'altra variante costruita girando le stesse manopole.
+
+Prima di fermarci abbiamo corretto anche il metro. La diagnostica dello stile poteva produrre risultati diversi cambiando soltanto il numero di processi usati per accelerarla. Con agenti casuali, lo stesso test da 2.000 partite passava da 975 a 1.014 vittorie per A. Il motivo non era la Briscola: il percorso seriale e quello parallelo distribuivano numeri casuali diversi. Ora ogni coppia di partite riceve la propria sequenza stabile. Uno o tre processi danno gli stessi conteggi; cambia solo il tempo.
+
+Anche i futuri dati di allenamento sono stati resi più onesti. Prima alcune mosse di una partita potevano finire fra gli esercizi e altre, molto simili, nell'esame. Ora una partita resta interamente da una parte: allenamento, verifica oppure test finale. La correzione non rende più forte v14 e non fabbrica v15. Evita soltanto che il prossimo candidato sembri bravo perché ha già intravisto metà del compito.
+
+Siamo quindi a un punto fermo, non a una prova che il gioco non abbia altro da insegnare. Per riaprire la corsa alla forza servirà un maestro nuovo: un gruppo ripetibile di errori, un piccolo problema a informazione nascosta di cui conosciamo davvero la soluzione, oppure un metodo capace di ragionare sull'informazione nel corso dell'intera partita. Sarebbe una strada diversa, non un allenamento più lungo della stessa rete.
+
+La release 0.37.0 lascia v14 al tavolo e congela la ricerca del modello finché non emerge uno di quei segnali. È una conclusione meno vistosa di una quindicesima generazione, ma più utile: distingue il limite di ciò che abbiamo provato dal limite della Briscola stessa.
+
+<small>🔬 *Per chi vuole i numeri, i tentativi chiusi e le condizioni per riaprire la ricerca: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/22-il-limite-della-strada.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.
