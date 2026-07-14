@@ -65,6 +65,7 @@ def main() -> int:
         default=1,
         help=(
             "Numero processi per parallelizzare le coppie seat-fair. "
+            "Cambia solo la velocita', non i risultati a parita' di seed. "
             "Usato con engine=domain; engine=numba usa thread Numba interni."
         ),
     )

@@ -410,10 +410,10 @@ def _pair_action_rng(*, seed: int, pair_index: int) -> random.Random:
     """
     RNG azioni indipendente per coppia seat-fair.
 
-    Questo rende la valutazione parallela riproducibile indipendentemente da come
-    suddividiamo i seed tra worker. Per agenti deterministici produce gli stessi risultati
-    della valutazione seriale storica; per agenti stocastici cambia solo la sequenza RNG,
-    non la suite di shuffle.
+    La coppia e' l'unita' minima del confronto seat-fair: assegnarle uno stream stabile
+    rende il risultato indipendente dal numero di worker e dal modo in cui le coppie
+    vengono distribuite tra processi. La seconda partita prosegue lo stream della prima,
+    mantenendo esplicito l'ordine interno della coppia.
     """
     mixed = (int(seed) ^ 0x9E3779B9 ^ ((int(pair_index) + 1) * 0x85EBCA6B)) & 0xFFFFFFFF
     return random.Random(mixed)
@@ -428,10 +428,10 @@ def _evaluate_quality_seed_pairs_independent_rng(
     pair_offset: int,
 ) -> _SeatFairQualityTotals:
     """
-    Valuta un sottoinsieme di coppie seat-fair con RNG indipendente per pair.
+    Valuta un sottoinsieme di coppie seat-fair con RNG indipendente per coppia.
 
-    E' il core usato dalla versione parallela: ogni chunk puo' girare in un processo diverso
-    e poi essere sommato senza dipendenze d'ordine.
+    E' il core condiviso dai percorsi seriale e parallelo: ogni chunk puo' girare in un
+    processo diverso e poi essere sommato senza dipendenze dal partizionamento.
     """
     wins_a = 0
     wins_b = 0
@@ -577,107 +577,29 @@ def evaluate_seat_fair_match_2p_with_quality(
     """
     Valuta A vs B (seat-fair) e colleziona quality metrics per A.
 
-    Nota:
-    In seat-fair, A gioca metà partite come P0 e metà come P1.
+    Note:
+    - in seat-fair, A gioca meta' partite come P0 e meta' come P1;
+    - ogni coppia riceve uno stream RNG delle azioni derivato da `seed` e dal proprio
+      indice. Lo stesso comando produce quindi gli stessi aggregati anche se la versione
+      parallela usa un numero diverso di worker.
     """
     if num_games % 2 != 0:
         raise ValueError("Per la valutazione seat-fair `num_games` deve essere pari (giochiamo a coppie).")
 
     rng_game = random.Random(seed)
-    rng_action = random.Random(seed ^ 0x9E3779B9)
     num_pairs = num_games // 2
 
     seeds = list(game_seeds) if game_seeds is not None else [rng_game.randrange(0, 2**32) for _ in range(num_pairs)]
     if len(seeds) < num_pairs:
         raise ValueError(f"game_seeds insufficiente: attesi >= {num_pairs}, ottenuti {len(seeds)}")
-
-    wins_a = 0
-    wins_b = 0
-    draws = 0
-    sum_a = 0
-    sum_b = 0
-    sum_diff = 0
-
-    q_num_second = 0
-    q_num_second_with_win = 0
-    q_num_waste = 0
-    q_num_trump_wins = 0
-    q_num_trump_overkill = 0
-    q_num_trump_wins_low = 0
-    q_num_trump_overkill_low = 0
-
-    for i in range(num_pairs):
-        game_seed = seeds[i]
-
-        # Game 1: A=P0, B=P1
-        s1, q1 = play_one_game_2p_collect_quality(
-            agent_a, agent_b, tracked_agent_index=0, rng=rng_action, game_seed=game_seed
-        )
-        p0, p1 = s1.players[0].points, s1.players[1].points
-        sum_a += p0
-        sum_b += p1
-        sum_diff += p0 - p1
-        w = _winner_index_2p(s1)
-        if w is None:
-            draws += 1
-        elif w == 0:
-            wins_a += 1
-        else:
-            wins_b += 1
-
-        q_num_second += q1.num_second_hand_decisions
-        q_num_second_with_win += q1.num_second_hand_with_winning_reply
-        q_num_waste += q1.num_trump_waste
-        q_num_trump_wins += q1.num_second_hand_trump_wins
-        q_num_trump_overkill += q1.num_trump_overkill
-        q_num_trump_wins_low += q1.num_second_hand_trump_wins_low_lead_points
-        q_num_trump_overkill_low += q1.num_trump_overkill_low_lead_points
-
-        # Game 2: A=P1, B=P0
-        s2, q2 = play_one_game_2p_collect_quality(
-            agent_b, agent_a, tracked_agent_index=1, rng=rng_action, game_seed=game_seed
-        )
-        p0, p1 = s2.players[0].points, s2.players[1].points
-        sum_b += p0
-        sum_a += p1
-        sum_diff += p1 - p0
-        w = _winner_index_2p(s2)
-        if w is None:
-            draws += 1
-        elif w == 0:
-            wins_b += 1
-        else:
-            wins_a += 1
-
-        q_num_second += q2.num_second_hand_decisions
-        q_num_second_with_win += q2.num_second_hand_with_winning_reply
-        q_num_waste += q2.num_trump_waste
-        q_num_trump_wins += q2.num_second_hand_trump_wins
-        q_num_trump_overkill += q2.num_trump_overkill
-        q_num_trump_wins_low += q2.num_second_hand_trump_wins_low_lead_points
-        q_num_trump_overkill_low += q2.num_trump_overkill_low_lead_points
-
-    match = SeatFairStats(
-        num_games=num_games,
-        agent_a_name=agent_a.name,
-        agent_b_name=agent_b.name,
-        wins_agent_a=wins_a,
-        wins_agent_b=wins_b,
-        draws=draws,
-        avg_points_agent_a=sum_a / num_games if num_games else 0.0,
-        avg_points_agent_b=sum_b / num_games if num_games else 0.0,
-        avg_point_diff_agent_a_minus_agent_b=sum_diff / num_games if num_games else 0.0,
+    totals = _evaluate_quality_seed_pairs_independent_rng(
+        agent_a=agent_a,
+        agent_b=agent_b,
+        seeds=seeds[:num_pairs],
+        seed=int(seed),
+        pair_offset=0,
     )
-    quality = DecisionQualityStats(
-        num_second_hand_decisions=q_num_second,
-        num_second_hand_with_winning_reply=q_num_second_with_win,
-        num_trump_waste=q_num_waste,
-        num_second_hand_trump_wins=q_num_trump_wins,
-        num_trump_overkill=q_num_trump_overkill,
-        num_second_hand_trump_wins_low_lead_points=q_num_trump_wins_low,
-        num_trump_overkill_low_lead_points=q_num_trump_overkill_low,
-    )
-    return SeatFairStatsWithQuality(match=match, quality=quality)
+    return _merge_quality_totals([totals])
 
 
 def evaluate_seat_fair_match_2p_with_quality_parallel(
@@ -693,13 +615,13 @@ def evaluate_seat_fair_match_2p_with_quality_parallel(
     Valuta A vs B con quality metrics usando piu' processi.
 
     Regola:
-    - `workers <= 1` delega alla funzione seriale storica.
+    - `workers <= 1` delega alla funzione seriale;
     - `workers > 1` divide le coppie seat-fair in chunk indipendenti.
 
     Nota RNG:
-    la versione parallela usa un RNG azioni indipendente per coppia seat-fair. Questo rende
-    il risultato stabile al variare del chunking; per agenti stocastici puo' differire dalla
-    funzione seriale storica, che usa un unico stream RNG condiviso.
+    seriale e parallelo usano lo stesso RNG azioni indipendente per coppia seat-fair.
+    `workers` cambia quindi il tempo di esecuzione, non il risultato, anche con agenti
+    stocastici.
     """
     if workers <= 1:
         return evaluate_seat_fair_match_2p_with_quality(
@@ -718,6 +640,14 @@ def evaluate_seat_fair_match_2p_with_quality_parallel(
     if len(seeds) < num_pairs:
         raise ValueError(f"game_seeds insufficiente: attesi >= {num_pairs}, ottenuti {len(seeds)}")
     seeds = seeds[:num_pairs]
+    if num_pairs == 0:
+        return evaluate_seat_fair_match_2p_with_quality(
+            agent_a,
+            agent_b,
+            num_games=0,
+            seed=seed,
+            game_seeds=seeds,
+        )
 
     worker_count = max(1, min(int(workers), num_pairs))
     chunk_size = (num_pairs + worker_count - 1) // worker_count

@@ -132,6 +132,39 @@ def test_parallel_decision_quality_matches_serial_for_deterministic_agents() -> 
     assert asdict(parallel.quality) == asdict(serial.quality)
 
 
+def test_parallel_decision_quality_matches_serial_for_stochastic_agents() -> None:
+    """
+    Anche gli agenti casuali devono ricevere gli stessi stream RNG per coppia:
+    cambiare il numero di worker deve influire solo sul tempo di esecuzione.
+
+    Tre worker dividono 15 coppie in chunk non coincidenti con il caso seriale;
+    il confronto protegge quindi anche il calcolo dell'offset globale della coppia.
+    """
+    agent_a = build_agent("random")
+    agent_b = build_agent("random")
+    seeds = list(range(15))
+
+    serial = evaluate_seat_fair_match_2p_with_quality_parallel(
+        agent_a,
+        agent_b,
+        num_games=30,
+        seed=456,
+        game_seeds=seeds,
+        workers=1,
+    )
+    parallel = evaluate_seat_fair_match_2p_with_quality_parallel(
+        agent_a,
+        agent_b,
+        num_games=30,
+        seed=456,
+        game_seeds=seeds,
+        workers=3,
+    )
+
+    assert asdict(parallel.match) == asdict(serial.match)
+    assert asdict(parallel.quality) == asdict(serial.quality)
+
+
 def test_numba_decision_quality_returns_consistent_stats(tmp_path: Path) -> None:
     """Il path Numba decision-quality deve produrre DTO coerenti per un modello MLP."""
     d = int(FEATURE_DIM_2P_V1)
