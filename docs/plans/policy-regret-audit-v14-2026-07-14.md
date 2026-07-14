@@ -1,7 +1,9 @@
 # Audit automatico del regret di v14 (2026-07-14)
 
-> Protocollo congelato prima del run formale. Esito: **in attesa della suite
-> 192 osservazioni x 64 determinizzazioni**.
+> Verdetto: **nessun cluster di errore policy-only; non autorizzare un nuovo
+> training**. I 14 errori affidabili sono tutti nelle finestre gia' gestite da PIMC o
+> solver. Evidenza:
+> [policy_regret_v14.v1.json](../reports/evidence/policy_regret_v14.v1.json).
 
 ## Domanda
 
@@ -120,6 +122,53 @@ del congelamento due correzioni conservative, cioe' il bilanciamento esplicito a
 avversario e la separazione degli errori gia' coperti da PIMC/solver. Il run formale usa
 un seed invariato (`20260720`) ma piu' campioni e intervalli al 99%.
 
+## Risultati formali
+
+Il run ha raccolto 192 decisioni in 34 partite (17 coppie), riempiendo esattamente
+ognuna delle 24 celle. Ogni avversario contribuisce 64 osservazioni; ogni combinazione
+fase/posizione ne contribuisce 24. Sono state escluse 34 mosse forzate.
+
+La sonda seleziona un'alternativa diversa da v14 in 81 casi su 192 (`42,19%`). Questo
+numero **non e' un tasso di errore**: sullo split indipendente molte alternative perdono
+il vantaggio o hanno incertezza troppo larga.
+
+| layer effettivo | decisioni | disaccordi candidati | errori affidabili | regret medio affidabile |
+|---|---:|---:|---:|---:|
+| policy-only (early + mid) | 96 | 36 | **0** | n/a |
+| finestra PIMC | 48 | 20 | 9 | 19,24 |
+| solver esatto | 48 | 25 | 5 | 3,20 |
+
+Nelle 96 decisioni esposte direttamente alla policy, il regret medio cross-fitted e'
+`+0,195` e la mediana `0`, ma nessun intervallo al 99% ha limite inferiore positivo. I
+casi con medie apparenti piu' alte hanno intervalli larghi: non formano una classe
+ripetibile e il report non costruisce alcun cluster.
+
+Le 14 decisioni affidabili fuori dal gruppo policy-only confermano invece che i layer
+runtime hanno un compito reale:
+
+- 9 sono nella finestra in cui il prodotto consulta PIMC belief 16x8;
+- 5 sono nel finale in cui il prodotto ignora la policy e usa il minimax esatto.
+
+Le etichette piu' frequenti sono rinunciare alla presa corrente (7 casi) e passare da
+briscola a non-briscola (6), ma si sovrappongono e appartengono tutte ai due layer
+runtime. Non riaprono la dose PIMC: il precedente confronto 16x8/32x8 ha gia' misurato
+forza e costo del runtime reale.
+
+Il secondo run completo ha prodotto un JSON byte-identico al primo, SHA-256
+`d14bfb9112c65a2352e63f696ec00b14803daf4d11e505f90acce145e431fa6f`.
+
+## Decisione
+
+Il routing preregistrato restituisce `no_policy_error_signal`. Questo non significa che
+v14 sia perfetta: significa che questa suite non individua un difetto early/mid abbastanza
+chiaro e ripetibile da sapere cosa insegnarle.
+
+**STOP** a un nuovo training, reward, ottimizzatore o architettura scelti per inerzia.
+V14 con PIMC belief 16x8 e solver resta la baseline. Una pista modello si riapre soltanto
+con nuova evidenza ripetibile, per esempio dal replay live o da un teacher realmente piu'
+informativo. Nel frattempo il prossimo lavoro utile e' metodologico: eliminare lo split
+casuale per record da BC/value prima di riutilizzare quelle pipeline.
+
 ## Esecuzione formale
 
 ```bash
@@ -135,6 +184,5 @@ uv run python scripts/probe_policy_regret.py \
   --out benchmarks/experiments/policy_regret_v14_v0_20260714/policy_regret_v14_o192_d64_seed20260720.json
 ```
 
-Il report atteso contiene tutte le decisioni, valori per carta, aggregati per fase,
+Il report prodotto contiene tutte le decisioni, valori per carta, aggregati per fase,
 posizione, avversario e layer runtime, top case, hash degli asset e verdetto automatico.
-

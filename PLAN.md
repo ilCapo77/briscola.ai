@@ -48,9 +48,9 @@
   20k partite perde direttamente in due seed su tre (mediana `-0,151`) e la dispersione della forza e' `2,08x`
   quella seriale; a pari 20k mazzi richiede 40k partite e resta direttamente neutra (`-0,148` mediano). Nessun run
   piu' lungo: `serial` resta il default. Report: `docs/plans/a2c-paired-schedule-v0-2026-07-14.md`.
-- La sonda automatica di policy regret e' implementata: raccoglie osservazioni bilanciate per avversario/fase/posizione,
-  sceglie e valuta l'alternativa su determinizzazioni separate e distingue gli errori policy-only da quelli gia'
-  dentro PIMC/solver. Il pilot ha validato la pipeline; il run formale 192x64 e' ancora da eseguire. Protocollo:
+- L'audit policy regret 192x64 e' chiuso con `no_policy_error_signal`. Su 96 decisioni early/mid trova 36 alternative
+  candidate ma **zero errori affidabili al 99%**; i 14 errori confermati sono tutti gia' nelle finestre PIMC (9) o
+  solver (5). Nessun cluster autorizza training o architetture nuove. Report:
   `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
@@ -60,14 +60,13 @@
 
 ## Prossima Decisione
 
-Simmetria, capacita' dormiente, dose PIMC, belief v1 e schedule paired hanno ora un esito causale chiuso. Rami e
-motivazioni complete in `docs/plans/prossima-iterazione-modello.md`.
+Le sette piste e l'audit degli errori residui hanno ora un esito chiuso. Rami e motivazioni complete in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Eseguire l'audit formale policy regret gia' congelato.** 192 osservazioni, 64 determinizzazioni, split 32/32 e
-   intervallo al 99%; comando e output in `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
-2. **Applicare il routing automatico senza tuning post-hoc.** Un nuovo intervento parte solo da almeno tre errori
-   policy-only della stessa categoria, distribuiti su almeno due avversari e due coppie. Casi isolati o gia' coperti
-   dal runtime non autorizzano training.
+1. **Congelare la ricerca modello.** V14, PIMC belief 16x8, solver e schedule seriale restano la baseline; nessun
+   risultato corrente autorizza v15, una nuova architettura o un altro training lungo.
+2. **Correggere lo split dei dataset prima di riusare BC/value.** Raggruppare train/validation/test per partita,
+   impedendo che stati della stessa partita finiscano in split diversi; aggiungere test e metadati di provenance.
 3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
 

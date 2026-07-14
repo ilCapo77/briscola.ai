@@ -466,7 +466,9 @@ Gli errori residui di una policy si possono cercare con
 compatibili, sceglie l'alternativa su meta' campioni e la giudica sull'altra meta', usa
 il solver esatto a mazzo vuoto e produce categorie automatiche. Il report separa le fasi
 policy-only dalle decisioni gia' coperte dal PIMC/solver del prodotto. Protocollo e
-limiti: `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
+limiti: `docs/plans/policy-regret-audit-v14-2026-07-14.md`. Sul run formale v14 192x64
+non trova errori affidabili nelle 96 decisioni early/mid; i 14 casi confermati sono tutti
+nelle finestre gia' gestite da PIMC (9) o solver (5), quindi non autorizza un retraining.
 
 Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
