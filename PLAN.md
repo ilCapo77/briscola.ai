@@ -31,6 +31,13 @@
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
+- Il primo replay appaiato di campo usa 70 partite complete (59 v13, 11 v14) e 2.660 decisioni non forzate. Sulle
+  stesse osservazioni i runtime concordano nell'`89,40%` dei casi; non emerge un difetto v14 localizzato e v14 riduce
+  ancora overkill (`22,91% -> 20,54%`) e sprechi (`4 -> 1`). Il dato live resta diagnostico e non bloccante:
+  `docs/plans/live-policy-replay-v13-v14-2026-07-14.md`.
+- Il gate belief v1 multi-stile è implementato: roster congelato di sette stili, split per partita,
+  leave-one-opponent-out, BCE/top-k/Brier/ECE e stop automatico. Il pilot da 770 partite valida soltanto la pipeline;
+  il prossimo job probatorio usa 66.000 partite. Protocollo: `docs/plans/belief-v1-multistile-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -42,10 +49,12 @@
 La promozione v14 chiude la pista di simmetria; diagnostica e training controllato chiudono la capacità dormiente;
 storico e probe v14 chiudono anche la dose PIMC. Rami esclusi in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Raccogliere il prossimo audit di campo su v14.** Servono alcune centinaia di partite umane complete, separate per
-   versione e filtrate dai bot, prima di usare osservazioni aneddotiche per proporre un nuovo obiettivo di training.
-2. **Preparare il gate belief v1.** Prima di un training lungo congelare roster misto, split leave-one-opponent-out e
-   confronto v0-vs-v1 nello stesso PIMC 16×8; le metriche offline da sole non autorizzano la promozione.
+1. **Eseguire il gate belief v1 completo.** Il runner genera 66.000 partite multi-stile, misura sette fold esclusi e
+   allena il candidato all-styles solo se supera tutti i gate offline preregistrati.
+2. **Solo dopo un GO offline, confrontare belief v1-v0 nel PIMC 16×8.** Screening seat-fair da 2.000 partite e
+   conferma da 10.000; policy, solver, dose e uniform mix restano identici.
+3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
+   basso volume previsto non blocca il gate belief e non diventa training senza una nuova decisione su privacy e qualità.
 
 Modifiche strutturali più ampie restano successive al gate belief e all'audit di campo.
 
@@ -54,9 +63,9 @@ Modifiche strutturali più ampie restano successive al gate belief e all'audit d
 - Le piste carichi guidati, timing dell'asso di briscola e cavata con mano lunga sono chiuse dalle ablation
   controfattuali: non riaprirle sulla base di singoli aneddoti. Riferimenti:
   `docs/plans/audit-campo-2026-07-07.md` e capitolo 17.
-- Ripetere l'audit solo con qualche centinaio di partite umane complete contro v14, separando per data/versione e
-  filtrando bot/load test. I dati umani restano diagnostici: niente training prima di rivalutare volume, consenso,
-  qualità e privacy.
+- Il replay appaiato corrente non confronta i rapporti vittorie grezzi: mostra v13 e v14 sulle stesse osservazioni e
+  separa fallback, search e solver. Aggiornarlo quando il volume v14 cresce, separando versione e bot/load test.
+- I dati umani restano diagnostici: niente training prima di rivalutare volume, consenso, qualità e privacy.
 
 ## Vincoli Operativi
 
@@ -126,6 +135,14 @@ Sonda riproducibile di simmetria dei semi:
 uv run python scripts/probe_suit_symmetry.py \
   --model data/models/best_a2c_v14.npz \
   --out-json data/suit_symmetry_v14.json
+```
+
+Gate belief v1 completo (job lungo, riprendibile):
+
+```bash
+nohup caffeinate -i uv run python scripts/run_belief_v1_gate.py \
+  --resume \
+  > data/belief/belief_v1_gate_20260714.log 2>&1 &
 ```
 
 Avvio locale:

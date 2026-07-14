@@ -329,23 +329,34 @@ nessuna coppia spezzata da un update e rifiuto esplicito di configurazioni dispa
 ### Problema
 
 La belief ufficiale `belief_v0_h128_50k_seed20260702.npz` è stata addestrata su 50k
-osservazioni mirror di v7. `generate_belief_dataset.py` usa oggi la stessa policy su
-entrambi i lati; non misura generalizzazione a stili diversi.
+partite mirror di v7 (350k record). Il vecchio dataset usava la stessa policy su entrambi
+i lati e non misurava generalizzazione a stili diversi.
 
-### Da implementare
+### Implementazione congelata (2026-07-14)
 
-- roster esplicito: v13, anchor nominata v11 ed euristiche con stili differenti;
+- roster esplicito: v14 dominante, v13, anchor nominata v11 ed euristiche con stili differenti;
 - `opponent_id` per record come solo metadato di split, mai input della rete;
 - split per partita e fold leave-one-opponent-out;
 - metriche BCE/top-k già esistenti più Brier score e calibrazione/ECE;
 - harness A/B simmetrico belief v0-v1 nello stesso PIMC 16x8.
 
+`generate_belief_dataset.py`, `train_belief.py`, `summarize_belief_folds.py` e
+`run_belief_v1_gate.py` implementano il protocollo. Il roster versionato assegna pesi
+`4:2:1:1:1:1:1` a v14, v13, v11, heuristic_v1, heuristic_v2, trump_saver e random.
+Il runner usa 66.000 partite, esegue i sette fold in sequenza e allena l'all-styles solo
+dopo un GO offline. Metodi, soglie, comando e limiti sono in
+`docs/plans/belief-v1-multistile-2026-07-14.md`.
+
 Il fold va assegnato in base allo stile della mano avversaria che la belief cerca di
 inferire, non al generico nome del matchup. Il full-state è lecito solo per costruire la
 label `y`; input `x` e inferenza restano osservazioni parziali.
 
+Il pilot da 770 partite/5.390 record ha validato l'intera pipeline e lo stop automatico.
+Come previsto non è competitivo con v0 addestrata su 50.000 partite (BCE macro `0,6103`
+contro `0,5514`): il verdetto è soltanto `pilot_pipeline_validated`, non un test dell'idea.
+
 La sigmoid per-carta non impone l'esatta cardinalità della mano, quindi una metrica
-offline migliore non basta. Il gate decisivo mantiene identici policy v13, D=16,
+offline migliore non basta. Il gate decisivo mantiene identici policy v14, D=16,
 finestra 8, solver e uniform mix, cambiando soltanto belief v0/v1.
 
 ### Decisione

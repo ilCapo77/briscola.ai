@@ -342,6 +342,11 @@ DATABASE_URL=... python scripts/export_live_actions.py \
   --out ./data/prod_live_actions_v14.jsonl
 ```
 
+`scripts/audit_live_policy_replay.py` mostra poi due policy e i rispettivi stack PIMC sulle **stesse** observation
+live. Il report contiene solo aggregati e hash, verifica la fedeltà al ramo registrato e distingue fallback, search
+campionaria e solver; non simula il seguito alternativo della partita e quindi misura differenze di scelta, non forza
+causale. Protocollo e primo audit v13-v14: `docs/plans/live-policy-replay-v13-v14-2026-07-14.md`.
+
 **Deploy (cloud multi‑replica)**: imposta `REDIS_URL` (stato partita condiviso + realtime via pub/sub) e, per la
 raccolta dati persistente, `DATABASE_URL` (event log Postgres). Sul sito live entrambi sono configurati e l'event log
 usa la modalità `dataset`. Restringi le origin con `BRISCOLA_CORS_ALLOW_ORIGINS=https://tuodominio` (default `*`, solo
@@ -388,6 +393,9 @@ Strumenti aggiuntivi:
 - `scripts/evaluate_pimc.py` – harness offline PIMC/determinizzazione sopra una policy `.npz`: confronta search,
   modello puro, solver-control o un'altra configurazione PIMC, con CI su score/avg diff e metriche di costo per mossa.
   È lo strumento per ablation della search; la distillazione PIMC→policy è invece un ramo storico chiuso.
+- `scripts/run_belief_v1_gate.py` – pipeline riprendibile per belief multi-stile: genera il dataset da roster
+  versionato, esegue i fold leave-one-opponent-out e crea il candidato all-styles solo dopo un GO offline. Il pilot
+  non può autorizzare una promozione; soglie e comando lungo sono in `docs/plans/belief-v1-multistile-2026-07-14.md`.
 - `scripts/probe_suit_symmetry.py` – rinomina semanticamente mano, briscola, tavolo, storia e one-hot pubbliche sotto
   tutte le 24 permutazioni dei semi, poi rimappa le 40 azioni prima del confronto. Esclude le mosse forzate e usa solo
   `PlayerObservation`: sulla v13 la sonda trovava **18,19% di flip dell'argmax**; la distillazione v14 li porta al
