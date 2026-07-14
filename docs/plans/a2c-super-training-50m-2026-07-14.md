@@ -199,54 +199,21 @@ non gigabyte.
 
 ### Comando del primo blocco 0-10M
 
-Questo comando dichiara fin dall'inizio l'orizzonte totale da 50M, ma ferma il processo a
-10M. I file a 5M e 10M contengono lo stato completo di resume; la riga diagnostica viene
-conservata ogni 1.000 update, mentre il log stampa un heartbeat ogni 20.000 partite.
+Il launcher dedicato contiene la ricetta congelata, dichiara fin dall'inizio l'orizzonte
+totale da 50M e ferma il processo a 10M:
 
 ```bash
-mkdir -p \
-  benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/models \
-  benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/resume \
-  benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/validation \
-  benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/final_gate
-
-PYTHONUNBUFFERED=1 nohup caffeinate -dimsu \
-  uv run python scripts/train_a2c.py \
-  --init data/models/best_a2c_v14.npz \
-  --out benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/models/a2c_v14_scale50m_seed20260723_at10m.npz \
-  --encoder-version v4 \
-  --rollout-engine fast --fast-rollout numba \
-  --training-schedule serial --seat-fair \
-  --opponent-mix bc_model:0.15,bc_model_pimc_belief:0.40,bc_model_value_lookahead_8x8:0.20,heuristic_trump_saver:0.12,heuristic_v1:0.04,heuristic_v2:0.06,random:0.03 \
-  --opponent-model data/models/best_a2c_v14.npz \
-  --opponent-belief-model data/models/belief_v0_h128_50k_seed20260702.npz \
-  --opponent-pimc-determinizations 16 \
-  --opponent-value-model data/models/value_v1_v4_fullgame_h128_seed20260718.npz \
-  --opponent-value-max-unknown-cards 8 \
-  --bc-anchor data/models/best_a2c_v14.npz --bc-anchor-beta 0.01 \
-  --overkill-penalty-mode gap --overkill-penalty-beta 0.3 \
-  --overkill-low-lead-points-max 2 \
-  --lr 0.0003 --weight-decay 0 \
-  --entropy-beta 0.0005 --value-coef 0.5 --gamma 1.0 \
-  --suit-augmentation off --suit-consistency-beta 0 --suit-margin-beta 0 \
-  --update-every 20 --log-every 1000 \
-  --metrics-mode summary \
-  --diagnostics-json benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/diagnostics_0_10m.sampled.json \
-  --diagnostics-every 1000 \
-  --num-games 50000000 --stop-after-games 10000000 \
-  --checkpoint-games 5000000,10000000 \
-  --checkpoint-dir benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/resume \
-  --checkpoint-prefix a2c_v14_scale50m_seed20260723 \
-  --seed 20260723 \
-  > benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/train_0_10m.log 2>&1 &
-
-echo $! > benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/train_0_10m.pid
+scripts/run_a2c_super_training_50m.sh start 10
 ```
 
-Controllo non invasivo:
+Il launcher crea directory, `nohup`, `caffeinate`, PID e log; rifiuta modifiche tracked,
+commit diversi, checkpoint mancanti e sovrascritture. I file a 5M e 10M contengono lo
+stato completo di resume. Diagnostica e heartbeat restano campionati ogni 1.000 update,
+cioe' ogni 20.000 partite. Controlli:
 
 ```bash
-tail -f benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/train_0_10m.log
+scripts/run_a2c_super_training_50m.sh status
+scripts/run_a2c_super_training_50m.sh log
 ```
 
 Il blocco e' completo quando il log contiene `Saved model` e il processo non esiste piu'.

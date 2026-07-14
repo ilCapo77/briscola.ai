@@ -476,6 +476,8 @@ non un nuovo warm-start. Il resume rifiuta cambi di flag, asset o codice. Per ma
 la memoria limitata usare `--metrics-mode summary` e campionare la telemetria con
 `--diagnostics-every N`. Schedule, metriche e test bit-identico sono descritti nel
 protocollo [`a2c-super-training-50m-2026-07-14.md`](docs/plans/a2c-super-training-50m-2026-07-14.md).
+Il launcher congelato di quell'esperimento è `scripts/run_a2c_super_training_50m.sh`:
+richiede esplicitamente `start 10|20|30|40|50` e non concatena i blocchi senza uno screen.
 
 Gli errori residui di una policy si possono cercare con
 `scripts/probe_policy_regret.py`: la sonda prova tutte le carte su determinizzazioni

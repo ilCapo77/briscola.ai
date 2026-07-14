@@ -74,8 +74,9 @@ Le sette piste e l'audit degli errori residui hanno un esito chiuso. Il costo mo
 eccezione controllata: falsificare l'ipotesi del plateau con il protocollo 50M, senza chiamarne automaticamente
 l'output v15. Rami precedenti e motivazioni complete in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Avviare soltanto il blocco 0-10M.** Il comando `nohup` validato e gli artefatti attesi sono nel protocollo;
-   checkpoint tecnico a 5M, strategico a 10M, heartbeat ogni 20k. Non concatenare automaticamente altri blocchi.
+1. **Avviare soltanto il blocco 0-10M.** Il launcher validato
+   `scripts/run_a2c_super_training_50m.sh start 10` gestisce `nohup`, PID e log; checkpoint tecnico a 5M,
+   strategico a 10M, heartbeat ogni 20k. Non concatenare automaticamente altri blocchi.
 2. **Eseguire lo scouting restante in blocchi da 10M.** Init/anchor v14 e roster congelato; pause decisionali a
    10/20/30/40/50M sulla stessa suite da 4k. I checkpoint tecnici a meta' blocco servono solo al resume e non sono
    candidati selezionabili; il test finale da 10k resta sigillato.

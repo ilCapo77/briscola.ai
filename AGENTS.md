@@ -93,6 +93,8 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
   - A2C long-run: `--num-games` resta l'orizzonte totale, `--stop-after-games` chiude il segmento e
     `--resume checkpoint.npz` ripristina policy, critic, Adam, RNG, schedule e metriche. Usare
     `--metrics-mode summary --diagnostics-every N`; il resume rifiuta configurazioni, asset o commit diversi.
+    Lo scouting v14 50M usa il launcher congelato `scripts/run_a2c_super_training_50m.sh start 10|20|30|40|50`;
+    ogni target va autorizzato separatamente dopo lo screen precedente.
 - Pipeline riproducibile (train + eval matrix + manifest): `python scripts/run_experiment.py`
 - Valutazione offline: `python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random`
   - engine selezionabile: `--engine domain|fast|numba`; modi seat-fair `--seat-fair --seed-suite small|medium`; benchmark `--benchmark medium|big`; carica modello con `--agent0 bc_model --agent0-model ./data/models/best_a2c.npz`
