@@ -1,6 +1,7 @@
 # Piano di ricerca: prossima iterazione del modello
 
-> Stato: esiti aggiornati al 2026-07-14; prossima pista: osservabilita' A2C.
+> Stato: esiti aggiornati al 2026-07-14; le sette piste hanno un esito e nessun
+> training v15 e' attualmente autorizzato.
 > Questo documento approfondisce le sette piste sintetizzate in `PLAN.md`; non autorizza
 > automaticamente training lunghi né promozioni. `PLAN.md` resta la fonte di verità su
 > quale fase eseguire adesso.
@@ -309,7 +310,7 @@ numerico nel trainer.
 Il flag attuale `train_a2c.py --seat-fair` alterna il posto della policy, ma genera un
 mazzo diverso per ogni partita. Non è quindi paired come l'evaluation.
 
-### Implementazione completata — run multi-seed in attesa
+### Implementazione completata
 
 Una schedule pura e riproducibile `(game_seed, policy_seat, opponent)` in cui ogni coppia:
 
@@ -336,12 +337,22 @@ ridurre bias e rumore, ma non è garantito che migliori il modello.
 Test richiesti: seed/opponent uguali e seat `{0,1}` in ogni coppia, schedule deterministica,
 nessuna coppia spezzata da un update e rifiuto esplicito di configurazioni dispari.
 
-Questi vincoli sono ora implementati da `--training-schedule paired` e coperti nei path
+Questi vincoli sono implementati da `--training-schedule paired` e coperti nei path
 dominio, fast Python e Numba. Flag omesso e `serial` esplicito producono pesi bit-per-bit
-uguali. Il runner
-riprendibile confronta tre seed a pari partite e a pari mazzi; soglie, comando lungo e
-limiti sono congelati in `a2c-paired-schedule-v0-2026-07-14.md`. Nessun risultato è
-ancora disponibile, quindi non va anticipato un verdetto.
+uguali. Il runner riprendibile confronta tre seed a pari partite e a pari mazzi; soglie,
+comando, risultato ed evidenza sono in `a2c-paired-schedule-v0-2026-07-14.md`.
+
+### Esito 2026-07-14
+
+A pari 20.000 partite, il paired ottiene differenze dirette rispetto al seriale di
+`-0,151`, `-0,462` e `+0,242` punti: mediana `-0,151` e un solo seed non negativo. La
+deviazione standard tra seed della forza contro v14 cresce da `0,177` a `0,367`
+(`2,08x`), mentre la variabilita' dei gradienti cresce leggermente (`1,038x`).
+
+Il controllo paired a pari 20.000 mazzi usa 40.000 partite ed e' molto stabile tra seed,
+ma resta neutro nel direct match con il seriale 20k (mediana `-0,148`) a circa il doppio
+del costo. Verdetto preregistrato: **inconcludente, mantenere seriale**. Non e'
+giustificato un altro run paired piu' lungo; nessun modello temporaneo e' candidabile.
 
 ## 8. Pista 6: belief v1 multi-stile
 
@@ -447,10 +458,10 @@ segnale oppure se il widening controllato non mostra alcun limite di capacità.
 | fatto: STOP | Augmentation paired | medio | smoke, sonda e gate | forza/simmetria non congiunte |
 | fatto: STOP | Sonda salute MLP | basso | JSON per fase/neurone + ablation | nessun collo di capacità |
 | fatto: STOP | Dose PIMC 16/32/64 | medio | forza + CPU media | curva piatta rispetto al costo |
-| prossimo | Strumentazione/A2C | medio | gradienti, critic, tre ablation separate | segnale non ripetibile |
-| dopo | Training paired | medio | schedule + confronto multi-seed | varianza/forza non migliori |
+| fatto: sano | Strumentazione/A2C | medio | gradienti, critic, tre ablation separate | nessun difetto numerico |
+| fatto: inconcludente | Training paired | medio | schedule + confronto multi-seed | varianza/forza non migliori |
 | fatto: STOP | Belief v1 | medio-alto | fold multi-stile + A/B PIMC | solo metriche offline migliori |
-| ultimo | Nuova architettura | alto | prototipo esportabile e gate completi | tooling/costo senza headroom |
+| sospeso | Nuova architettura | alto | prototipo esportabile e gate completi | nessun limite di rappresentazione isolato |
 
 Non avviare la fase successiva per inerzia. Ogni fase deve produrre un artefatto piccolo
 e versionabile (JSON di sonda, manifest o nota tecnica) che consenta a una sessione futura
@@ -478,7 +489,9 @@ uv run python scripts/probe_suit_symmetry.py \
   --out-json data/suit_symmetry_v14.json
 ```
 
-Sonda MLP, simmetria, dose e roster belief hanno ora script ed evidenze stabili. Mancano
-ancora comandi affidabili per critic reuse, osservabilita'/normalizzazione/clipping A2C,
-schedule seat-paired di training e nuove architetture. Il prossimo lavoro implementa e
-testa prima la sola osservabilita' A2C, senza preparare una ricetta lunga.
+Sonda MLP, simmetria, dose, roster belief, diagnostica A2C e schedule paired hanno script
+ed evidenze stabili. Critic reuse, normalizzazione, clipping e una nuova architettura non
+sono lavoro mancante: sono ipotesi sospese perche' i test non hanno mostrato il difetto
+che dovrebbero correggere. Prima di un nuovo training serve un audit offline degli errori
+residui di v14 che individui una classe ripetibile, non un'altra ricetta lunga scelta a
+priori.

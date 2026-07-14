@@ -42,11 +42,12 @@
 - La diagnostica passiva A2C su tre seed × 2.000 partite supera tutti i gate. Il critic, pur ripartendo da zero,
   raggiunge explained variance mediana finale `0,127..0,133`; bias advantage `0,147..0,174`, picco gradiente
   `p95/mediana 1,92..2,00` e passi relativi sotto `0,019%` non indicano instabilità. **STOP**, per ora, a critic
-  reuse, normalizzazione e clipping; prossimo controllo: schedule davvero paired. Report:
+  reuse, normalizzazione e clipping. Report:
   `docs/plans/a2c-health-diagnostic-v0-2026-07-14.md`.
-- La schedule A2C realmente paired è implementata dietro `--training-schedule paired`: stesso seed e opponent,
-  seat `{0,1}` e coppia intera nello stesso update, condivisa tra dominio/fast/Numba. `serial` resta il default.
-  Protocollo 3 seed pronto, ma **nessun risultato ancora**: `docs/plans/a2c-paired-schedule-v0-2026-07-14.md`.
+- La schedule A2C realmente paired e' implementata e validata, ma il confronto 3 seed e' **inconcludente**. A pari
+  20k partite perde direttamente in due seed su tre (mediana `-0,151`) e la dispersione della forza e' `2,08x`
+  quella seriale; a pari 20k mazzi richiede 40k partite e resta direttamente neutra (`-0,148` mediano). Nessun run
+  piu' lungo: `serial` resta il default. Report: `docs/plans/a2c-paired-schedule-v0-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -55,13 +56,14 @@
 
 ## Prossima Decisione
 
-Simmetria, capacità dormiente, dose PIMC e belief v1 hanno ora un esito causale chiuso. Rami e motivazioni complete in
-`docs/plans/prossima-iterazione-modello.md`.
+Simmetria, capacita' dormiente, dose PIMC, belief v1 e schedule paired hanno ora un esito causale chiuso. Rami e
+motivazioni complete in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Eseguire il protocollo seriale/paired già congelato.** Tre seed, 20k a pari partite e 40k a pari mazzi; usare il
-   comando `nohup` in `docs/plans/a2c-paired-schedule-v0-2026-07-14.md` e riprendere dal report finale.
-2. **Applicare il gate senza tuning post-hoc.** GO solo con non-regressione diretta e minore dispersione sia di forza
-   sia dei gradienti; altrimenti serial resta il default. I nove modelli sono temporanei e non sono candidati v15.
+1. **Non avviare un altro training per inerzia.** V14 e la schedule seriale restano la baseline; i nove modelli del
+   probe paired sono temporanei e non sono candidati v15.
+2. **Misurare prima il prossimo limite.** Prima di scegliere architettura, reward o ottimizzatore, preparare un audit
+   offline degli errori residui di v14 su osservazioni fisse, separato per fase e tipo di decisione. Una nuova pista
+   parte solo da una classe di errore ripetibile e da un intervento che la isoli.
 3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
 

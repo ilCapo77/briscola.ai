@@ -465,8 +465,9 @@ Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
 - **training schedule paired** (`--training-schedule paired`): ripete seed di mazzo e avversario su seat `{0,1}`
-  dentro lo stesso update. Il default resta `serial`; il confronto multi-seed riprendibile è
-  `scripts/run_a2c_paired_schedule_probe.py` e il protocollo vive in
+  dentro lo stesso update. Il confronto su tre seed non ha ridotto la variabilita' ne' superato il seriale a pari
+  partite; `serial` resta il default e non e' autorizzato un run paired piu' lungo. Il runner riprendibile e'
+  `scripts/run_a2c_paired_schedule_probe.py`; protocollo e risultato vivono in
   `docs/plans/a2c-paired-schedule-v0-2026-07-14.md`;
 - **reward shaping anti‑overkill** (`--overkill-penalty-mode flat|gap --overkill-penalty-beta`);
 - **suit augmentation paired sperimentale** (`--suit-augmentation paired`): duplica ogni traiettoria con una
