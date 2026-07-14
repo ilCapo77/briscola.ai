@@ -85,7 +85,10 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
 - Self-play → DB: `python scripts/self_play_to_db.py` (verso SQLite, no HTTP)
 - Self-play veloce (summary-only, no DB): `python scripts/fast_self_play.py`
 - Export dataset: `python scripts/export_dataset.py` (SQLite → JSONL versionato)
-- Training BC (imitation): `python scripts/train_bc.py` (legge JSONL, target = action_id `[0,39]` + action mask)
+- Training BC (imitation): `python scripts/train_bc.py` (legge JSONL, target = action_id `[0,39]` + action mask;
+  split train/validation/test per `game_id`, default 80/10/10)
+- Training value: `python scripts/train_value.py` / `python scripts/train_value_pairwise.py` (split per partita;
+  gli NPZ compatti devono contenere `game_ids`, senza fallback allo split per record)
 - Training RL: `python scripts/train_a2c.py` / `python scripts/train_pg.py` (salvano `.npz` in `data/models/`)
 - Pipeline riproducibile (train + eval matrix + manifest): `python scripts/run_experiment.py`
 - Valutazione offline: `python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random`

@@ -52,6 +52,9 @@
   candidate ma **zero errori affidabili al 99%**; i 14 errori confermati sono tutti gia' nelle finestre PIMC (9) o
   solver (5). Nessun cluster autorizza training o architetture nuove. Report:
   `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
+- Lo split supervisionato BC/value e' ora per partita, non per record: default 80/10/10, test finale separato,
+  provenance con conteggi/digest e rifiuto degli NPZ storici senza `game_ids`. Anche il value pairwise raggruppa
+  tutte le root della stessa partita. Protocollo: `docs/plans/dataset-split-per-partita-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -65,9 +68,7 @@ Le sette piste e l'audit degli errori residui hanno ora un esito chiuso. Rami e 
 
 1. **Congelare la ricerca modello.** V14, PIMC belief 16x8, solver e schedule seriale restano la baseline; nessun
    risultato corrente autorizza v15, una nuova architettura o un altro training lungo.
-2. **Correggere lo split dei dataset prima di riusare BC/value.** Raggruppare train/validation/test per partita,
-   impedendo che stati della stessa partita finiscano in split diversi; aggiungere test e metadati di provenance.
-3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
+2. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
 
 Critic reuse, normalizzazione, clipping, nuove architetture e Q Monte Carlo restano sospesi finché una misura non
@@ -97,8 +98,6 @@ mostra il problema specifico che dovrebbero risolvere.
 
 ## Debito Aperto
 
-- BC e value usano ancora split casuali per record: prima di riutilizzarli per una nuova linea, introdurre split per
-  partita per evitare leakage tra stati della stessa partita.
 - RNG seriale e parallelo di `decision_quality` non è riproducibile cross-`workers`.
 - Cold start residuo (~13.7s) è il pavimento della piattaforma; leve reali: keep-alive sotto l'idle timeout o piano
   diverso. Il runtime applicativo non ha più compilazione JIT.

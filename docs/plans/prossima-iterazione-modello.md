@@ -497,5 +497,16 @@ residui di v14 che individui una classe ripetibile, non un'altra ricetta lunga s
 priori. La sonda 192x64 non trova errori affidabili nelle 96 decisioni policy-only; i 14
 casi confermati sono tutti nelle finestre PIMC/solver. Verdetto
 `no_policy_error_signal`: nessun training autorizzato. Metodo e numeri sono in
-`policy-regret-audit-v14-2026-07-14.md`. Prima di riusare BC/value va invece corretto lo
-split casuale per record, raggruppando gli stati per partita.
+`policy-regret-audit-v14-2026-07-14.md`.
+
+## 12. Prerequisito dati BC/value (completato 2026-07-14)
+
+Lo split casuale per record e' stato sostituito da uno split deterministico per partita
+in BC, value scalare e value pairwise. I trainer usano per default 80/10/10, valutano il
+test solo dopo la scelta del modello e salvano conteggi + digest dell'assegnazione. I
+dataset NPZ value e leaf PIMC hanno formato v2 con `game_ids`; quelli storici privi del
+confine fra partite vengono rifiutati e vanno rigenerati.
+
+Questo chiude un rischio di validation ottimistica, ma non costituisce un segnale per
+riaprire il training: v14 e lo stack runtime corrente restano congelati. Dettagli e
+migrazione: `dataset-split-per-partita-2026-07-14.md`.

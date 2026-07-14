@@ -104,20 +104,43 @@ def test_build_training_examples_can_filter_disagreements(tmp_path: Path) -> Non
         )
     data_path.write_text("\n".join(rows) + "\n", encoding="utf-8")
 
-    x, mask, y, weights, target_probs = train_bc._build_training_examples(
+    dataset = train_bc._build_training_examples(
         data_path,
         encoder_version="v3",
         disagreement_agent=_AlwaysFirstCardAgent(),
     )
 
-    assert x.shape[0] == 1
-    assert mask.shape == (1, 40)
+    assert dataset.x.shape[0] == 1
+    assert dataset.mask.shape == (1, 40)
     # Senza campo sample_weight nel JSONL, il peso di default è 1.0 (training uniforme).
-    assert weights.shape == (1,)
-    assert float(weights[0]) == 1.0
-    assert target_probs is None
+    assert dataset.weights.shape == (1,)
+    assert float(dataset.weights[0]) == 1.0
+    assert dataset.target_probs is None
+    assert dataset.game_ids.tolist() == ["disagree_1"]
     kept_card = obs["my_hand"][1]
-    assert int(y[0]) == train_bc.card_dto_to_action_id(kept_card)
+    assert int(dataset.y[0]) == train_bc.card_dto_to_action_id(kept_card)
+
+
+def test_build_training_examples_rejects_missing_game_id(tmp_path: Path) -> None:
+    """Un esempio BC senza partita sorgente non deve ricadere nello split per record."""
+    train_bc = _load_train_bc_module()
+    state = new_game_state(num_players=2, seed=43)
+    obs = build_observation_dto(state, player_index=0, server_version=1).model_dump(mode="json")
+    data_path = tmp_path / "missing_game_id.jsonl"
+    data_path.write_text(
+        json.dumps(
+            {
+                "schema_version": 1,
+                "observation": obs,
+                "action": {"card_index": 0},
+            }
+        )
+        + "\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ValueError, match="split per partita e' obbligatorio"):
+        train_bc._build_training_examples(data_path, encoder_version="v3")
 
 
 def _load_train_bc_module():
@@ -183,6 +206,14 @@ def test_train_bc_mlp_supports_init_and_anchor(tmp_path: Path) -> None:
     assert metadata["init"] == str(init_path)
     assert metadata["bc_anchor_path"] == str(init_path)
     assert metadata["bc_anchor_beta"] == 0.01
+    assert metadata["dataset_split"]["unit"] == "game"
+    assert metadata["dataset_split"]["group_counts"] == {
+        "total": 8,
+        "train": 5,
+        "validation": 2,
+        "test": 1,
+    }
+    assert len(metadata["dataset_split"]["assignment_sha256"]) == 64
 
 
 def test_train_bc_upgrade_init_v3_to_v4(tmp_path: Path) -> None:

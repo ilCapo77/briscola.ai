@@ -8,6 +8,10 @@ Il target consigliato per lo Stage 0 V-lookahead e' il residuo normalizzato:
 
 Questo rende esplicita la baseline "delta corrente" e chiede alla rete di predire solo il
 valore futuro residuo della posizione.
+
+Lo split train/validation/test e' assegnato per partita intera (default 80/10/10). I dataset
+devono quindi conservare un ``game_id`` per record; il formato Numba v2 aggiunge sia
+``game_ids`` sia i ``game_seeds`` di provenance.
 """
 
 from __future__ import annotations
@@ -22,6 +26,7 @@ import numpy as np
 
 from briscola_ai.ai.encoding.observation_encoder import EncoderVersion, encode_observation_2p_with_version
 from briscola_ai.ai.numba.value_dataset import phase_name_from_code
+from briscola_ai.ai.training.dataset_split import make_grouped_dataset_split
 
 TargetMode = Literal["residual", "absolute"]
 LossName = Literal["huber", "mse"]
@@ -37,13 +42,14 @@ class ValueBatch:
 
 @dataclass(frozen=True, slots=True)
 class ValueDataset:
-    """Dataset value caricato in memoria."""
+    """Dataset value caricato in memoria, con provenance per partita."""
 
     x: np.ndarray
     y: np.ndarray
     current_delta: np.ndarray
     final_delta: np.ndarray
     phases: np.ndarray
+    game_ids: np.ndarray
 
 
 @dataclass
@@ -52,11 +58,11 @@ class ValueMetrics:
 
     epoch: int
     train_loss: float
-    val_loss: float
-    val_mae_points: float
-    val_baseline_mae_points: float
-    val_sign_acc: float
-    val_baseline_sign_acc: float
+    val_loss: float | None
+    val_mae_points: float | None
+    val_baseline_mae_points: float | None
+    val_sign_acc: float | None
+    val_baseline_sign_acc: float | None
 
 
 def _iter_jsonl(path: Path):
@@ -88,6 +94,7 @@ def _load_value_dataset_jsonl(path: Path, *, encoder_version: EncoderVersion, ta
     current_delta: list[float] = []
     final_delta: list[float] = []
     phases: list[str] = []
+    game_ids: list[str | int] = []
 
     for rec in _iter_jsonl(path):
         if rec.get("dataset_kind") != "value_observation":
@@ -95,12 +102,21 @@ def _load_value_dataset_jsonl(path: Path, *, encoder_version: EncoderVersion, ta
         obs = rec.get("observation")
         if not isinstance(obs, dict) or obs.get("num_players") != 2:
             continue
+        game_id = rec.get("game_id")
+        if isinstance(game_id, bool) or not isinstance(game_id, (str, int)):
+            raise ValueError(
+                "Record value valido senza game_id stringa/intero: lo split per partita e' obbligatorio. "
+                "Rigenera il dataset con generate_value_dataset.py aggiornato."
+            )
+        if isinstance(game_id, str) and not game_id.strip():
+            raise ValueError("Record value valido con game_id vuoto")
         encoded = encode_observation_2p_with_version(obs, version=encoder_version)
         features.append(encoded.features)
         targets.append(_target_scaled(rec, target=target))
         current_delta.append(float(rec["current_score_delta"]))
         final_delta.append(float(rec["final_score_delta"]))
         phases.append(str(rec.get("phase", "unknown")))
+        game_ids.append(game_id)
 
     if not features:
         raise ValueError("Nessun record value_observation valido trovato")
@@ -111,26 +127,38 @@ def _load_value_dataset_jsonl(path: Path, *, encoder_version: EncoderVersion, ta
         current_delta=np.asarray(current_delta, dtype=np.float32),
         final_delta=np.asarray(final_delta, dtype=np.float32),
         phases=np.asarray(phases, dtype=object),
+        game_ids=np.asarray(game_ids, dtype=object),
     )
 
 
 def _load_value_dataset_npz(path: Path, *, target: TargetMode) -> ValueDataset:
     """Carica un dataset compatto `.npz` prodotto da `generate_value_dataset_numba.py`."""
-    with np.load(path) as data:
+    with np.load(path, allow_pickle=False) as data:
         keys = set(data.keys())
-        missing = {"x", "current_delta", "final_delta"} - keys
+        missing = {"x", "current_delta", "final_delta", "game_ids"} - keys
         if missing:
-            raise ValueError(f"Dataset value .npz invalido: mancano chiavi {sorted(missing)}")
+            detail = ""
+            if "game_ids" in missing:
+                detail = (
+                    " Il formato storico non consente uno split sicuro per partita: "
+                    "rigenera il dataset con generate_value_dataset_numba.py aggiornato."
+                )
+            raise ValueError(f"Dataset value .npz invalido: mancano chiavi {sorted(missing)}.{detail}")
 
         x = np.asarray(data["x"], dtype=np.float32)
         current_delta = np.asarray(data["current_delta"], dtype=np.float32)
         final_delta = np.asarray(data["final_delta"], dtype=np.float32)
+        game_ids = np.asarray(data["game_ids"])
         if x.ndim != 2:
             raise ValueError(f"Dataset value .npz invalido: x deve essere 2D, ottenuto {x.shape}")
-        if current_delta.shape != (x.shape[0],) or final_delta.shape != (x.shape[0],):
+        if (
+            current_delta.shape != (x.shape[0],)
+            or final_delta.shape != (x.shape[0],)
+            or game_ids.shape != (x.shape[0],)
+        ):
             raise ValueError(
-                "Dataset value .npz invalido: current_delta/final_delta devono avere shape "
-                f"{(x.shape[0],)}, ottenuto {current_delta.shape}/{final_delta.shape}"
+                "Dataset value .npz invalido: current_delta/final_delta/game_ids devono avere shape "
+                f"{(x.shape[0],)}, ottenuto {current_delta.shape}/{final_delta.shape}/{game_ids.shape}"
             )
 
         if target == "residual":
@@ -154,6 +182,7 @@ def _load_value_dataset_npz(path: Path, *, target: TargetMode) -> ValueDataset:
         current_delta=current_delta,
         final_delta=final_delta,
         phases=phases,
+        game_ids=game_ids,
     )
 
 
@@ -162,6 +191,18 @@ def load_value_dataset(path: Path, *, encoder_version: EncoderVersion, target: T
     if path.suffix.lower() == ".npz":
         return _load_value_dataset_npz(path, target=target)
     return _load_value_dataset_jsonl(path, encoder_version=encoder_version, target=target)
+
+
+def _subset_value_dataset(dataset: ValueDataset, indices: np.ndarray) -> ValueDataset:
+    """Crea una vista indicizzata mantenendo allineati target, fasi e game_id."""
+    return ValueDataset(
+        x=dataset.x[indices],
+        y=dataset.y[indices],
+        current_delta=dataset.current_delta[indices],
+        final_delta=dataset.final_delta[indices],
+        phases=dataset.phases[indices],
+        game_ids=dataset.game_ids[indices],
+    )
 
 
 def _relu(x: np.ndarray) -> np.ndarray:
@@ -350,7 +391,18 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=512, help="Dimensione minibatch (default 512)")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate Adam-like (default 1e-3)")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay L2 (default 0: disattivo)")
-    parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione dei dati per la validation (default 0.1)")
+    parser.add_argument(
+        "--val-frac",
+        type=float,
+        default=0.1,
+        help="Frazione di PARTITE per la validation (default 0.1)",
+    )
+    parser.add_argument(
+        "--test-frac",
+        type=float,
+        default=0.1,
+        help="Frazione di PARTITE per il test finale (default 0.1)",
+    )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG per split/shuffle (riproducibilita')")
     args = parser.parse_args()
 
@@ -375,21 +427,26 @@ def main() -> int:
         else:
             raise ValueError(f"feature_dim del dataset non riconosciuta: {actual_dim}")
     rng = np.random.default_rng(int(args.seed))
-    n, d = dataset.x.shape
-    idx = np.arange(n)
-    rng.shuffle(idx)
-    val_size = int(round(n * float(args.val_frac)))
-    val_idx = idx[:val_size]
-    train_idx = idx[val_size:]
+    _n, d = dataset.x.shape
+    split = make_grouped_dataset_split(
+        dataset.game_ids,
+        validation_fraction=float(args.val_frac),
+        test_fraction=float(args.test_frac),
+        seed=int(args.seed),
+        group_key="game_id",
+    )
+    train_idx = split.train_indices
+    val_idx = split.validation_indices
+    test_idx = split.test_indices
+    print(
+        "dataset_split | unit=game "
+        f"groups={split.provenance['group_counts']} records={split.provenance['record_counts']} "
+        f"sha256={split.provenance['assignment_sha256']}"
+    )
 
     x_train, y_train = dataset.x[train_idx], dataset.y[train_idx]
-    val_dataset = ValueDataset(
-        x=dataset.x[val_idx],
-        y=dataset.y[val_idx],
-        current_delta=dataset.current_delta[val_idx],
-        final_delta=dataset.final_delta[val_idx],
-        phases=dataset.phases[val_idx],
-    )
+    val_dataset = _subset_value_dataset(dataset, val_idx)
+    test_dataset = _subset_value_dataset(dataset, test_idx)
 
     hdim = int(args.hidden_dim)
     if hdim <= 0:
@@ -433,40 +490,50 @@ def main() -> int:
             _adam_update(b2, np.asarray([gb2], dtype=np.float32), state=st_b2, lr=float(args.lr), t=t)
             train_losses.append(float(loss))
 
-        val_pred, _ = _predict(val_dataset.x, w1, b1, w2, float(b2[0]))
-        val_loss, *_ = _loss_grad(
-            val_dataset.x,
-            val_dataset.y,
-            w1,
-            b1,
-            w2,
-            float(b2[0]),
-            loss_name=loss_name,
-            huber_delta=float(args.huber_delta),
-            weight_decay=0.0,
-        )
-        eval_metrics = evaluate_predictions(pred_scaled=val_pred, dataset=val_dataset, target=target)
+        val_loss: float | None = None
+        eval_metrics: dict[str, float | dict[str, dict[str, float | int]]] | None = None
+        if val_idx.size:
+            val_pred, _ = _predict(val_dataset.x, w1, b1, w2, float(b2[0]))
+            val_loss, *_ = _loss_grad(
+                val_dataset.x,
+                val_dataset.y,
+                w1,
+                b1,
+                w2,
+                float(b2[0]),
+                loss_name=loss_name,
+                huber_delta=float(args.huber_delta),
+                weight_decay=0.0,
+            )
+            eval_metrics = evaluate_predictions(pred_scaled=val_pred, dataset=val_dataset, target=target)
         row = ValueMetrics(
             epoch=epoch,
             train_loss=float(np.mean(train_losses)),
-            val_loss=float(val_loss),
-            val_mae_points=float(eval_metrics["mae_points"]),
-            val_baseline_mae_points=float(eval_metrics["baseline_mae_points"]),
-            val_sign_acc=float(eval_metrics["sign_acc"]),
-            val_baseline_sign_acc=float(eval_metrics["baseline_sign_acc"]),
+            val_loss=float(val_loss) if val_loss is not None else None,
+            val_mae_points=float(eval_metrics["mae_points"]) if eval_metrics is not None else None,
+            val_baseline_mae_points=(float(eval_metrics["baseline_mae_points"]) if eval_metrics is not None else None),
+            val_sign_acc=float(eval_metrics["sign_acc"]) if eval_metrics is not None else None,
+            val_baseline_sign_acc=(float(eval_metrics["baseline_sign_acc"]) if eval_metrics is not None else None),
         )
         metrics.append(row)
         # Snapshot del miglior checkpoint per val_loss (copie, perché i pesi mutano in-place).
-        if float(val_loss) < best_val_loss:
+        if val_loss is not None and float(val_loss) < best_val_loss:
             best_val_loss = float(val_loss)
             best_eval = eval_metrics
             best_epoch = epoch
             best_snapshot = (w1.copy(), b1.copy(), w2.copy(), b2.copy())
-        print(
-            f"epoch {epoch:02d} | train loss {row.train_loss:.5f} | val loss {row.val_loss:.5f} | "
-            f"MAE {row.val_mae_points:.2f} vs baseline {row.val_baseline_mae_points:.2f} | "
-            f"sign {row.val_sign_acc:.3f} vs baseline {row.val_baseline_sign_acc:.3f}"
-        )
+        if row.val_loss is None:
+            print(f"epoch {epoch:02d} | train loss {row.train_loss:.5f} | validation disabilitata")
+        else:
+            assert row.val_mae_points is not None
+            assert row.val_baseline_mae_points is not None
+            assert row.val_sign_acc is not None
+            assert row.val_baseline_sign_acc is not None
+            print(
+                f"epoch {epoch:02d} | train loss {row.train_loss:.5f} | val loss {row.val_loss:.5f} | "
+                f"MAE {row.val_mae_points:.2f} vs baseline {row.val_baseline_mae_points:.2f} | "
+                f"sign {row.val_sign_acc:.3f} vs baseline {row.val_baseline_sign_acc:.3f}"
+            )
 
     # Salviamo i pesi del miglior checkpoint per val_loss (fallback: ultimi, es. val_frac=0).
     has_validation = best_snapshot is not None
@@ -477,6 +544,30 @@ def main() -> int:
         # Nessuna validation utile (es. --val-frac 0): teniamo l'ultima epoca, senza fingere un "best".
         best_epoch = len(metrics)
         best_eval = None
+
+    test_eval: dict[str, object] | None = None
+    if test_idx.size:
+        test_pred, _ = _predict(test_dataset.x, w1, b1, w2, float(b2[0]))
+        test_loss, *_ = _loss_grad(
+            test_dataset.x,
+            test_dataset.y,
+            w1,
+            b1,
+            w2,
+            float(b2[0]),
+            loss_name=loss_name,
+            huber_delta=float(args.huber_delta),
+            weight_decay=0.0,
+        )
+        test_eval = {
+            "examples": int(test_idx.size),
+            "loss": float(test_loss),
+            **evaluate_predictions(pred_scaled=test_pred, dataset=test_dataset, target=target),
+        }
+        print(
+            f"test finale | examples {test_eval['examples']} loss {test_eval['loss']:.5f} "
+            f"MAE {test_eval['mae_points']:.2f}"
+        )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
     payload = {
@@ -490,6 +581,7 @@ def main() -> int:
         "huber_delta": float(args.huber_delta),
         "data_path": str(data_path),
         "seed": int(args.seed),
+        "dataset_split": split.provenance,
         "train": {
             "optimizer": "adam",
             "lr": float(args.lr),
@@ -500,6 +592,7 @@ def main() -> int:
         "metrics": [asdict(metric) for metric in metrics],
         "best_epoch": int(best_epoch),
         "best_eval": best_eval,
+        "test_eval": test_eval,
     }
     np.savez(
         out_path,

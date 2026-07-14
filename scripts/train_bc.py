@@ -41,6 +41,13 @@ sono normalizzati a media 1.0 sul train, così il learning rate resta valido;
 `--ignore-sample-weights` allena uniforme e `--no-weight-normalize` disabilita la
 normalizzazione, utili per confronti A/B.
 
+Split dei dati
+--------------
+Train, validation e test sono separati per ``game_id`` (default 80/10/10): tutte le
+decisioni della stessa partita restano nello stesso insieme. Un record allenabile senza
+``game_id`` viene rifiutato, perché uno split casuale per mossa sovrastimerebbe la capacità
+di generalizzare del modello.
+
 Nota didattica:
 Questo NON è un modello "forte". Serve come primo passo:
 encoder -> dataset -> training -> salvataggio -> (in futuro) integrazione in `evaluate_agents.py`.
@@ -63,6 +70,7 @@ from briscola_ai.ai.encoding.observation_encoder import (
     encode_observation_2p_with_version,
 )
 from briscola_ai.ai.models import BCModelAgent, LoadedBCModel, MLPBCModel, load_bc_model_npz
+from briscola_ai.ai.training.dataset_split import make_grouped_dataset_split
 from briscola_ai.domain.models import Card, Rank, Suit
 from briscola_ai.domain.observation import PlayerObservation
 
@@ -76,6 +84,18 @@ class Batch:
     y: np.ndarray  # (B,) int in [0, 39]
     weight: np.ndarray  # (B,) float32, peso CE per esempio (1.0 = neutro)
     target_probs: np.ndarray | None = None  # (B, 40) float32, distribuzione teacher opzionale
+
+
+@dataclass(frozen=True, slots=True)
+class BCTrainingDataset:
+    """Esempi BC in memoria, inclusa la partita sorgente di ogni osservazione."""
+
+    x: np.ndarray
+    mask: np.ndarray
+    y: np.ndarray
+    weights: np.ndarray
+    target_probs: np.ndarray | None
+    game_ids: np.ndarray
 
 
 def _iter_jsonl(path: Path):
@@ -258,16 +278,12 @@ def _build_training_examples(
     ignore_sample_weights: bool = False,
     soft_labels: bool = False,
     soft_temperature: float = 5.0,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
+) -> BCTrainingDataset:
     """
     Carica esempi dal JSONL export.
 
-    Ritorna:
-    - X: (N, D) float32
-    - M: (N, 40) bool
-    - y: (N,) int64
-    - W: (N,) float32  (peso CE per esempio; 1.0 se il dataset non ne specifica)
-    - T: (N, 40) float32 | None  (target soft PIMC se richiesto)
+    Oltre a feature, mask e target conserva il ``game_id`` di ogni riga. Il trainer usa
+    questi identificativi per tenere tutte le decisioni di una partita nello stesso split.
     """
     if soft_labels and float(soft_temperature) <= 0.0:
         raise ValueError("--soft-temperature deve essere > 0")
@@ -277,6 +293,7 @@ def _build_training_examples(
     targets: list[int] = []
     weights: list[float] = []
     target_probs_list: list[np.ndarray] = []
+    game_ids: list[str | int] = []
     disagreement_rng = np.random.default_rng(disagreement_seed)
 
     for rec in _iter_jsonl(path):
@@ -324,10 +341,20 @@ def _build_training_examples(
             if int(baseline_y) == int(y):
                 continue
 
+        game_id = rec.get("game_id")
+        if isinstance(game_id, bool) or not isinstance(game_id, (str, int)):
+            raise ValueError(
+                "Record BC valido senza game_id stringa/intero: lo split per partita e' obbligatorio. "
+                "Rigenera il dataset con un exporter aggiornato."
+            )
+        if isinstance(game_id, str) and not game_id.strip():
+            raise ValueError("Record BC valido con game_id vuoto")
+
         features_list.append(encoded.features)
         masks_list.append(encoded.action_mask)
         targets.append(y)
         weights.append(_record_sample_weight(rec, ignore_sample_weights=ignore_sample_weights))
+        game_ids.append(game_id)
         if soft_labels:
             assert target_probs is not None
             target_probs_list.append(target_probs)
@@ -340,7 +367,14 @@ def _build_training_examples(
     y_arr = np.asarray(targets, dtype=np.int64)
     w_arr = np.asarray(weights, dtype=np.float32)
     t_arr = np.asarray(target_probs_list, dtype=np.float32) if soft_labels else None
-    return x, m, y_arr, w_arr, t_arr
+    return BCTrainingDataset(
+        x=x,
+        mask=m,
+        y=y_arr,
+        weights=w_arr,
+        target_probs=t_arr,
+        game_ids=np.asarray(game_ids, dtype=object),
+    )
 
 
 def _masked_logits(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -436,8 +470,8 @@ class TrainMetrics:
     epoch: int
     train_loss: float
     train_acc: float
-    val_loss: float
-    val_acc: float
+    val_loss: float | None
+    val_acc: float | None
 
 
 def _loss_and_grad_linear(
@@ -736,7 +770,18 @@ def main() -> int:
         help="Temperatura della softmax sui mean_score PIMC quando `--soft-labels` è attivo. Default: 5.",
     )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG")
-    parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione validation (0..1)")
+    parser.add_argument(
+        "--val-frac",
+        type=float,
+        default=0.1,
+        help="Frazione di PARTITE riservata alla validation (default 0.1).",
+    )
+    parser.add_argument(
+        "--test-frac",
+        type=float,
+        default=0.1,
+        help="Frazione di PARTITE riservata al test finale (default 0.1).",
+    )
     args = parser.parse_args()
 
     data_path = Path(args.data)
@@ -782,7 +827,7 @@ def main() -> int:
         return label, description_it
 
     disagreement_agent = BCModelAgent.from_npz(filter_disagree_path) if filter_disagree_path else None
-    x_all, mask_all, y_all, w_all, target_probs_all = _build_training_examples(
+    dataset = _build_training_examples(
         data_path,
         encoder_version=encoder_version,
         disagreement_agent=disagreement_agent,
@@ -791,22 +836,38 @@ def main() -> int:
         soft_labels=bool(args.soft_labels),
         soft_temperature=float(args.soft_temperature),
     )
+    x_all = dataset.x
+    mask_all = dataset.mask
+    y_all = dataset.y
+    w_all = dataset.weights
+    target_probs_all = dataset.target_probs
 
     rng = np.random.default_rng(args.seed)
     n = x_all.shape[0]
     d = x_all.shape[1]
 
-    # Split train/val (semplice e didattico).
-    idx = np.arange(n)
-    rng.shuffle(idx)
-    val_size = int(round(n * float(args.val_frac)))
-    val_idx = idx[:val_size]
-    train_idx = idx[val_size:]
+    split = make_grouped_dataset_split(
+        dataset.game_ids,
+        validation_fraction=float(args.val_frac),
+        test_fraction=float(args.test_frac),
+        seed=int(args.seed),
+        group_key="game_id",
+    )
+    train_idx = split.train_indices
+    val_idx = split.validation_indices
+    test_idx = split.test_indices
+    print(
+        "dataset_split | unit=game "
+        f"groups={split.provenance['group_counts']} records={split.provenance['record_counts']} "
+        f"sha256={split.provenance['assignment_sha256']}"
+    )
 
     x_train, mask_train, y_train, w_train = x_all[train_idx], mask_all[train_idx], y_all[train_idx], w_all[train_idx]
     x_val, mask_val, y_val = x_all[val_idx], mask_all[val_idx], y_all[val_idx]
+    x_test, mask_test, y_test = x_all[test_idx], mask_all[test_idx], y_all[test_idx]
     target_train = None if target_probs_all is None else target_probs_all[train_idx]
     target_val = None if target_probs_all is None else target_probs_all[val_idx]
+    target_test = None if target_probs_all is None else target_probs_all[test_idx]
 
     # Normalizziamo i pesi a media 1.0 sul solo train: così il gradiente medio per batch ha la stessa
     # scala del training non pesato e il learning rate resta valido. La validation usa CE non pesata
@@ -916,31 +977,56 @@ def main() -> int:
                 train_losses.append(loss)
                 train_accs.append(_accuracy(masked, batch.y))
 
-            # Val (full batch: semplice).
-            val_loss, _, _, val_masked = _loss_and_grad_linear(
-                x_val,
-                mask_val,
-                y_val,
-                w,
-                b,
-                target_probs=target_val,
-                anchor=bc_anchor,
-                anchor_beta=float(args.bc_anchor_beta),
-            )
-            val_acc = _accuracy(val_masked, y_val)
+            # La validation resta separata per partita. Se disabilitata esplicitamente,
+            # non produciamo NaN nei metadati del modello.
+            val_loss: float | None = None
+            val_acc: float | None = None
+            if val_idx.size:
+                val_loss, _, _, val_masked = _loss_and_grad_linear(
+                    x_val,
+                    mask_val,
+                    y_val,
+                    w,
+                    b,
+                    target_probs=target_val,
+                    anchor=bc_anchor,
+                    anchor_beta=float(args.bc_anchor_beta),
+                )
+                val_acc = _accuracy(val_masked, y_val)
 
             row = TrainMetrics(
                 epoch=epoch,
                 train_loss=float(np.mean(train_losses)),
                 train_acc=float(np.mean(train_accs)),
-                val_loss=float(val_loss),
-                val_acc=float(val_acc),
+                val_loss=float(val_loss) if val_loss is not None else None,
+                val_acc=float(val_acc) if val_acc is not None else None,
             )
             metrics.append(row)
-            print(
-                f"epoch {epoch:02d} | "
-                f"train loss {row.train_loss:.4f} acc {row.train_acc:.3f} | "
+            val_summary = (
                 f"val loss {row.val_loss:.4f} acc {row.val_acc:.3f}"
+                if row.val_loss is not None and row.val_acc is not None
+                else "val disabilitata"
+            )
+            print(f"epoch {epoch:02d} | train loss {row.train_loss:.4f} acc {row.train_acc:.3f} | {val_summary}")
+
+        test_metrics: dict[str, float | int] | None = None
+        if test_idx.size:
+            test_loss, _, _, test_masked = _loss_and_grad_linear(
+                x_test,
+                mask_test,
+                y_test,
+                w,
+                b,
+                target_probs=target_test,
+            )
+            test_metrics = {
+                "examples": int(test_idx.size),
+                "loss": float(test_loss),
+                "accuracy": _accuracy(test_masked, y_test),
+            }
+            print(
+                f"test finale | examples {test_metrics['examples']} "
+                f"loss {test_metrics['loss']:.4f} acc {test_metrics['accuracy']:.3f}"
             )
 
         out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -964,8 +1050,10 @@ def main() -> int:
                 "enabled": bool(args.soft_labels),
                 "temperature": float(args.soft_temperature) if bool(args.soft_labels) else None,
             },
+            "dataset_split": split.provenance,
             "train": {"model": "linear", "optimizer": "sgd", "lr": float(lr), "epochs": int(args.epochs)},
             "metrics": [asdict(metric) for metric in metrics],
+            "test_metrics": test_metrics,
         }
         np.savez(out_path, w=w, b=b, metadata_json=json.dumps(payload, ensure_ascii=False, indent=2))
         print(f"Saved model: {out_path}")
@@ -1032,34 +1120,60 @@ def main() -> int:
             train_losses.append(loss)
             train_accs.append(_accuracy(masked, batch.y))
 
-        # Val (full batch: semplice).
-        val_loss, _, _, _, _, val_masked = _loss_and_grad_mlp(
-            x_val,
-            mask_val,
-            y_val,
-            w1,
-            b1,
-            w2,
-            b2,
-            weight_decay=float(args.weight_decay),
-            target_probs=target_val,
-            anchor=bc_anchor,
-            anchor_beta=float(args.bc_anchor_beta),
-        )
-        val_acc = _accuracy(val_masked, y_val)
+        val_loss = None
+        val_acc = None
+        if val_idx.size:
+            val_loss, _, _, _, _, val_masked = _loss_and_grad_mlp(
+                x_val,
+                mask_val,
+                y_val,
+                w1,
+                b1,
+                w2,
+                b2,
+                weight_decay=float(args.weight_decay),
+                target_probs=target_val,
+                anchor=bc_anchor,
+                anchor_beta=float(args.bc_anchor_beta),
+            )
+            val_acc = _accuracy(val_masked, y_val)
 
         row = TrainMetrics(
             epoch=epoch,
             train_loss=float(np.mean(train_losses)),
             train_acc=float(np.mean(train_accs)),
-            val_loss=float(val_loss),
-            val_acc=float(val_acc),
+            val_loss=float(val_loss) if val_loss is not None else None,
+            val_acc=float(val_acc) if val_acc is not None else None,
         )
         metrics.append(row)
-        print(
-            f"epoch {epoch:02d} | "
-            f"train loss {row.train_loss:.4f} acc {row.train_acc:.3f} | "
+        val_summary = (
             f"val loss {row.val_loss:.4f} acc {row.val_acc:.3f}"
+            if row.val_loss is not None and row.val_acc is not None
+            else "val disabilitata"
+        )
+        print(f"epoch {epoch:02d} | train loss {row.train_loss:.4f} acc {row.train_acc:.3f} | {val_summary}")
+
+    test_metrics = None
+    if test_idx.size:
+        test_loss, _, _, _, _, test_masked = _loss_and_grad_mlp(
+            x_test,
+            mask_test,
+            y_test,
+            w1,
+            b1,
+            w2,
+            b2,
+            weight_decay=0.0,
+            target_probs=target_test,
+        )
+        test_metrics = {
+            "examples": int(test_idx.size),
+            "loss": float(test_loss),
+            "accuracy": _accuracy(test_masked, y_test),
+        }
+        print(
+            f"test finale | examples {test_metrics['examples']} "
+            f"loss {test_metrics['loss']:.4f} acc {test_metrics['accuracy']:.3f}"
         )
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -1084,6 +1198,7 @@ def main() -> int:
             "enabled": bool(args.soft_labels),
             "temperature": float(args.soft_temperature) if bool(args.soft_labels) else None,
         },
+        "dataset_split": split.provenance,
         "train": {
             "model": "mlp",
             "optimizer": "adam",
@@ -1092,6 +1207,7 @@ def main() -> int:
             "weight_decay": float(args.weight_decay),
         },
         "metrics": [asdict(metric) for metric in metrics],
+        "test_metrics": test_metrics,
     }
     np.savez(
         out_path,

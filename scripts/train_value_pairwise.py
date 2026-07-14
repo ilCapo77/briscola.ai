@@ -9,7 +9,8 @@ le foglie generate dalle carte candidate della stessa posizione root. La loss co
 - ranking pairwise dentro lo stesso gruppo, usando i valori PIMC root-level come ordinamento.
 
 Il modello salvato usa lo stesso formato `value_mlp_v1` di `train_value.py`, quindi può essere
-usato direttamente da `ValueLookaheadAgent`.
+usato direttamente da `ValueLookaheadAgent`. Lo split usa la partita sorgente, non la sola
+root: tutte le posizioni correlate della stessa partita restano nello stesso insieme.
 """
 
 from __future__ import annotations
@@ -22,6 +23,7 @@ from pathlib import Path
 import numpy as np
 
 from briscola_ai.ai.models import load_value_model_npz
+from briscola_ai.ai.training.dataset_split import make_grouped_dataset_split
 
 LossName = str
 
@@ -37,6 +39,7 @@ class LeafValueDataset:
     root_sign: np.ndarray
     root_id: np.ndarray
     action_value: np.ndarray
+    game_ids: np.ndarray
 
 
 @dataclass
@@ -84,11 +87,23 @@ def _adam_update(
 
 def load_leaf_value_dataset(path: Path) -> LeafValueDataset:
     """Carica dataset prodotto da `generate_pimc_leaf_value_dataset.py`."""
-    with np.load(path) as data:
-        required = {"x", "y", "current_delta", "final_delta", "root_sign", "root_id", "action_value"}
+    with np.load(path, allow_pickle=False) as data:
+        required = {
+            "x",
+            "y",
+            "current_delta",
+            "final_delta",
+            "root_sign",
+            "root_id",
+            "action_value",
+            "game_ids",
+        }
         missing = required - set(data.keys())
         if missing:
-            raise ValueError(f"Dataset leaf-value invalido: mancano {sorted(missing)}")
+            detail = ""
+            if "game_ids" in missing:
+                detail = " Rigenera il dataset: lo split per partita richiede game_ids."
+            raise ValueError(f"Dataset leaf-value invalido: mancano {sorted(missing)}.{detail}")
         x = np.asarray(data["x"], dtype=np.float32)
         y = np.asarray(data["y"], dtype=np.float32)
         current = np.asarray(data["current_delta"], dtype=np.float32)
@@ -96,6 +111,7 @@ def load_leaf_value_dataset(path: Path) -> LeafValueDataset:
         root_sign = np.asarray(data["root_sign"], dtype=np.float32)
         root_id = np.asarray(data["root_id"], dtype=np.int64)
         action_value = np.asarray(data["action_value"], dtype=np.float32)
+        game_ids = np.asarray(data["game_ids"])
     if x.ndim != 2:
         raise ValueError(f"x deve essere 2D, ottenuto {x.shape}")
     n = x.shape[0]
@@ -106,6 +122,7 @@ def load_leaf_value_dataset(path: Path) -> LeafValueDataset:
         "root_sign": root_sign,
         "root_id": root_id,
         "action_value": action_value,
+        "game_ids": game_ids,
     }.items():
         if arr.shape != (n,):
             raise ValueError(f"{name} shape={arr.shape}, atteso {(n,)}")
@@ -117,6 +134,7 @@ def load_leaf_value_dataset(path: Path) -> LeafValueDataset:
         root_sign=root_sign,
         root_id=root_id,
         action_value=action_value,
+        game_ids=game_ids,
     )
 
 
@@ -181,17 +199,6 @@ def _regression_loss_grad(
         gw1 += float(weight_decay) * w1
         gw2 += float(weight_decay) * w2
     return loss, gw1, gb1, gw2, gb2
-
-
-def _make_group_split(
-    root_id: np.ndarray, *, val_frac: float, rng: np.random.Generator
-) -> tuple[np.ndarray, np.ndarray]:
-    """Split per gruppo root, non per riga, per evitare leakage tra carte candidate."""
-    groups = np.unique(root_id)
-    rng.shuffle(groups)
-    val_groups = set(int(group) for group in groups[: int(round(len(groups) * float(val_frac)))])
-    val_mask = np.asarray([int(group) in val_groups for group in root_id], dtype=bool)
-    return np.where(~val_mask)[0], np.where(val_mask)[0]
 
 
 def _build_pairs(
@@ -299,15 +306,33 @@ def _subset(data: LeafValueDataset, idx: np.ndarray) -> LeafValueDataset:
         root_sign=data.root_sign[idx],
         root_id=data.root_id[idx],
         action_value=data.action_value[idx],
+        game_ids=data.game_ids[idx],
     )
 
 
 def train_pairwise(args: argparse.Namespace) -> dict:
     data = load_leaf_value_dataset(Path(args.data))
     rng = np.random.default_rng(int(args.seed))
-    train_idx, val_idx = _make_group_split(data.root_id, val_frac=float(args.val_frac), rng=rng)
+    split = make_grouped_dataset_split(
+        data.game_ids,
+        validation_fraction=float(args.val_frac),
+        test_fraction=float(args.test_frac),
+        seed=int(args.seed),
+        group_key="game_ids",
+    )
+    train_idx = split.train_indices
+    val_idx = split.validation_indices
+    test_idx = split.test_indices
+    if not val_idx.size:
+        raise ValueError("train_value_pairwise richiede --val-frac > 0 per scegliere il checkpoint")
+    print(
+        "dataset_split | unit=game "
+        f"groups={split.provenance['group_counts']} records={split.provenance['record_counts']} "
+        f"sha256={split.provenance['assignment_sha256']}"
+    )
     train = _subset(data, train_idx)
     val = _subset(data, val_idx)
+    test = _subset(data, test_idx)
     train_pairs = _build_pairs(train.root_id, train.action_value, min_margin=float(args.pair_min_margin))
 
     n, d = train.x.shape
@@ -404,6 +429,13 @@ def train_pairwise(args: argparse.Namespace) -> dict:
         )
 
     w1, b1, w2, b2 = best_snapshot
+    test_eval = None
+    if test_idx.size:
+        test_eval = evaluate_pairwise(test, w1, b1, w2, float(b2[0]), min_margin=float(args.pair_min_margin))
+        print(
+            f"test finale | MAE {test_eval['mae_points']:.2f} | "
+            f"pair {test_eval['pairwise_accuracy']:.3f} | top1 {test_eval['top1_accuracy']:.3f}"
+        )
     payload = {
         "format": "value_mlp_v1",
         "feature_dim": int(d),
@@ -416,6 +448,7 @@ def train_pairwise(args: argparse.Namespace) -> dict:
         "data_path": str(args.data),
         "init_value_model": str(args.init_value_model).strip() or None,
         "seed": int(args.seed),
+        "dataset_split": split.provenance,
         "train": {
             "optimizer": "adam",
             "lr": float(args.lr),
@@ -430,6 +463,7 @@ def train_pairwise(args: argparse.Namespace) -> dict:
         "metrics": [asdict(metric) for metric in metrics],
         "best_epoch": int(best_epoch),
         "best_eval": best_eval,
+        "test_eval": test_eval,
     }
     out_path = Path(args.out)
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -441,7 +475,7 @@ def train_pairwise(args: argparse.Namespace) -> dict:
 def main() -> int:
     parser = argparse.ArgumentParser(description="Allena value MLP con loss pairwise su leaf PIMC.")
     parser.add_argument(
-        "--data", required=True, help="Dataset foglie decision-aligned (JSONL con root_id/action_value)"
+        "--data", required=True, help="Dataset NPZ foglie decision-aligned con root_id/action_value/game_ids"
     )
     parser.add_argument("--out", required=True, help="Path del value model .npz da salvare")
     parser.add_argument("--hidden-dim", type=int, default=128, help="Neuroni hidden layer della MLP (default 128)")
@@ -456,7 +490,10 @@ def main() -> int:
     parser.add_argument("--batch-size", type=int, default=512, help="Dimensione minibatch regressione (default 512)")
     parser.add_argument("--lr", type=float, default=1e-3, help="Learning rate (default 1e-3)")
     parser.add_argument("--weight-decay", type=float, default=0.0, help="Weight decay L2 (default 0: disattivo)")
-    parser.add_argument("--val-frac", type=float, default=0.1, help="Frazione dei dati per la validation (default 0.1)")
+    parser.add_argument(
+        "--val-frac", type=float, default=0.1, help="Frazione di PARTITE per la validation (default 0.1)"
+    )
+    parser.add_argument("--test-frac", type=float, default=0.1, help="Frazione di PARTITE per il test (default 0.1)")
     parser.add_argument(
         "--pairwise-beta", type=float, default=1.0, help="Peso del termine ranking pairwise nella loss (default 1.0)"
     )

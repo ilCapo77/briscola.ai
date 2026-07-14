@@ -119,6 +119,8 @@ def test_generate_value_dataset_and_train_value_roundtrip(tmp_path: Path) -> Non
     dataset = train_value.load_value_dataset(data_path, encoder_version="v3", target="residual")
     assert dataset.x.shape == (len(records), int(FEATURE_DIM_2P_V3))
     assert dataset.y.shape == (len(records),)
+    assert dataset.game_ids.shape == (len(records),)
+    assert len(set(dataset.game_ids.tolist())) == 3
 
     model_path = tmp_path / "value_model.npz"
     argv = [
@@ -150,6 +152,16 @@ def test_generate_value_dataset_and_train_value_roundtrip(tmp_path: Path) -> Non
     assert model.hidden_dim == 8
     pred = model.predict_points(np.zeros((int(FEATURE_DIM_2P_V3),), dtype=np.float32), current_score_delta=4.0)
     assert isinstance(pred, float)
+    with np.load(model_path, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+    assert metadata["dataset_split"]["unit"] == "game"
+    assert metadata["dataset_split"]["group_counts"] == {
+        "total": 3,
+        "train": 1,
+        "validation": 1,
+        "test": 1,
+    }
+    assert metadata["test_eval"]["examples"] > 0
 
 
 def test_generate_value_dataset_numba_npz_roundtrip(tmp_path: Path) -> None:
@@ -185,6 +197,17 @@ def test_generate_value_dataset_numba_npz_roundtrip(tmp_path: Path) -> None:
     assert dataset.x.shape[1] == feature_dim
     assert dataset.y.shape == (dataset.x.shape[0],)
     assert set(dataset.phases.tolist()) <= {"early", "mid", "pimc_window", "endgame"}
+    assert len(set(dataset.game_ids.tolist())) == 8
+    with np.load(data_path, allow_pickle=False) as data:
+        game_ids = np.asarray(data["game_ids"])
+        game_seeds = np.asarray(data["game_seeds"])
+        assert game_ids.shape == (dataset.x.shape[0],)
+        assert game_seeds.shape == (dataset.x.shape[0],)
+        metadata = json.loads(str(data["metadata_json"]))
+    for game_id in np.unique(game_ids):
+        assert np.unique(game_seeds[game_ids == game_id]).size == 1
+    assert metadata["format"] == "value_dataset_npz_v2"
+    assert metadata["split_unit"] == "game"
 
     model_out = tmp_path / "value_model_numba.npz"
     old_argv = sys.argv
@@ -210,6 +233,21 @@ def test_generate_value_dataset_numba_npz_roundtrip(tmp_path: Path) -> None:
     assert load_value_model_npz(model_out).feature_dim == feature_dim
 
 
+def test_train_value_rejects_legacy_npz_without_game_ids(tmp_path: Path) -> None:
+    """Un vecchio NPZ senza partita sorgente non deve ricadere nello split per record."""
+    train_value = _load_script_module("train_value")
+    legacy_path = tmp_path / "legacy_value_v1.npz"
+    np.savez(
+        legacy_path,
+        x=np.zeros((3, int(FEATURE_DIM_2P_V3)), dtype=np.float32),
+        current_delta=np.zeros(3, dtype=np.float32),
+        final_delta=np.zeros(3, dtype=np.float32),
+    )
+
+    with pytest.raises(ValueError, match="split sicuro per partita"):
+        train_value.load_value_dataset(legacy_path, encoder_version="v3", target="residual")
+
+
 def test_pimc_leaf_value_dataset_and_pairwise_train_smoke(tmp_path: Path) -> None:
     """Il dataset leaf PIMC deve essere allenabile con la loss pairwise decision-aligned."""
     pimc_generator = _load_script_module("generate_pimc_teacher_dataset")
@@ -230,7 +268,7 @@ def test_pimc_leaf_value_dataset_and_pairwise_train_smoke(tmp_path: Path) -> Non
     pimc_generator.generate_pimc_teacher_dataset(
         pimc_generator.PIMCTeacherDatasetConfig(
             out_path=teacher_data,
-            num_examples=8,
+            num_examples=30,
             max_games=80,
             seed=31,
             max_unknown_cards=8,
@@ -247,7 +285,7 @@ def test_pimc_leaf_value_dataset_and_pairwise_train_smoke(tmp_path: Path) -> Non
         data_path=teacher_data,
         policy_model_path=policy_path,
         out_path=leaf_data,
-        max_roots=4,
+        max_roots=18,
         samples_per_root=1,
         seed=32,
         min_margin=0.0,
@@ -261,6 +299,7 @@ def test_pimc_leaf_value_dataset_and_pairwise_train_smoke(tmp_path: Path) -> Non
     assert dataset.x.shape[1] == int(FEATURE_DIM_2P_V3)
     assert dataset.y.shape == (dataset.x.shape[0],)
     assert len(set(dataset.root_id.tolist())) >= 1
+    assert len(set(dataset.game_ids.tolist())) >= 3
 
     out_model = tmp_path / "value_pairwise.npz"
     init_value = tmp_path / "init_value.npz"
@@ -297,6 +336,11 @@ def test_pimc_leaf_value_dataset_and_pairwise_train_smoke(tmp_path: Path) -> Non
     model = load_value_model_npz(out_model)
     assert model.feature_dim == int(FEATURE_DIM_2P_V3)
     assert model.hidden_dim == 8
+    with np.load(out_model, allow_pickle=False) as data:
+        metadata = json.loads(str(data["metadata_json"]))
+    assert metadata["dataset_split"]["unit"] == "game"
+    assert metadata["dataset_split"]["group_counts"]["test"] >= 1
+    assert metadata["test_eval"] is not None
 
 
 def test_numba_value_dataset_collector_shapes_are_valid() -> None:

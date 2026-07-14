@@ -6,6 +6,8 @@ Il dataset PIMC teacher salva, per ogni posizione root, il valore medio stimato 
 carta giocabile (`search_diagnostics.action_values`). Questo script campiona determinizzazioni
 compatibili con la root, applica ogni carta candidata, porta lo stato al decision boundary
 successivo e salva l'osservazione della foglia con target pari al valore PIMC della carta.
+Ogni foglia conserva anche il `game_id` della root sorgente, così root diverse della stessa
+partita non possono essere separate fra train, validation e test.
 
 Differenza rispetto a `generate_value_dataset_numba.py`:
 - quel dataset predice l'esito di continuazione della policy base;
@@ -158,6 +160,7 @@ def generate_pimc_leaf_value_dataset(
     target_final_delta: list[float] = []
     root_sign: list[int] = []
     root_id: list[int] = []
+    game_ids: list[str] = []
     card_index: list[int] = []
     action_value: list[float] = []
     margin: list[float] = []
@@ -194,6 +197,14 @@ def generate_pimc_leaf_value_dataset(
         except KeyError, TypeError, ValueError:
             counters["roots_skipped_invalid"] += 1
             continue
+        source_game_id = record.get("game_id")
+        if not isinstance(source_game_id, str):
+            raise ValueError(
+                "Record PIMC valido senza game_id stringa: "
+                "rigenera il teacher dataset per consentire lo split per partita."
+            )
+        if not source_game_id.strip():
+            raise ValueError("Record PIMC valido con game_id vuoto")
 
         root_group_id = int(counters["roots_used"])
         root_rows_before = len(xs)
@@ -237,6 +248,7 @@ def generate_pimc_leaf_value_dataset(
                 target_residual_scaled.append((target_final_leaf - current_leaf) / 120.0)
                 root_sign.append(int(sign))
                 root_id.append(root_group_id * int(samples_per_root) + sample_idx)
+                game_ids.append(source_game_id)
                 card_index.append(local_card_index)
                 action_value.append(mean_score_root)
                 margin.append(root_margin)
@@ -255,7 +267,8 @@ def generate_pimc_leaf_value_dataset(
     root_sign_arr = np.asarray(root_sign, dtype=np.int8)
     action_value_arr = np.asarray(action_value, dtype=np.float32)
     metadata = {
-        "format": "pimc_leaf_value_dataset_v1",
+        "format": "pimc_leaf_value_dataset_v2",
+        "schema_version": 2,
         "dataset_kind": "pimc_leaf_value",
         "source_path": str(data_path),
         "policy_model_path": str(policy_model_path),
@@ -268,6 +281,8 @@ def generate_pimc_leaf_value_dataset(
         "min_margin": float(min_margin),
         "min_margin_ci_low": float(min_margin_ci_low),
         "feature_dtype": str(feature_dtype),
+        "split_unit": "game",
+        "split_group_key": "game_ids",
     }
     counters["leaf_records_written"] = int(x.shape[0])
     counters["elapsed_seconds"] = time.perf_counter() - started
@@ -281,6 +296,7 @@ def generate_pimc_leaf_value_dataset(
         final_delta=final_arr,
         root_sign=root_sign_arr,
         root_id=np.asarray(root_id, dtype=np.int64),
+        game_ids=np.asarray(game_ids, dtype=np.str_),
         card_index=np.asarray(card_index, dtype=np.int64),
         action_value=action_value_arr,
         margin=np.asarray(margin, dtype=np.float32),

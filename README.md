@@ -420,7 +420,7 @@ Idea didattica: prima un modello supervisionato che **imita** un teacher (Behavi
 
 **Spazio azioni**: “40 carte + action mask” (il modello sceglie tra 40 classi; la mask abilita solo le carte in mano).
 
-**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3|v4` (v3/v4 richiedono dataset con `out_of_play` popolato; v4 aggiunge la memoria delle prese). Per fine-tuning controllato supporta `--init` da un MLP `.npz` compatibile e `--bc-anchor ... --bc-anchor-beta ...` per restare vicino a un modello congelato. Per esperimenti di distillazione può filtrare il dataset con `--filter-disagree-with-model`: tiene solo gli esempi in cui il teacher sceglie una carta diversa dal modello base.
+**Behavior Cloning** (`scripts/train_bc.py`): allena su un JSONL esportato un modello (lineare o MLP) che riproduce le scelte del teacher. Encoder selezionabile con `--encoder-version v1|v2|v3|v4` (v3/v4 richiedono dataset con `out_of_play` popolato; v4 aggiunge la memoria delle prese). Per fine-tuning controllato supporta `--init` da un MLP `.npz` compatibile e `--bc-anchor ... --bc-anchor-beta ...` per restare vicino a un modello congelato. Per esperimenti di distillazione può filtrare il dataset con `--filter-disagree-with-model`: tiene solo gli esempi in cui il teacher sceglie una carta diversa dal modello base. Train, validation e test sono separati per `game_id` (default 80/10/10); un record allenabile senza identità di partita viene rifiutato per evitare leakage fra mosse della stessa partita.
 
 **Distillazione PIMC — nota storica (ramo chiuso).** L'idea di comprimere le mosse della search
 PIMC in una policy reattiva via BC è stata tentata due volte (giugno su v6, luglio come iterazione-0
@@ -439,8 +439,10 @@ value-v1, leaf-level e pairwise non lo hanno però superato materialmente, quind
 
 Il codice rimane per riproducibilità e didattica:
 
-- `generate_value_dataset.py` / `generate_value_dataset_numba.py` raccolgono target JSONL o `.npz` compatto;
-- `train_value.py` allena la regressione scalare e `train_value_pairwise.py` aggiunge ranking intra-root;
+- `generate_value_dataset.py` / `generate_value_dataset_numba.py` raccolgono target JSONL o `.npz` compatto; il
+  formato compatto `value_dataset_npz_v2` conserva `game_ids` e `game_seeds`;
+- `train_value.py` allena la regressione scalare e `train_value_pairwise.py` aggiunge ranking intra-root; entrambi
+  separano train/validation/test per partita e salvano conteggi + digest dello split nei metadati;
 - `evaluate_value_ranking.py`, `evaluate_value_lookahead.py`, `evaluate_value_lookahead_pair.py` e
   `evaluate_value_lookahead_quality.py` costituiscono i gate offline e seat-fair;
 - `ai/numba/value_lookahead.py` conserva il core JIT training-first utilizzabile come avversario nei rollout A2C.
@@ -448,6 +450,9 @@ Il codice rimane per riproducibilità e didattica:
 Le ricette v6-v8 e i relativi risultati sono deliberatamente storici e vivono in
 `docs/plans/belief-expert-iteration.md`, nel report modelli e in `--help` degli script; non vanno interpretati come
 comandi per rigenerare gli esperimenti storici; l'attuale best v14 deriva invece dalla distillazione simmetrica.
+Gli NPZ value/leaf precedenti ai campi `game_ids` vanno rigenerati prima di un nuovo training: il trainer non puo'
+ricostruire in modo affidabile i confini fra partite. Protocollo e motivazione sono in
+`docs/plans/dataset-split-per-partita-2026-07-14.md`.
 
 **Reinforcement Learning**: BC tende a *eguagliare* il teacher, non a superarlo. Per superarlo:
 - **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.

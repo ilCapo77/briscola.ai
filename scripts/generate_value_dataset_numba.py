@@ -95,14 +95,36 @@ def _grow_capacity(
     unknown_live_cards: np.ndarray,
     deck_size: np.ndarray,
     exploratory_action: np.ndarray,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    game_ids: np.ndarray,
+    game_seeds: np.ndarray,
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """Espande gli array output quando la stima iniziale non basta."""
     old_capacity = int(x.shape[0])
     if required <= old_capacity:
-        return x, current_delta, final_delta, phase, unknown_live_cards, deck_size, exploratory_action
+        return (
+            x,
+            current_delta,
+            final_delta,
+            phase,
+            unknown_live_cards,
+            deck_size,
+            exploratory_action,
+            game_ids,
+            game_seeds,
+        )
     new_capacity = min(int(hard_cap), max(required, max(old_capacity + 1, int(old_capacity * 1.5))))
     if new_capacity <= old_capacity:
-        return x, current_delta, final_delta, phase, unknown_live_cards, deck_size, exploratory_action
+        return (
+            x,
+            current_delta,
+            final_delta,
+            phase,
+            unknown_live_cards,
+            deck_size,
+            exploratory_action,
+            game_ids,
+            game_seeds,
+        )
 
     def grow(arr: np.ndarray) -> np.ndarray:
         new_arr = np.empty((new_capacity, *arr.shape[1:]), dtype=arr.dtype)
@@ -117,6 +139,8 @@ def _grow_capacity(
         grow(unknown_live_cards),
         grow(deck_size),
         grow(exploratory_action),
+        grow(game_ids),
+        grow(game_seeds),
     )
 
 
@@ -169,6 +193,10 @@ def generate_value_dataset_numba(
     unknown_live_cards = np.empty(capacity, dtype=np.int8)
     deck_size = np.empty(capacity, dtype=np.int8)
     exploratory_action = np.empty(capacity, dtype=np.bool_)
+    # ``game_ids`` e' l'ordinale univoco nella run; ``game_seeds`` rende la
+    # provenienza ricostruibile senza usare il seed come identificativo (potrebbe ripetersi).
+    game_ids = np.empty(capacity, dtype=np.int64)
+    record_game_seeds = np.empty(capacity, dtype=np.int64)
 
     rng = np.random.default_rng(int(seed))
     records = 0
@@ -204,6 +232,8 @@ def generate_value_dataset_numba(
                     unknown_live_cards,
                     deck_size,
                     exploratory_action,
+                    game_ids,
+                    record_game_seeds,
                 ) = _grow_capacity(
                     required=required,
                     hard_cap=hard_cap,
@@ -214,6 +244,8 @@ def generate_value_dataset_numba(
                     unknown_live_cards=unknown_live_cards,
                     deck_size=deck_size,
                     exploratory_action=exploratory_action,
+                    game_ids=game_ids,
+                    game_seeds=record_game_seeds,
                 )
                 capacity = int(x.shape[0])
             take = min(batch_records, capacity - records)
@@ -224,6 +256,9 @@ def generate_value_dataset_numba(
             flat_unknown = batch.unknown_live_cards.reshape(-1)[mask]
             flat_deck = batch.deck_size.reshape(-1)[mask]
             flat_exploratory = batch.exploratory_action.reshape(-1)[mask]
+            game_ordinals = np.arange(games_completed, games_completed + n_games, dtype=np.int64)
+            flat_game_ids = np.broadcast_to(game_ordinals[:, None], batch.valid.shape).reshape(-1)[mask]
+            flat_game_seeds = np.broadcast_to(game_seeds[:, None], batch.valid.shape).reshape(-1)[mask]
 
             end = records + take
             x[records:end] = flat_x[:take].astype(dtype, copy=False)
@@ -233,6 +268,8 @@ def generate_value_dataset_numba(
             unknown_live_cards[records:end] = flat_unknown[:take].astype(np.int8, copy=False)
             deck_size[records:end] = flat_deck[:take].astype(np.int8, copy=False)
             exploratory_action[records:end] = flat_exploratory[:take]
+            game_ids[records:end] = flat_game_ids[:take]
+            record_game_seeds[records:end] = flat_game_seeds[:take]
             exploratory_records += int(np.sum(flat_exploratory[:take]))
             records = end
         games_completed += int(batch.games_completed)
@@ -245,10 +282,13 @@ def generate_value_dataset_numba(
     final_unknown = unknown_live_cards[:records]
     final_deck = deck_size[:records]
     final_exploratory = exploratory_action[:records]
+    final_game_ids = game_ids[:records]
+    final_game_seeds = record_game_seeds[:records]
     residual = final_final - final_current
 
     metadata = {
-        "format": "value_dataset_npz_v1",
+        "format": "value_dataset_npz_v2",
+        "schema_version": 2,
         "dataset_kind": "value_observation_numba",
         "model_path": str(model_path),
         "policy_label": str(policy.metadata.get("label", "")),
@@ -258,6 +298,7 @@ def generate_value_dataset_numba(
         "num_games_requested": int(num_games),
         "games_completed": int(games_completed),
         "records_written": int(records),
+        "games_with_records": int(np.unique(final_game_ids).size),
         "seed": int(seed),
         "epsilon": float(epsilon),
         "label_mode": "policy_solver_continuation",
@@ -265,6 +306,8 @@ def generate_value_dataset_numba(
         "max_unknown_cards": int(max_unknown_cards),
         "include_endgame": bool(include_endgame),
         "feature_dtype": str(feature_dtype),
+        "split_unit": "game",
+        "split_group_key": "game_ids",
     }
     np.savez(
         out_path,
@@ -276,6 +319,8 @@ def generate_value_dataset_numba(
         unknown_live_cards=final_unknown,
         deck_size=final_deck,
         exploratory_action=final_exploratory,
+        game_ids=final_game_ids,
+        game_seeds=final_game_seeds,
         metadata_json=json.dumps(metadata, ensure_ascii=False, indent=2),
     )
 
