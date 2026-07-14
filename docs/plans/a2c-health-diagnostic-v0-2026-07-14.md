@@ -1,6 +1,8 @@
 # Diagnostica della salute A2C v0 (2026-07-14)
 
-> Protocollo e soglie fissati prima del run. Esito: **in attesa del probe multi-seed**.
+> Verdetto: **segnali A2C sani su tutti i tre seed; nessuna correzione numerica
+> prioritaria**. Evidenza completa:
+> [a2c_health_v14.v1.json](../reports/evidence/a2c_health_v14.v1.json).
 
 ## Domanda
 
@@ -85,6 +87,50 @@ La prima condizione fallita decide il solo test successivo:
    implementare e confrontare la schedule di training davvero paired.
 
 Il probe non può promuovere i tre modelli temporanei né autorizzare un training lungo.
+
+## Risultati
+
+Il probe ha completato 6.000 partite e 300 optimizer update. Tutti i sei gate passano
+separatamente su ogni seed.
+
+| metrica | seed 20260714 | seed 20260715 | seed 20260716 | soglia |
+|---|---:|---:|---:|---:|
+| explained variance critic, mediana finale | 0,1328 | 0,1268 | 0,1298 | >= 0,10 |
+| update finali con explained variance negativa | 2% | 2% | 0% | <= 25% |
+| bias advantage, mediana finale | 0,1481 | 0,1465 | 0,1739 | <= 0,25 |
+| p95/mediana gradiente globale | 2,001 | 1,920 | 1,991 | <= 5,0 |
+| p95 passo relativo trunk | 0,0145% | 0,0140% | 0,0146% | <= 1% |
+| p95 passo relativo actor | 0,0183% | 0,0182% | 0,0186% | <= 1% |
+| massima quota unità mai attive nell'update | 48,05% | 47,66% | 48,05% | <= 75% |
+| tasso medio di attivazione, mediana finale | 8,67% | 8,81% | 8,70% | 2%..98% |
+
+Il critic parte davvero da zero: il primo update ha explained variance `0` in tutti i
+run. Nella seconda metà arriva però a una mediana stabile tra `0,127` e `0,133`; gli
+update negativi sono rari e l'errore quadratico mediano resta tra `0,0299` e `0,0344`.
+Il valore appreso è utile ma non perfetto: spiegare circa il 13% della variabilità non
+dimostra che il critic sia ottimale, dimostra soltanto che il reset non emerge come il
+primo guasto da correggere.
+
+Gli advantage non hanno un offset dominante. I gradienti non mostrano esplosioni e i
+passi Adam sono oltre cinquanta volte più piccoli del limite massimo fissato. Questo
+esclude aggiornamenti troppo bruschi nel probe; non dimostra che il learning rate sia
+quello ottimale e non introduce una soglia minima post-hoc.
+
+Circa il 48% delle unità resta inattivo dentro almeno un batch, coerentemente con la
+precedente diagnostica delle unità dormienti. Il tasso medio di attivazione vicino
+all'8,7% non è estremo secondo il protocollo e non riapre la pista widening/reset, già
+chiusa causalmente.
+
+## Decisione
+
+Il verdetto preregistrato è `signals_healthy`. **STOP**, per ora, a reuse del critic,
+normalizzazione degli advantage e gradient clipping: i dati non indicano quale di queste
+correzioni risolva un problema osservato. Il prossimo esperimento è la schedule di
+training davvero paired, mantenendo invariata questa ricetta e confrontandola su almeno
+tre seed.
+
+I tre `.npz` del probe sono artefatti temporanei: non sono stati valutati in forza, non
+entrano nel catalogo e non possono sostituire v14.
 
 ## Riproduzione
 

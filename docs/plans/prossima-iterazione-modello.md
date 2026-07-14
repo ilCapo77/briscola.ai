@@ -261,7 +261,7 @@ Non esistono ancora normalizzazione degli advantage né gradient clipping global
 
 ### Prima fase: osservabilità
 
-Prima di cambiare l'algoritmo registrare:
+La diagnostica passiva è ora implementata e registra:
 
 - media/std degli advantage per optimizer update;
 - explained variance e loss del critic;
@@ -269,7 +269,15 @@ Prima di cambiare l'algoritmo registrare:
 - activation rate della hidden layer;
 - rapporto tra aggiornamento e norma dei parametri.
 
-### Ablation, una alla volta
+Il probe preregistrato su tre seed × 2.000 partite supera tutti i gate. Nella metà finale
+il critic raggiunge explained variance mediana `0,127..0,133`, gli advantage hanno bias
+relativo mediano `0,147..0,174`, i gradienti restano a `1,92..2,00×` tra p95 e mediana e
+i passi relativi p95 restano sotto `0,019%`. Circa il 48% delle unità non si attiva in
+almeno un batch, coerentemente con la pista capacità già chiusa, ma il tasso medio di
+attivazione resta stabile vicino all'`8,7%`. Report completo:
+`a2c-health-diagnostic-v0-2026-07-14.md`.
+
+### Ablation numeriche sospese
 
 1. critic `reset` attuale contro `reuse` dal checkpoint;
 2. normalizzazione advantage sull'intero optimizer update, non per singola partita;
@@ -278,17 +286,21 @@ Prima di cambiare l'algoritmo registrare:
 5. stop-gradient o trunk separato actor/critic soltanto se la diagnostica mostra
    interferenza, perché cambia più profondamente capacità e costo.
 
-I path per-step e Numba batch devono applicare la stessa definizione. Servono test su
-gradienti sintetici, caricamento reale del critic, metadati e parità dei due accumulatori.
+I path per-step e Numba batch applicano la stessa osservazione passiva; test sintetici e
+un controllo end-to-end garantiscono che attivare il report non cambi i pesi. Le ablation
+restano disponibili, ma nessuna ha priorità finché una diagnostica futura non fallisce il
+relativo gate.
 
 ### Decisione
 
-Ogni variante passa prima uno screening breve su tre seed. **GO** a una run lunga solo
-per un intervento con varianza ridotta e mediana non regressiva; **STOP** se il beneficio
-appare in un solo seed o richiede combinare più modifiche non interpretabili.
+**STOP**, per ora, a reuse, normalizzazione e clipping: il probe non mostra il difetto che
+dovrebbero correggere. Se una misura futura riapre una variante, passerà prima uno
+screening breve su tre seed. **GO** a una run lunga solo per un intervento con varianza
+ridotta e mediana non regressiva; **STOP** se il beneficio appare in un solo seed o
+richiede combinare più modifiche non interpretabili.
 
-PPO non è il passo successivo automatico: prima va stabilito se il collo di bottiglia è
-nel trainer attuale.
+PPO non è il passo successivo: il controllo corrente non individua un collo di bottiglia
+numerico nel trainer.
 
 ## 7. Pista 5: training davvero paired
 
@@ -297,7 +309,7 @@ nel trainer attuale.
 Il flag attuale `train_a2c.py --seat-fair` alterna il posto della policy, ma genera un
 mazzo diverso per ogni partita. Non è quindi paired come l'evaluation.
 
-### Da implementare
+### Da implementare — prossima decisione attiva
 
 Una schedule pura e riproducibile `(game_seed, policy_seat, opponent)` in cui ogni coppia:
 

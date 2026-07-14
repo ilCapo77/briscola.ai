@@ -39,6 +39,11 @@
   relativo e top-k di `+3,29` punti, ma nel PIMC 16×8 perde `-0,224` punti/partita contro v0 (CI95
   `-0,572..+0,124`) e fallisce lo screen preregistrato. Nessuna conferma 10k: belief v0 resta ufficiale. Report:
   `docs/plans/belief-v1-multistile-2026-07-14.md`.
+- La diagnostica passiva A2C su tre seed × 2.000 partite supera tutti i gate. Il critic, pur ripartendo da zero,
+  raggiunge explained variance mediana finale `0,127..0,133`; bias advantage `0,147..0,174`, picco gradiente
+  `p95/mediana 1,92..2,00` e passi relativi sotto `0,019%` non indicano instabilità. **STOP**, per ora, a critic
+  reuse, normalizzazione e clipping; prossimo controllo: schedule davvero paired. Report:
+  `docs/plans/a2c-health-diagnostic-v0-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -50,14 +55,15 @@
 Simmetria, capacità dormiente, dose PIMC e belief v1 hanno ora un esito causale chiuso. Rami e motivazioni complete in
 `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Strumentare la salute del training A2C prima di modificarlo.** Registrare advantage, explained variance del
-   critic, gradienti actor/critic/trunk, attivazioni e rapporto aggiornamento/parametri in smoke brevi riproducibili.
-2. **Provare una sola correzione alla volta su tre seed.** In ordine: critic reset/reuse, normalizzazione advantage e
-   gradient clipping. Nessuna run lunga e nessun PPO finché la diagnostica non mostra il problema specifico.
+1. **Implementare la schedule di training davvero paired.** Ogni seed deve produrre due partite consecutive con
+   stesso mazzo e stesso avversario, scambiando la seat, senza attraversare un optimizer update.
+2. **Confrontare seriale e paired su almeno tre seed.** Misurare sia a pari partite/update sia a pari mazzi distinti;
+   mantenere invariati critic, advantage, clipping e ricetta avversari per attribuire l'effetto alla sola schedule.
 3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
 
-Nuove architetture o Q Monte Carlo restano successive alla diagnosi del trainer attuale.
+Critic reuse, normalizzazione, clipping, nuove architetture e Q Monte Carlo restano sospesi finché una misura non
+mostra il problema specifico che dovrebbero risolvere.
 
 ## Audit Di Campo
 
