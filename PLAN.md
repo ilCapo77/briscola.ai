@@ -48,6 +48,10 @@
   20k partite perde direttamente in due seed su tre (mediana `-0,151`) e la dispersione della forza e' `2,08x`
   quella seriale; a pari 20k mazzi richiede 40k partite e resta direttamente neutra (`-0,148` mediano). Nessun run
   piu' lungo: `serial` resta il default. Report: `docs/plans/a2c-paired-schedule-v0-2026-07-14.md`.
+- La sonda automatica di policy regret e' implementata: raccoglie osservazioni bilanciate per avversario/fase/posizione,
+  sceglie e valuta l'alternativa su determinizzazioni separate e distingue gli errori policy-only da quelli gia'
+  dentro PIMC/solver. Il pilot ha validato la pipeline; il run formale 192x64 e' ancora da eseguire. Protocollo:
+  `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -59,11 +63,11 @@
 Simmetria, capacita' dormiente, dose PIMC, belief v1 e schedule paired hanno ora un esito causale chiuso. Rami e
 motivazioni complete in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Non avviare un altro training per inerzia.** V14 e la schedule seriale restano la baseline; i nove modelli del
-   probe paired sono temporanei e non sono candidati v15.
-2. **Misurare prima il prossimo limite.** Prima di scegliere architettura, reward o ottimizzatore, preparare un audit
-   offline degli errori residui di v14 su osservazioni fisse, separato per fase e tipo di decisione. Una nuova pista
-   parte solo da una classe di errore ripetibile e da un intervento che la isoli.
+1. **Eseguire l'audit formale policy regret gia' congelato.** 192 osservazioni, 64 determinizzazioni, split 32/32 e
+   intervallo al 99%; comando e output in `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
+2. **Applicare il routing automatico senza tuning post-hoc.** Un nuovo intervento parte solo da almeno tre errori
+   policy-only della stessa categoria, distribuiti su almeno due avversari e due coppie. Casi isolati o gia' coperti
+   dal runtime non autorizzano training.
 3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
 

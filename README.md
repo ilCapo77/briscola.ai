@@ -461,6 +461,13 @@ bit-per-bit dei pesi con sonda accesa/spenta è coperta dai test. Il protocollo 
 ablation successiva; soglie e limiti sono in
 `docs/plans/a2c-health-diagnostic-v0-2026-07-14.md`.
 
+Gli errori residui di una policy si possono cercare con
+`scripts/probe_policy_regret.py`: la sonda prova tutte le carte su determinizzazioni
+compatibili, sceglie l'alternativa su meta' campioni e la giudica sull'altra meta', usa
+il solver esatto a mazzo vuoto e produce categorie automatiche. Il report separa le fasi
+policy-only dalle decisioni gia' coperte dal PIMC/solver del prodotto. Protocollo e
+limiti: `docs/plans/policy-regret-audit-v14-2026-07-14.md`.
+
 Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;

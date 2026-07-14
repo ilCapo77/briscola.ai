@@ -494,4 +494,5 @@ ed evidenze stabili. Critic reuse, normalizzazione, clipping e una nuova archite
 sono lavoro mancante: sono ipotesi sospese perche' i test non hanno mostrato il difetto
 che dovrebbero correggere. Prima di un nuovo training serve un audit offline degli errori
 residui di v14 che individui una classe ripetibile, non un'altra ricetta lunga scelta a
-priori.
+priori. La sonda, il bilanciamento e il gate di routing sono ora congelati in
+`policy-regret-audit-v14-2026-07-14.md`; il prossimo passo e' il solo run formale 192x64.

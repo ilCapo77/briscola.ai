@@ -100,6 +100,8 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
   sia a pari partite sia a pari mazzi; job lungo da affidare al maintainer)
 - Diagnostica simmetria semi: `scripts/probe_suit_symmetry.py` (24 rinomine complete di `PlayerObservation`,
   mosse forzate escluse, report JSON riproducibile)
+- Diagnostica errori policy: `scripts/probe_policy_regret.py` (controfattuali PIMC cross-fitted, endgame esatto,
+  contesto pubblico e routing automatico per cluster)
 - Benchmark throughput: `python scripts/benchmark_perf.py`
 
 Dataset, run e benchmark in `data/` e `benchmarks/experiments/` sono locali (gitignored), salvo i piccoli asset
