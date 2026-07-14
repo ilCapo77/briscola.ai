@@ -1,6 +1,6 @@
 # Piano di ricerca: prossima iterazione del modello
 
-> Stato: proposta operativa, 2026-07-11.
+> Stato: esiti aggiornati al 2026-07-14; prossima pista: osservabilita' A2C.
 > Questo documento approfondisce le sette piste sintetizzate in `PLAN.md`; non autorizza
 > automaticamente training lunghi né promozioni. `PLAN.md` resta la fonte di verità su
 > quale fase eseguire adesso.
@@ -9,7 +9,7 @@
 
 La baseline da preservare è:
 
-- policy `best_a2c_v13.npz`, encoder v4, `369 -> 256 -> 40`, senza guard runtime;
+- policy `best_a2c_v14.npz`, encoder v4, `369 -> 256 -> 40`, senza guard runtime;
 - default prodotto `bc_model_pimc_belief_16x8` con belief v0 e solver finale;
 - valutazioni seat-fair paired, stessi mazzi e posti scambiati;
 - anti-cheat invariato: policy, belief, reward e search ricevono solo informazione lecita.
@@ -364,6 +364,19 @@ finestra 8, solver e uniform mix, cambiando soltanto belief v0/v1.
 **GO** solo se v1 migliora calibrazione sui fold esclusi e poi batte/non regredisce v0
 nel PIMC paired. **STOP** se migliora BCE/top-k ma non le decisioni della search.
 
+### Esito 2026-07-14
+
+Il gate offline completo usa 66.000 partite/462.000 record e passa tutti i controlli:
+BCE macro `-7,63%` relativo, top-k `+3,29` punti, Brier `-0,0130` ed ECE `-0,0259`
+rispetto a belief v0. Il fold v14 e' l'unico con BCE peggiore (`+1,45%`), entro il tetto
+preregistrato del 2%, quindi autorizza lo screen runtime ma non una promozione.
+
+Nel PIMC 16x8 seat-fair da 2.000 partite il candidato fa `-0,224` punti/partita contro
+v0, CI95 `-0,572..+0,124`, con 950 vittorie, 971 sconfitte e 79 pareggi. Integrita' e
+costo sono perfetti, ma falliscono punto stimato e limite basso richiesti dallo screen.
+**STOP** alla conferma 10k e alla pista belief v1; belief v0 resta ufficiale. Report ed
+evidenze: `belief-v1-multistile-2026-07-14.md`.
+
 ## 9. Pista 7: nuova architettura o Q Monte Carlo
 
 Questa fase parte solo se le piste precedenti dimostrano un limite di rappresentazione.
@@ -411,14 +424,14 @@ segnale oppure se il widening controllato non mostra alcun limite di capacità.
 
 | Ordine | Fase | Costo iniziale | Output richiesto | Stop immediato |
 |---:|---|---|---|---|
-| fatto | Sonda simmetria semi | basso | report su 4.096 osservazioni | GO augmentation paired |
-| 1 | Augmentation paired | medio | tre smoke seed + sonda e gate | flip non cala o forza regredisce |
-| 2 | Sonda salute MLP | basso | JSON riproducibile per fase/neurone | nessun segnale di capacità |
-| 3 | Dose PIMC 16/32/64 | medio | forza + CPU p50/p95 | curva piatta |
-| 4 | Strumentazione/A2C | medio | gradienti, critic, tre ablation separate | segnale non ripetibile |
-| 5 | Training paired | medio | schedule + confronto multi-seed | varianza/forza non migliori |
-| 6 | Belief v1 | medio-alto | fold multi-stile + A/B PIMC | solo metriche offline migliori |
-| 7 | Nuova architettura | alto | prototipo esportabile e gate completi | tooling/costo senza headroom |
+| fatto: GO v14 | Sonda simmetria semi | basso | report su 4.096 osservazioni | ramo chiuso con distillazione |
+| fatto: STOP | Augmentation paired | medio | smoke, sonda e gate | forza/simmetria non congiunte |
+| fatto: STOP | Sonda salute MLP | basso | JSON per fase/neurone + ablation | nessun collo di capacità |
+| fatto: STOP | Dose PIMC 16/32/64 | medio | forza + CPU media | curva piatta rispetto al costo |
+| prossimo | Strumentazione/A2C | medio | gradienti, critic, tre ablation separate | segnale non ripetibile |
+| dopo | Training paired | medio | schedule + confronto multi-seed | varianza/forza non migliori |
+| fatto: STOP | Belief v1 | medio-alto | fold multi-stile + A/B PIMC | solo metriche offline migliori |
+| ultimo | Nuova architettura | alto | prototipo esportabile e gate completi | tooling/costo senza headroom |
 
 Non avviare la fase successiva per inerzia. Ogni fase deve produrre un artefatto piccolo
 e versionabile (JSON di sonda, manifest o nota tecnica) che consenta a una sessione futura
@@ -430,26 +443,23 @@ Baseline riproducibili già disponibili:
 
 ```bash
 uv run python scripts/behavior_profile.py \
-  --model data/models/best_a2c_v13.npz \
+  --model data/models/best_a2c_v14.npz \
   --opponents heuristic_trump_saver,mirror,heuristic_v1 \
   --num-games 2000
 
 uv run python scripts/evaluate_pimc.py \
-  --model data/models/best_a2c_v13.npz \
+  --model data/models/best_a2c_v14.npz \
   --belief-model data/models/belief_v0_h128_50k_seed20260702.npz \
   --determinizations 16 \
   --max-unknown-cards 8 \
   --num-games 2000
 
 uv run python scripts/probe_suit_symmetry.py \
-  --model data/models/best_a2c_v13.npz \
-  --out-json docs/reports/evidence/suit_symmetry_v13.v1.json
+  --model data/models/best_a2c_v14.npz \
+  --out-json data/suit_symmetry_v14.json
 ```
 
-Il secondo comando è solo una baseline: prima del confronto belief 16/32/64 l'harness
-deve diventare simmetrico e registrare le latenze per decisione.
-
-Non esistono ancora comandi affidabili per sonda MLP, augmentation paired, critic
-reuse/normalizzazione/clipping, schedule seat-paired di training, roster belief v1 o nuove
-architetture. I relativi flag e script vanno implementati e testati prima di preparare
-ricette lunghe.
+Sonda MLP, simmetria, dose e roster belief hanno ora script ed evidenze stabili. Mancano
+ancora comandi affidabili per critic reuse, osservabilita'/normalizzazione/clipping A2C,
+schedule seat-paired di training e nuove architetture. Il prossimo lavoro implementa e
+testa prima la sola osservabilita' A2C, senza preparare una ricetta lunga.

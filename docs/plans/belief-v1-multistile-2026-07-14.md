@@ -1,11 +1,15 @@
 # Protocollo belief v1 multi-stile
 
 **Data:** 2026-07-14  
-**Stato:** pipeline e pilot validati; gate completo non ancora eseguito.  
+**Stato:** gate completo chiuso con **STOP runtime**; belief v0 resta ufficiale.  
 **Roster congelato:**
 [`docs/plans/belief-v1-roster-2026-07-14.json`](belief-v1-roster-2026-07-14.json)  
 **Evidenza pilot:**
-[`docs/reports/evidence/belief_v1_pilot.v1.json`](../reports/evidence/belief_v1_pilot.v1.json)
+[`docs/reports/evidence/belief_v1_pilot.v1.json`](../reports/evidence/belief_v1_pilot.v1.json)  
+**Gate offline:**
+[`docs/reports/evidence/belief_v1_offline_gate.v1.json`](../reports/evidence/belief_v1_offline_gate.v1.json)  
+**Screen runtime:**
+[`docs/reports/evidence/belief_v1_runtime_screen.v1.json`](../reports/evidence/belief_v1_runtime_screen.v1.json)
 
 ## Obiettivo in parole semplici
 
@@ -80,8 +84,8 @@ dell'idea: v0 ha visto 50.000 partite, il pilot appena 770. Il verdetto salvato 
 
 ## Job completo
 
-Il runner esegue i fold in sequenza per non moltiplicare memoria e contesa CPU. Il job e'
-lungo e va lanciato dal maintainer in background:
+Il runner esegue i fold in sequenza per non moltiplicare memoria e contesa CPU. La run
+canonica e' terminata in modo integro; il comando resta la ricetta di riproduzione:
 
 ```bash
 nohup caffeinate -i uv run python scripts/run_belief_v1_gate.py \
@@ -96,13 +100,31 @@ tail -f data/belief/belief_v1_gate_20260714.log
 ```
 
 `--resume` riusa solo dataset e modelli i cui hash, split e iperparametri coincidono col
-protocollo; un file incompatibile causa un errore esplicito. Gli artefatti attesi vivono in
+protocollo; un file incompatibile causa un errore esplicito. Gli artefatti locali vivono in
 `data/belief/belief_v1_gate_20260714/`:
 
 - `belief_v1_multistyle_g66000_seed20260714.npz`;
 - sette modelli sotto `folds/`;
 - `belief_v1_leave_one_out_g66000_seed20260714.json` con il verdetto;
-- solo dopo un GO, `belief_v1_all_styles_h128_g66000_seed20260714.npz`.
+- `belief_v1_all_styles_h128_g66000_seed20260714.npz`, creato dopo il GO offline.
+
+## Risultato offline completo
+
+Il dataset contiene 66.000 partite e 462.000 esempi. Tutti i cinque gate preregistrati
+passano:
+
+| Macro-media sui sette stili esclusi | belief v0 | belief v1 | Differenza v1-v0 |
+|---|---:|---:|---:|
+| BCE, minore e' meglio | 0,5457 | 0,5041 | -7,63% relativo |
+| Top-k recall | 54,87% | 58,16% | +3,29 punti |
+| Brier, minore e' meglio | 0,1846 | 0,1715 | -0,0130 |
+| ECE, minore e' meglio | 0,0463 | 0,0204 | -0,0259 |
+
+Belief v1 migliora nettamente sugli stili euristici e random. Sul fold v14 e' invece
+peggiore dell'`1,45%` relativo in BCE e di `1,10` punti in top-k; la regressione resta
+entro il limite preregistrato del 2%, quindi il verdetto offline corretto e' GO al solo
+screen PIMC. Il candidato all-styles migliora anche sul validation mix interno (BCE
+`0,4995` contro `0,5351`, top-k `58,20%` contro `55,47%`).
 
 ## Gate runtime preregistrato
 
@@ -119,3 +141,26 @@ La conferma da 10.000 richiede differenza media almeno `+0,20`, limite basso CI9
 di zero, integrita' completa e lo stesso tetto di costo. Se il test non li soddisfa, belief
 v0 resta l'asset ufficiale anche se le metriche offline di v1 sono migliori.
 
+## Risultato runtime e decisione
+
+Lo screen da 2.000 partite e' terminato in 155,4 secondi:
+
+- belief v1: 950 vittorie; belief v0: 971; pareggi: 79;
+- differenza media v1-v0: `-0,224` punti/partita, CI95 `-0,572..+0,124`;
+- score rate v1 `49,475%`, CI95 `48,595..50,355%`;
+- zero determinizzazioni o rollout falliti e zero mosse corrette forzatamente;
+- latenza search `15,034 ms` v1 contro `15,062 ms` v0, rapporto `0,998x`.
+
+Integrita' e costo passano, ma falliscono entrambi i gate di forza dello screen: il punto
+stimato non raggiunge `+0,10` e il limite basso e' sotto `-0,50`. La CI include zero,
+quindi non dimostriamo che v1 sia certamente peggiore; dimostriamo pero' che non ha
+fornito l'headroom richiesto per continuare. Coerentemente con il protocollo:
+
+- **STOP** alla conferma da 10.000 partite;
+- nessuna promozione o copia del candidato in `data/models/`;
+- belief v0 resta l'asset prodotto;
+- niente reweighting post-hoc del roster per salvare lo stesso esperimento.
+
+La conclusione didattica e' che una stima delle carte migliore in media non garantisce
+scelte PIMC migliori. Il fold v14, unico leggermente negativo offline, anticipava inoltre
+la direzione dello screen self-play con policy v14.

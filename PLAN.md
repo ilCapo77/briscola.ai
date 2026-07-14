@@ -35,9 +35,10 @@
   stesse osservazioni i runtime concordano nell'`89,40%` dei casi; non emerge un difetto v14 localizzato e v14 riduce
   ancora overkill (`22,91% -> 20,54%`) e sprechi (`4 -> 1`). Il dato live resta diagnostico e non bloccante:
   `docs/plans/live-policy-replay-v13-v14-2026-07-14.md`.
-- Il gate belief v1 multi-stile è implementato: roster congelato di sette stili, split per partita,
-  leave-one-opponent-out, BCE/top-k/Brier/ECE e stop automatico. Il pilot da 770 partite valida soltanto la pipeline;
-  il prossimo job probatorio usa 66.000 partite. Protocollo: `docs/plans/belief-v1-multistile-2026-07-14.md`.
+- La pista belief v1 multi-stile è chiusa con **STOP runtime**. Sui sette holdout migliora BCE macro del `7,63%`
+  relativo e top-k di `+3,29` punti, ma nel PIMC 16×8 perde `-0,224` punti/partita contro v0 (CI95
+  `-0,572..+0,124`) e fallisce lo screen preregistrato. Nessuna conferma 10k: belief v0 resta ufficiale. Report:
+  `docs/plans/belief-v1-multistile-2026-07-14.md`.
 - Il diario pubblico condensa la linea di simmetria nei capitoli 18-19; i quattro approfondimenti tecnici restano
   separati, con l'esito finale in `docs/diario/21-una-voce-sola.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -46,17 +47,17 @@
 
 ## Prossima Decisione
 
-La promozione v14 chiude la pista di simmetria; diagnostica e training controllato chiudono la capacità dormiente;
-storico e probe v14 chiudono anche la dose PIMC. Rami esclusi in `docs/plans/prossima-iterazione-modello.md`.
+Simmetria, capacità dormiente, dose PIMC e belief v1 hanno ora un esito causale chiuso. Rami e motivazioni complete in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Eseguire il gate belief v1 completo.** Il runner genera 66.000 partite multi-stile, misura sette fold esclusi e
-   allena il candidato all-styles solo se supera tutti i gate offline preregistrati.
-2. **Solo dopo un GO offline, confrontare belief v1-v0 nel PIMC 16×8.** Screening seat-fair da 2.000 partite e
-   conferma da 10.000; policy, solver, dose e uniform mix restano identici.
+1. **Strumentare la salute del training A2C prima di modificarlo.** Registrare advantage, explained variance del
+   critic, gradienti actor/critic/trunk, attivazioni e rapporto aggiornamento/parametri in smoke brevi riproducibili.
+2. **Provare una sola correzione alla volta su tre seed.** In ordine: critic reset/reuse, normalizzazione advantage e
+   gradient clipping. Nessuna run lunga e nessun PPO finché la diagnostica non mostra il problema specifico.
 3. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
-   basso volume previsto non blocca il gate belief e non diventa training senza una nuova decisione su privacy e qualità.
+   basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
 
-Modifiche strutturali più ampie restano successive al gate belief e all'audit di campo.
+Nuove architetture o Q Monte Carlo restano successive alla diagnosi del trainer attuale.
 
 ## Audit Di Campo
 
@@ -84,8 +85,6 @@ Modifiche strutturali più ampie restano successive al gate belief e all'audit d
 
 - BC e value usano ancora split casuali per record: prima di riutilizzarli per una nuova linea, introdurre split per
   partita per evitare leakage tra stati della stessa partita.
-- Il trainer A2C va diagnosticato prima di aggiungere PPO: salute/gradienti del trunk, critic reinizializzato nei
-  warm-start, normalizzazione advantage e gradient clipping sono ablation separate, non un unico cambio.
 - RNG seriale e parallelo di `decision_quality` non è riproducibile cross-`workers`.
 - Cold start residuo (~13.7s) è il pavimento della piattaforma; leve reali: keep-alive sotto l'idle timeout o piano
   diverso. Il runtime applicativo non ha più compilazione JIT.
@@ -135,14 +134,6 @@ Sonda riproducibile di simmetria dei semi:
 uv run python scripts/probe_suit_symmetry.py \
   --model data/models/best_a2c_v14.npz \
   --out-json data/suit_symmetry_v14.json
-```
-
-Gate belief v1 completo (job lungo, riprendibile):
-
-```bash
-nohup caffeinate -i uv run python scripts/run_belief_v1_gate.py \
-  --resume \
-  > data/belief/belief_v1_gate_20260714.log 2>&1 &
 ```
 
 Avvio locale:
