@@ -90,6 +90,9 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
 - Training value: `python scripts/train_value.py` / `python scripts/train_value_pairwise.py` (split per partita;
   gli NPZ compatti devono contenere `game_ids`, senza fallback allo split per record)
 - Training RL: `python scripts/train_a2c.py` / `python scripts/train_pg.py` (salvano `.npz` in `data/models/`)
+  - A2C long-run: `--num-games` resta l'orizzonte totale, `--stop-after-games` chiude il segmento e
+    `--resume checkpoint.npz` ripristina policy, critic, Adam, RNG, schedule e metriche. Usare
+    `--metrics-mode summary --diagnostics-every N`; il resume rifiuta configurazioni, asset o commit diversi.
 - Pipeline riproducibile (train + eval matrix + manifest): `python scripts/run_experiment.py`
 - Valutazione offline: `python scripts/evaluate_agents.py --num-games 1000 --seed 42 --agent0 heuristic_v1 --agent1 random`
   - engine selezionabile: `--engine domain|fast|numba`; modi seat-fair `--seat-fair --seed-suite small|medium`; benchmark `--benchmark medium|big`; carica modello con `--agent0 bc_model --agent0-model ./data/models/best_a2c.npz`

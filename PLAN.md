@@ -58,6 +58,10 @@
 - `decision_quality` assegna ora lo stesso stream RNG a ogni coppia seat-fair nel percorso seriale e parallelo:
   `--workers` cambia solo la velocita', anche con agenti stocastici. Riproduzione e compatibilita':
   `docs/plans/decision-quality-rng-2026-07-14.md`.
+- E' pronto un ultimo scouting A2C seriale da 50M partite, partendo e restando ancorato a v14. Schedule e metriche
+  sono ora a memoria costante; checkpoint atomico, Adam/critic/RNG e digest riprendono bit per bit. Test continuo
+  contro interrotto e smoke sul roster reale passano; il primo blocco 0-10M non e' ancora stato avviato. Protocollo,
+  comando e gate: `docs/plans/a2c-super-training-50m-2026-07-14.md`.
 - Il diario pubblico arriva al capitolo 20 e distingue il plateau dell'attuale ricetta dal limite strategico del
   gioco. L'approfondimento e' `docs/diario/22-il-limite-della-strada.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
@@ -66,14 +70,20 @@
 
 ## Prossima Decisione
 
-Le sette piste e l'audit degli errori residui hanno ora un esito chiuso. Rami e motivazioni complete in
-`docs/plans/prossima-iterazione-modello.md`.
+Le sette piste e l'audit degli errori residui hanno un esito chiuso. Il costo monetario nullo autorizza una sola
+eccezione controllata: falsificare l'ipotesi del plateau con il protocollo 50M, senza chiamarne automaticamente
+l'output v15. Rami precedenti e motivazioni complete in `docs/plans/prossima-iterazione-modello.md`.
 
-1. **Congelare la ricerca modello.** V14, PIMC belief 16x8, solver e schedule seriale restano la baseline; nessun
-   risultato corrente autorizza v15, una nuova architettura o un altro training lungo.
-2. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
+1. **Avviare soltanto il blocco 0-10M.** Il comando `nohup` validato e gli artefatti attesi sono nel protocollo;
+   checkpoint tecnico a 5M, strategico a 10M, heartbeat ogni 20k. Non concatenare automaticamente altri blocchi.
+2. **Eseguire lo scouting restante in blocchi da 10M.** Init/anchor v14 e roster congelato; pause decisionali a
+   10/20/30/40/50M sulla stessa suite da 4k. I checkpoint tecnici a meta' blocco servono solo al resume e non sono
+   candidati selezionabili; il test finale da 10k resta sigillato.
+3. **Replicare solo un successo.** Un singolo seed non puo' essere promosso: due ulteriori seed allo stesso orizzonte
+   precedono l'eventuale teacher a 24 viste e la distillazione simmetrica.
+4. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
    basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
-3. **Prima di riaprire la forza, misurare il soffitto.** Serve un cluster di errori ripetibile oppure un benchmark
+5. **Per altre linee di forza, misurare prima il soffitto.** Serve un cluster di errori ripetibile oppure un benchmark
    ridotto a informazione nascosta con riferimento piu' forte di PIMC. Solo un gap dimostrato autorizza a progettare
    ricerca sull'information set/regret; non partire direttamente da v15 o da un training piu' lungo.
 
@@ -99,6 +109,8 @@ mostra il problema specifico che dovrebbero risolvere.
 - Confrontare varianti search a pari CPU media e p95, non soltanto a pari numero di determinizzazioni.
 - I job oltre ~5 minuti vanno preparati per il maintainer con `nohup`, log e path artefatti; non vanno avviati
   dall'agente restando in attesa.
+- Durante i cinque segmenti 50M non cambiare commit, flag o asset: il fingerprint del resume rifiuta variazioni per
+  impedire continuazioni solo apparenti. Le valutazioni intermedie devono scrivere soltanto artefatti gitignored.
 - Ogni bump richiede `pyproject.toml` + `uv.lock`, tag annotato e rigenerazione/verifica di
   `docs/reports/model_progress.xlsx`; il catalogo deve mostrare la policy compatibile e nascondere value/belief.
 

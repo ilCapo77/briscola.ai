@@ -11,6 +11,7 @@ import numpy as np
 import pytest
 
 from briscola_ai.ai.training.game_schedule import (
+    TrainingGameScheduleStream,
     build_training_game_schedule,
     training_schedule_sha256,
 )
@@ -59,6 +60,64 @@ def test_paired_schedule_reuses_seed_and_opponent_then_swaps_seat() -> None:
     for start in range(0, len(schedule), 4):
         pair_ids = [game.pair_index for game in schedule[start : start + 4]]
         assert pair_ids == [start // 2, start // 2, start // 2 + 1, start // 2 + 1]
+
+
+@pytest.mark.parametrize("mode", ["serial", "paired"])
+def test_streamed_batches_equal_materialized_schedule(mode: str) -> None:
+    """La versione O(1) deve emettere le stesse righe e lo stesso digest storico."""
+    expected = _schedule(mode=mode)
+    stream = TrainingGameScheduleStream(
+        mode=mode,
+        seat_fair=True,
+        default_opponent_name="random",
+        opponent_mix=parse_opponent_mix("random:1,heuristic_v1:1"),
+        rng_game=np.random.default_rng(11),
+        rng_opponent=np.random.default_rng(12),
+    )
+
+    actual = stream.take(4) + stream.take(4)
+
+    assert actual == expected
+    assert stream.consumed_games == 8
+    assert stream.sha256 == training_schedule_sha256(expected)
+
+
+def test_stream_resume_extends_digest_without_replaying_prefix() -> None:
+    """RNG, cursore e 32 byte di digest devono bastare per continuare la schedule."""
+    game_rng = np.random.default_rng(11)
+    opponent_rng = np.random.default_rng(12)
+    first = TrainingGameScheduleStream(
+        mode="serial",
+        seat_fair=True,
+        default_opponent_name="random",
+        opponent_mix=parse_opponent_mix("random:1,heuristic_v1:1"),
+        rng_game=game_rng,
+        rng_opponent=opponent_rng,
+    )
+    prefix = first.take(4)
+    prefix_digest = first.sha256
+    game_state = game_rng.bit_generator.state
+    opponent_state = opponent_rng.bit_generator.state
+
+    resumed_game_rng = np.random.default_rng()
+    resumed_game_rng.bit_generator.state = game_state
+    resumed_opponent_rng = np.random.default_rng()
+    resumed_opponent_rng.bit_generator.state = opponent_state
+    resumed = TrainingGameScheduleStream(
+        mode="serial",
+        seat_fair=True,
+        default_opponent_name="random",
+        opponent_mix=parse_opponent_mix("random:1,heuristic_v1:1"),
+        rng_game=resumed_game_rng,
+        rng_opponent=resumed_opponent_rng,
+        consumed_games=4,
+        digest_hex=prefix_digest,
+    )
+
+    suffix = resumed.take(4)
+
+    assert prefix + suffix == _schedule(mode="serial")
+    assert resumed.sha256 == training_schedule_sha256(prefix + suffix)
 
 
 @pytest.mark.parametrize(

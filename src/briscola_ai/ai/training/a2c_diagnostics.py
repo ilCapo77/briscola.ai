@@ -237,6 +237,19 @@ class A2CUpdateDiagnostics:
         """Converte dataclass annidate in un oggetto JSON standard."""
         return asdict(self)
 
+    @classmethod
+    def from_json(cls, payload: dict[str, Any]) -> A2CUpdateDiagnostics:
+        """Ricostruisce una riga campionata conservata in un checkpoint di resume."""
+        raw_signals = payload.get("signals")
+        if not isinstance(raw_signals, dict):
+            raise ValueError("Riga diagnostica senza signals validi")
+        values = dict(payload)
+        values["signals"] = A2CSignalSnapshot(**raw_signals)
+        try:
+            return cls(**values)
+        except TypeError as exc:
+            raise ValueError("Riga diagnostica del resume incompatibile") from exc
+
 
 def build_update_diagnostics(
     *,

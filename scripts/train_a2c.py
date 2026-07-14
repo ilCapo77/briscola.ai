@@ -80,6 +80,15 @@ from briscola_ai.ai.numba.value_lookahead import (
     collect_a2c_batch_numba_value_lookahead_2p,
     collect_a2c_trajectory_numba_value_lookahead_2p,
 )
+from briscola_ai.ai.training.a2c_checkpoint import (
+    A2C_RESUME_SCHEMA,
+    atomic_savez,
+    canonical_json,
+    config_fingerprint,
+    json_compatible,
+    parse_resume_json,
+    tuple_tree,
+)
 from briscola_ai.ai.training.a2c_diagnostics import (
     A2CArrayGroups,
     A2CSignalAccumulator,
@@ -89,13 +98,14 @@ from briscola_ai.ai.training.a2c_diagnostics import (
     summarize_update_diagnostics,
 )
 from briscola_ai.ai.training.game_schedule import (
+    ScheduledTrainingGame,
+    TrainingGameScheduleStream,
     TrainingScheduleMode,
-    build_training_game_schedule,
-    training_schedule_sha256,
 )
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
+from briscola_ai.ai.training.streaming_history import HistoryMode, StreamingHistory
 from briscola_ai.ai.training.suit_augmentation import (
     permute_action_ids,
     permute_action_masks,
@@ -250,7 +260,7 @@ class A2CPolicy:
     w2: np.ndarray  # (H, 40)
     b2: np.ndarray  # (40,)
     wv: np.ndarray  # (H,)
-    bv: np.ndarray  # ()
+    bv: float
 
     @property
     def feature_dim(self) -> int:
@@ -1328,6 +1338,14 @@ def main() -> int:
     parser.add_argument("--out", required=True, help="Path output modello (.npz)")
     parser.add_argument("--init", default="", help="Warm-start da un modello `.npz` MLP (es. BC/RL).")
     parser.add_argument(
+        "--resume",
+        default="",
+        help=(
+            "Riprende esattamente un checkpoint A2C long-run: policy, critic, Adam, RNG, schedule e metriche. "
+            "È mutuamente esclusivo con --init."
+        ),
+    )
+    parser.add_argument(
         "--encoder-version",
         choices=["v1", "v2", "v3", "v4"],
         default="v1",
@@ -1409,6 +1427,15 @@ def main() -> int:
         ),
     )
     parser.add_argument("--num-games", type=int, default=20000, help="Numero partite di training (2-player).")
+    parser.add_argument(
+        "--stop-after-games",
+        type=int,
+        default=0,
+        help=(
+            "Ferma questo processo al conteggio cumulativo indicato, mantenendo --num-games come orizzonte totale. "
+            "Serve per blocchi riprendibili bit-identici; 0 significa arrivare a --num-games."
+        ),
+    )
     parser.add_argument("--seed", type=int, default=0, help="Seed RNG (riproducibilità).")
     parser.add_argument(
         "--rollout-engine",
@@ -1568,6 +1595,15 @@ def main() -> int:
         ),
     )
     parser.add_argument(
+        "--diagnostics-every",
+        type=int,
+        default=1,
+        help=(
+            "Conserva una riga diagnostica ogni N optimizer update, includendo sempre primo, checkpoint e ultimo "
+            "update del segmento (default 1)."
+        ),
+    )
+    parser.add_argument(
         "--training-schedule",
         choices=["serial", "paired"],
         default="serial",
@@ -1581,19 +1617,29 @@ def main() -> int:
 
     if args.num_games <= 0:
         raise ValueError("--num-games deve essere > 0")
+    if str(args.init).strip() and str(args.resume).strip():
+        raise ValueError("--init e --resume sono mutuamente esclusivi")
     if args.hidden_dim <= 0:
         raise ValueError("--hidden-dim deve essere > 0")
     if args.update_every <= 0:
         raise ValueError("--update-every deve essere > 0")
     if args.log_every <= 0:
         raise ValueError("--log-every deve essere > 0")
+    if args.diagnostics_every <= 0:
+        raise ValueError("--diagnostics-every deve essere > 0")
+    num_games = int(args.num_games)
+    stop_after_games = int(args.stop_after_games) if int(args.stop_after_games) > 0 else num_games
+    if stop_after_games <= 0 or stop_after_games > num_games:
+        raise ValueError("--stop-after-games deve essere in (0, --num-games]")
+    if stop_after_games < num_games and stop_after_games % int(args.update_every) != 0:
+        raise ValueError("--stop-after-games intermedio deve essere multiplo di --update-every")
     training_schedule_mode: TrainingScheduleMode = str(args.training_schedule)
     if training_schedule_mode == "paired":
-        if int(args.num_games) % 2 != 0:
+        if num_games % 2 != 0:
             raise ValueError("--training-schedule paired richiede --num-games pari")
         if int(args.update_every) % 2 != 0:
             raise ValueError("--training-schedule paired richiede --update-every pari")
-        if int(args.num_games) % int(args.update_every) != 0:
+        if num_games % int(args.update_every) != 0:
             raise ValueError(
                 "--training-schedule paired richiede --num-games multiplo di --update-every, "
                 "per evitare update parziali"
@@ -1639,6 +1685,44 @@ def main() -> int:
         )
 
     out_path = Path(args.out)
+    resume_path = Path(str(args.resume).strip()) if str(args.resume).strip() else None
+    resume_state: dict[str, object] | None = None
+    resume_arrays: dict[str, np.ndarray] = {}
+    if resume_path is not None:
+        required_resume_arrays = {
+            "w1",
+            "b1",
+            "w2",
+            "b2",
+            "wv",
+            "bv",
+            "resume_st_w1_m",
+            "resume_st_w1_v",
+            "resume_st_b1_m",
+            "resume_st_b1_v",
+            "resume_st_w2_m",
+            "resume_st_w2_v",
+            "resume_st_b2_m",
+            "resume_st_b2_v",
+            "resume_st_wv_m",
+            "resume_st_wv_v",
+            "resume_st_bv_m",
+            "resume_st_bv_v",
+            "resume_state_json",
+        }
+        with np.load(resume_path, allow_pickle=False) as archive:
+            missing = sorted(required_resume_arrays.difference(archive.files))
+            if missing:
+                raise ValueError(f"Checkpoint non riprendibile, array mancanti: {missing}")
+            resume_state = parse_resume_json(archive["resume_state_json"])
+            resume_arrays = {
+                name: np.asarray(archive[name]).copy() for name in required_resume_arrays if name != "resume_state_json"
+            }
+        completed = int(str(resume_state.get("games_completed", -1)))
+        if completed <= 0 or completed % int(args.update_every) != 0:
+            raise ValueError("Il checkpoint deve trovarsi dopo un optimizer update completo")
+        if completed >= stop_after_games:
+            raise ValueError(f"Il checkpoint contiene già {completed} partite; --stop-after-games deve essere maggiore")
     diagnostics_path = Path(str(args.diagnostics_json).strip()) if str(args.diagnostics_json).strip() else None
     if diagnostics_path is not None and diagnostics_path.resolve() == out_path.resolve():
         raise ValueError("--diagnostics-json deve essere diverso da --out")
@@ -1655,8 +1739,10 @@ def main() -> int:
                 raise ValueError(f"Checkpoint non valido in --checkpoint-games: {item!r}") from exc
             if checkpoint_game <= 0:
                 raise ValueError("--checkpoint-games deve contenere solo valori > 0")
-            if checkpoint_game > int(args.num_games):
-                raise ValueError("--checkpoint-games non può superare --num-games")
+            if checkpoint_game > stop_after_games:
+                raise ValueError("--checkpoint-games non può superare --stop-after-games del segmento")
+            if resume_state is not None and checkpoint_game <= int(str(resume_state["games_completed"])):
+                raise ValueError("--checkpoint-games deve contenere solo checkpoint successivi al resume")
             if checkpoint_game % int(args.update_every) != 0:
                 raise ValueError("Ogni checkpoint deve essere multiplo di --update-every, per salvare dopo un update.")
             checkpoint_games.add(checkpoint_game)
@@ -1674,6 +1760,31 @@ def main() -> int:
     suit_margin_beta = float(args.suit_margin_beta)
     suit_margin_cap = float(args.suit_margin_cap)
     rng_suit_margin = np.random.default_rng(args.seed ^ 0x0A461A9E) if suit_margin_beta > 0.0 else None
+
+    if resume_state is not None:
+        raw_rng = resume_state.get("rng")
+        if not isinstance(raw_rng, dict):
+            raise ValueError("Checkpoint senza stato RNG")
+        try:
+            rng_action.bit_generator.state = raw_rng["action"]
+            rng_game.bit_generator.state = raw_rng["game"]
+            rng_opponent_select.bit_generator.state = raw_rng["opponent_select"]
+            rng_opponent.setstate(tuple_tree(raw_rng["opponent_python"]))
+            optional_rngs = {
+                "suit_augmentation": rng_suit_augmentation,
+                "suit_consistency": rng_suit_consistency,
+                "suit_margin": rng_suit_margin,
+            }
+            for name, rng in optional_rngs.items():
+                state = raw_rng.get(name)
+                if (rng is None) != (state is None):
+                    raise ValueError(f"Configurazione RNG {name} diversa dal checkpoint")
+                if rng is not None:
+                    if not isinstance(state, dict):
+                        raise ValueError(f"Stato RNG {name} incompatibile")
+                    rng.bit_generator.state = state
+        except (KeyError, TypeError, ValueError) as exc:
+            raise ValueError("Stato RNG del checkpoint incompatibile") from exc
 
     opponent_pool: OpponentPool | None = None
     fast_numba_model_opponent: FastNumbaModelOpponent | None = None
@@ -1852,17 +1963,24 @@ def main() -> int:
         else:
             opponent = build_agent(opponent_name)
 
-    training_schedule = build_training_game_schedule(
-        num_games=int(args.num_games),
-        update_every=int(args.update_every),
+    resume_games = int(str(resume_state["games_completed"])) if resume_state is not None else 0
+    raw_schedule_state = resume_state.get("schedule") if resume_state is not None else None
+    if raw_schedule_state is not None and not isinstance(raw_schedule_state, dict):
+        raise ValueError("Stato schedule del checkpoint incompatibile")
+    schedule_digest = str(raw_schedule_state["sha256"]) if raw_schedule_state is not None else None
+    schedule_consumed = int(raw_schedule_state["consumed_games"]) if raw_schedule_state is not None else 0
+    if schedule_consumed != resume_games:
+        raise ValueError("Cursore schedule e conteggio partite del checkpoint non coincidono")
+    training_schedule = TrainingGameScheduleStream(
         mode=training_schedule_mode,
         seat_fair=bool(args.seat_fair),
         default_opponent_name=opponent.name,
         opponent_mix=opponent_pool.items if opponent_pool is not None else None,
         rng_game=rng_game,
         rng_opponent=rng_opponent_select,
+        consumed_games=schedule_consumed,
+        digest_hex=schedule_digest,
     )
-    training_schedule_digest = training_schedule_sha256(training_schedule)
     effective_seat_fair = bool(args.seat_fair) or training_schedule_mode == "paired"
 
     # Inizializzazione policy/critic.
@@ -1885,7 +2003,33 @@ def main() -> int:
     init_path = Path(args.init.strip()) if args.init.strip() else None
     init_contains_critic = False
     init_critic_shapes: dict[str, list[int]] | None = None
-    if init_path is not None:
+    original_init_artifact: dict[str, str | int] | None = None
+    if resume_state is not None:
+        raw_initialization = resume_state.get("initialization")
+        if not isinstance(raw_initialization, dict):
+            raise ValueError("Checkpoint senza provenienza dell'inizializzazione")
+        init_contains_critic = bool(raw_initialization.get("init_contains_critic", False))
+        raw_shapes = raw_initialization.get("init_critic_shapes")
+        init_critic_shapes = raw_shapes if isinstance(raw_shapes, dict) else None
+        raw_artifact = raw_initialization.get("init_artifact")
+        original_init_artifact = raw_artifact if isinstance(raw_artifact, dict) else None
+        w1 = resume_arrays["w1"].copy()
+        b1 = resume_arrays["b1"].copy()
+        w2 = resume_arrays["w2"].copy()
+        b2 = resume_arrays["b2"].copy()
+        wv = resume_arrays["wv"].copy()
+        bv_values = resume_arrays["bv"].reshape(-1)
+        if bv_values.size != 1:
+            raise ValueError("Checkpoint con bias critic non scalare")
+        bv = np.float32(bv_values[0])
+        hdim = int(w1.shape[1])
+        if int(w1.shape[0]) != target_feature_dim:
+            raise ValueError(
+                f"Feature dim del resume {int(w1.shape[0])}, attesa {target_feature_dim} per {encoder_version}"
+            )
+        if b1.shape != (hdim,) or w2.shape != (hdim, 40) or b2.shape != (40,) or wv.shape != (hdim,):
+            raise ValueError("Shape policy/critic incompatibili nel checkpoint")
+    elif init_path is not None:
         with np.load(init_path, allow_pickle=False) as init_archive:
             init_contains_critic = "wv" in init_archive and "bv" in init_archive
             if init_contains_critic:
@@ -1922,16 +2066,18 @@ def main() -> int:
                     f"init={init_dim} target={target_feature_dim} (encoder={encoder_version}). "
                     "Soluzioni: usa `--encoder-version` coerente, oppure abilita `--upgrade-init-v1-to-v2`."
                 )
+        original_init_artifact = _artifact(init_path)
+        # Critic head: il warm-start storico usa sempre un critic vicino a zero.
+        wv = np.zeros((hdim,), dtype=np.float32)
+        bv = np.float32(0.0)
     else:
         hdim = int(args.hidden_dim)
         w1 = rng_action.normal(loc=0.0, scale=0.02, size=(target_feature_dim, hdim)).astype(np.float32)
         b1 = np.zeros((hdim,), dtype=np.float32)
         w2 = rng_action.normal(loc=0.0, scale=0.02, size=(hdim, 40)).astype(np.float32)
         b2 = np.zeros((40,), dtype=np.float32)
-
-    # Critic head: inizializziamo vicino a zero (safe).
-    wv = np.zeros((hdim,), dtype=np.float32)
-    bv = np.float32(0.0)
+        wv = np.zeros((hdim,), dtype=np.float32)
+        bv = np.float32(0.0)
 
     policy = A2CPolicy(w1=w1, b1=b1, w2=w2, b2=b2, wv=wv, bv=float(bv))
 
@@ -1945,7 +2091,29 @@ def main() -> int:
 
     signal_diagnostics = A2CSignalAccumulator(policy.hidden_dim) if diagnostics_path is not None else None
     update_diagnostics: list[A2CUpdateDiagnostics] = []
-    initial_parameter_groups = _policy_parameter_groups().copied() if diagnostics_path is not None else None
+    diagnostic_initial_parameter_l2: dict[str, float] | None = None
+    if diagnostics_path is not None:
+        if resume_state is None:
+            initial_groups = _policy_parameter_groups()
+            diagnostic_initial_parameter_l2 = {
+                "trunk": array_group_l2(initial_groups.trunk),
+                "actor_head": array_group_l2(initial_groups.actor_head),
+                "critic_head": array_group_l2(initial_groups.critic_head),
+            }
+        else:
+            raw_diagnostics = resume_state.get("diagnostics")
+            if not isinstance(raw_diagnostics, dict):
+                raise ValueError("Checkpoint senza storico diagnostico")
+            raw_initial_l2 = raw_diagnostics.get("initial_parameter_l2")
+            raw_updates = raw_diagnostics.get("updates")
+            if not isinstance(raw_initial_l2, dict) or not isinstance(raw_updates, list):
+                raise ValueError("Storico diagnostico del checkpoint incompatibile")
+            diagnostic_initial_parameter_l2 = {
+                "trunk": float(raw_initial_l2["trunk"]),
+                "actor_head": float(raw_initial_l2["actor_head"]),
+                "critic_head": float(raw_initial_l2["critic_head"]),
+            }
+            update_diagnostics = [A2CUpdateDiagnostics.from_json(row) for row in raw_updates]
 
     # Anchor BC (teacher) opzionale: deve avere stessa feature_dim dell'encoder corrente.
     bc_anchor: LoadedBCModel | None = None
@@ -1960,19 +2128,55 @@ def main() -> int:
             )
         bc_anchor = loaded_anchor
 
-    # Adam state.
-    st_w1 = _adam_init(policy.w1)
-    st_b1 = _adam_init(policy.b1)
-    st_w2 = _adam_init(policy.w2)
-    st_b2 = _adam_init(policy.b2)
-    st_wv = _adam_init(policy.wv)
-    st_bv = _adam_init(np.asarray([policy.bv], dtype=np.float32))
-    t = 0
+    # Adam state: uno warm-start riparte da zero; un resume ripristina ogni momento.
+    if resume_state is None:
+        st_w1 = _adam_init(policy.w1)
+        st_b1 = _adam_init(policy.b1)
+        st_w2 = _adam_init(policy.w2)
+        st_b2 = _adam_init(policy.b2)
+        st_wv = _adam_init(policy.wv)
+        st_bv = _adam_init(np.asarray([policy.bv], dtype=np.float32))
+        t = 0
+    else:
+        st_w1 = AdamState(resume_arrays["resume_st_w1_m"], resume_arrays["resume_st_w1_v"])
+        st_b1 = AdamState(resume_arrays["resume_st_b1_m"], resume_arrays["resume_st_b1_v"])
+        st_w2 = AdamState(resume_arrays["resume_st_w2_m"], resume_arrays["resume_st_w2_v"])
+        st_b2 = AdamState(resume_arrays["resume_st_b2_m"], resume_arrays["resume_st_b2_v"])
+        st_wv = AdamState(resume_arrays["resume_st_wv_m"], resume_arrays["resume_st_wv_v"])
+        st_bv = AdamState(resume_arrays["resume_st_bv_m"], resume_arrays["resume_st_bv_v"])
+        expected_shapes = (
+            (st_w1, policy.w1),
+            (st_b1, policy.b1),
+            (st_w2, policy.w2),
+            (st_b2, policy.b2),
+            (st_wv, policy.wv),
+            (st_bv, np.asarray([policy.bv], dtype=np.float32)),
+        )
+        if any(state.m.shape != param.shape or state.v.shape != param.shape for state, param in expected_shapes):
+            raise ValueError("Shape dello stato Adam incompatibili col checkpoint")
+        t = int(str(resume_state.get("optimizer_updates", -1)))
+        if t != resume_games // int(args.update_every):
+            raise ValueError("Contatore Adam incoerente col numero di partite nel checkpoint")
 
     update_every = int(args.update_every)
-    metrics: list[TrainMetrics] = []
-    suit_consistency_metrics: list[dict[str, int | float]] = []
-    suit_margin_metrics: list[dict[str, int | float]] = []
+    history_mode: HistoryMode = "full" if str(args.metrics_mode) == "full" else "summary"
+    if resume_state is None:
+        metrics = StreamingHistory[dict[str, object]](mode=history_mode)
+        suit_consistency_metrics = StreamingHistory[dict[str, object]](mode=history_mode)
+        suit_margin_metrics = StreamingHistory[dict[str, object]](mode=history_mode)
+    else:
+        raw_histories = resume_state.get("histories")
+        if not isinstance(raw_histories, dict):
+            raise ValueError("Checkpoint senza storici delle metriche")
+        metrics = StreamingHistory[dict[str, object]].from_resume_state(
+            raw_histories["metrics"], expected_mode=history_mode
+        )
+        suit_consistency_metrics = StreamingHistory[dict[str, object]].from_resume_state(
+            raw_histories["suit_consistency"], expected_mode=history_mode
+        )
+        suit_margin_metrics = StreamingHistory[dict[str, object]].from_resume_state(
+            raw_histories["suit_margin"], expected_mode=history_mode
+        )
 
     # Accumulo grad (batch).
     gw1 = np.zeros_like(policy.w1)
@@ -1999,11 +2203,101 @@ def main() -> int:
     suit_margin_teacher_sum = 0.0
     suit_margin_student_sum = 0.0
 
-    num_games = int(args.num_games)
     use_numba_batch_rollout = rollout_engine == "fast" and fast_rollout == "numba"
     use_value_lookahead_numba_rollout = use_numba_batch_rollout and fast_numba_value_lookahead_opponent is not None
     numba_batch: NumbaA2CBatch | None = None
     numba_batch_offset = 0
+    schedule_batch: tuple[ScheduledTrainingGame, ...] = ()
+    schedule_batch_offset = 0
+
+    def _configured_artifact(raw_path: str, *, enabled: bool) -> dict[str, str | int] | None:
+        """Hasha soltanto gli asset che partecipano realmente al run."""
+        value = raw_path.strip()
+        return _artifact(Path(value)) if enabled and value else None
+
+    config_payload: dict[str, object] = {
+        "schema": "briscola.a2c_training_config.v1",
+        "code": {
+            "version": get_code_version(),
+            "rules": get_rules_version(),
+            "git_commit": _git_commit(),
+            "trainer_sha256": _sha256(Path(__file__).resolve()),
+            "python": platform.python_version(),
+            "numpy": np.__version__,
+        },
+        "seed": int(args.seed),
+        "num_games": num_games,
+        "architecture": {
+            "encoder_version": encoder_version,
+            "feature_dim": int(policy.feature_dim),
+            "hidden_dim": int(policy.hidden_dim),
+            "action_dim": 40,
+            "policy_belief": policy_belief is not None,
+        },
+        "rollout": {
+            "engine": rollout_engine,
+            "fast_encoder": fast_encoder,
+            "fast_rollout": fast_rollout,
+        },
+        "schedule": {
+            "mode": training_schedule_mode,
+            "seat_fair_requested": bool(args.seat_fair),
+            "update_every": int(args.update_every),
+        },
+        "opponents": {
+            "single": str(args.opponent) if opponent_pool is None else None,
+            "mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
+            "pimc_determinizations": int(args.opponent_pimc_determinizations),
+            "value_max_unknown_cards": int(args.opponent_value_max_unknown_cards),
+        },
+        "optimizer": {
+            "name": "adam",
+            "lr": float(args.lr),
+            "weight_decay": float(args.weight_decay),
+            "entropy_beta": float(args.entropy_beta),
+            "value_coef": float(args.value_coef),
+            "gamma": float(args.gamma),
+        },
+        "regularization": {
+            "bc_anchor_beta": float(args.bc_anchor_beta),
+            "overkill_mode": str(args.overkill_penalty_mode),
+            "overkill_beta": float(args.overkill_penalty_beta),
+            "overkill_low_lead_points_max": int(args.overkill_low_lead_points_max),
+            "suit_augmentation": suit_augmentation,
+            "suit_consistency_beta": suit_consistency_beta,
+            "suit_margin_beta": suit_margin_beta,
+            "suit_margin_cap": suit_margin_cap,
+        },
+        "output_contract": {
+            "metrics_mode": history_mode,
+            "diagnostics_enabled": diagnostics_path is not None,
+            "diagnostics_every": int(args.diagnostics_every),
+            "inference_overkill_guard": bool(args.inference_overkill_guard),
+        },
+        "assets": {
+            "initial_model": original_init_artifact,
+            "bc_anchor": _configured_artifact(bc_anchor_path, enabled=bc_anchor is not None),
+            "policy_belief": _configured_artifact(policy_belief_path, enabled=policy_belief is not None),
+            "opponent_model": _configured_artifact(
+                str(args.opponent_model),
+                enabled=fast_numba_model_opponent is not None or fast_numba_value_lookahead_opponent is not None,
+            ),
+            "opponent_belief": _configured_artifact(
+                str(args.opponent_belief_model), enabled=fast_numba_opponent_belief is not None
+            ),
+            "opponent_value": _configured_artifact(
+                str(args.opponent_value_model), enabled=use_value_lookahead_numba_rollout
+            ),
+        },
+    }
+    training_config_fingerprint = config_fingerprint(config_payload)
+    if resume_state is not None:
+        expected_fingerprint = str(resume_state.get("config_fingerprint", ""))
+        if training_config_fingerprint != expected_fingerprint:
+            raise ValueError(
+                "Configurazione del resume diversa dal checkpoint: ripetere gli stessi flag, asset e commit del run. "
+                f"attuale={training_config_fingerprint} checkpoint={expected_fingerprint}"
+            )
 
     # Metadati UI (opzionali ma utili per il dropdown dei modelli in frontend).
     def _format_num_games(n: int) -> str:
@@ -2025,22 +2319,12 @@ def main() -> int:
 
     def _metrics_metadata() -> dict[str, object]:
         """Return either full metric history or a compact summary for long runs."""
-        if str(args.metrics_mode) == "full":
-            return {"metrics": [asdict(m) for m in metrics]}
-        if not metrics:
-            return {"metrics_summary": {"mode": "summary", "count": 0}}
-        return {
-            "metrics_summary": {
-                "mode": "summary",
-                "count": len(metrics),
-                "first": asdict(metrics[0]),
-                "last": asdict(metrics[-1]),
-            }
-        }
+        return metrics.metadata(full_key="metrics", summary_key="metrics_summary")
 
     def _build_metadata(*, trained_games: int, is_checkpoint: bool) -> dict[str, object]:
         """Build metadata for a final model or an intermediate training checkpoint."""
-        trained_schedule = training_schedule[: int(trained_games)]
+        if training_schedule.consumed_games != int(trained_games):
+            raise AssertionError(f"Schedule consumata={training_schedule.consumed_games}, modello={int(trained_games)}")
         observation_note = (
             "Osservazione anti-cheat: Fast2PState numerico con feature equivalenti a PlayerObservation."
             if rollout_engine == "fast"
@@ -2073,7 +2357,8 @@ def main() -> int:
                 "fast_numba_determinized" if use_value_lookahead_numba_rollout else None
             ),
             "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
-            "init": args.init.strip() or None,
+            "init": original_init_artifact["path"] if original_init_artifact is not None else None,
+            "resume_from": str(resume_path) if resume_path is not None else None,
             "encoder": f"encode_observation_2p:{encoder_version}",
             "encoder_version": encoder_version,
             "policy_belief_model": policy_belief_path or None,
@@ -2104,20 +2389,23 @@ def main() -> int:
                     ),
                     "opponent_sampling_scope": "pair" if training_schedule_mode == "paired" else "game",
                     "seat_order": [0, 1] if training_schedule_mode == "paired" else None,
-                    "sha256": training_schedule_sha256(trained_schedule),
+                    "sha256": training_schedule.sha256,
+                    "digest_algorithm": "sha256_chain_v2",
                     "game_rng_seed": int(args.seed ^ 0x9E3779B9),
                     "opponent_rng_seed": int(args.seed ^ 0xA5A5A5A5),
                 },
                 "num_games": int(trained_games),
-                "requested_num_games": int(args.num_games),
+                "requested_num_games": num_games,
+                "run_complete": int(trained_games) == num_games,
             },
+            "training_config_fingerprint": training_config_fingerprint,
         }
         if diagnostics_path is not None:
             payload["a2c_diagnostics"] = {
                 "schema": "briscola.a2c_training_diagnostics.v1",
                 "report_path": str(diagnostics_path),
                 "passive": True,
-                "critic_initialization": "reset_zero",
+                "critic_initialization": "resume" if resume_state is not None else "reset_zero",
                 "init_contains_critic": init_contains_critic,
             }
         if suit_augmentation == "paired":
@@ -2140,15 +2428,12 @@ def main() -> int:
                 "loss_normalization": "mean_over_original_on_policy_steps",
                 "rng_seed": int(args.seed ^ 0x0C05157E),
             }
-            if str(args.metrics_mode) == "full":
-                payload["suit_consistency_metrics"] = suit_consistency_metrics
-            else:
-                payload["suit_consistency_metrics_summary"] = {
-                    "mode": "summary",
-                    "count": len(suit_consistency_metrics),
-                    "first": suit_consistency_metrics[0] if suit_consistency_metrics else None,
-                    "last": suit_consistency_metrics[-1] if suit_consistency_metrics else None,
-                }
+            payload.update(
+                suit_consistency_metrics.metadata(
+                    full_key="suit_consistency_metrics",
+                    summary_key="suit_consistency_metrics_summary",
+                )
+            )
         if suit_margin_beta > 0.0:
             payload["suit_margin_consistency"] = {
                 "mode": "teacher_argmax_hinge",
@@ -2162,29 +2447,81 @@ def main() -> int:
                 "loss_normalization": "mean_over_original_on_policy_steps",
                 "rng_seed": int(args.seed ^ 0x0A461A9E),
             }
-            if str(args.metrics_mode) == "full":
-                payload["suit_margin_metrics"] = suit_margin_metrics
-            else:
-                payload["suit_margin_metrics_summary"] = {
-                    "mode": "summary",
-                    "count": len(suit_margin_metrics),
-                    "first": suit_margin_metrics[0] if suit_margin_metrics else None,
-                    "last": suit_margin_metrics[-1] if suit_margin_metrics else None,
-                }
+            payload.update(
+                suit_margin_metrics.metadata(
+                    full_key="suit_margin_metrics",
+                    summary_key="suit_margin_metrics_summary",
+                )
+            )
         if is_checkpoint:
             payload["checkpoint"] = {
                 "games": int(trained_games),
-                "final_num_games": int(args.num_games),
+                "final_num_games": num_games,
             }
         payload.update(_metrics_metadata())
         return payload
 
+    def _build_resume_state(*, trained_games: int) -> dict[str, object]:
+        """Cattura lo stato post-update sufficiente per una continuazione bit-identica."""
+        if trained_games % update_every != 0:
+            raise ValueError("Un resume A2C può essere salvato soltanto dopo un update completo")
+        if training_schedule.consumed_games != trained_games:
+            raise AssertionError("Cursore schedule incoerente durante il checkpoint")
+        diagnostics_state = None
+        if diagnostics_path is not None:
+            assert diagnostic_initial_parameter_l2 is not None
+            diagnostics_state = {
+                "initial_parameter_l2": diagnostic_initial_parameter_l2,
+                "updates": [row.to_json() for row in update_diagnostics],
+            }
+        return {
+            "schema": A2C_RESUME_SCHEMA,
+            "config_fingerprint": training_config_fingerprint,
+            "config": config_payload,
+            "games_completed": int(trained_games),
+            "optimizer_updates": int(t),
+            "schedule": {
+                "consumed_games": training_schedule.consumed_games,
+                "sha256": training_schedule.sha256,
+                "digest_algorithm": "sha256_chain_v2",
+            },
+            "rng": {
+                "action": json_compatible(rng_action.bit_generator.state),
+                "game": json_compatible(rng_game.bit_generator.state),
+                "opponent_select": json_compatible(rng_opponent_select.bit_generator.state),
+                "opponent_python": json_compatible(rng_opponent.getstate()),
+                "suit_augmentation": (
+                    json_compatible(rng_suit_augmentation.bit_generator.state)
+                    if rng_suit_augmentation is not None
+                    else None
+                ),
+                "suit_consistency": (
+                    json_compatible(rng_suit_consistency.bit_generator.state)
+                    if rng_suit_consistency is not None
+                    else None
+                ),
+                "suit_margin": (
+                    json_compatible(rng_suit_margin.bit_generator.state) if rng_suit_margin is not None else None
+                ),
+            },
+            "histories": {
+                "metrics": metrics.resume_state(),
+                "suit_consistency": suit_consistency_metrics.resume_state(),
+                "suit_margin": suit_margin_metrics.resume_state(),
+            },
+            "diagnostics": diagnostics_state,
+            "initialization": {
+                "init_contains_critic": init_contains_critic,
+                "init_critic_shapes": init_critic_shapes,
+                "init_artifact": original_init_artifact,
+            },
+        }
+
     def _save_model(path: Path, *, trained_games: int, is_checkpoint: bool) -> None:
-        """Save actor/critic weights plus metadata to `.npz`."""
-        path.parent.mkdir(parents=True, exist_ok=True)
+        """Salva modello e, quando utile, lo stato di resume con pubblicazione atomica."""
         payload = _build_metadata(trained_games=trained_games, is_checkpoint=is_checkpoint)
         # Nota compatibilità: `w1/b1/w2/b2` (actor) rende il file caricabile da `bc_model`.
-        extra_arrays = {}
+        extra_arrays: dict[str, object] = {}
         if policy_belief is not None:
             # Artefatto SELF-CONTAINED: la belief congelata viaggia col modello, cosi'
             # bc_model puo' ricostruire l'input 409 a inference senza file esterni.
@@ -2194,7 +2531,25 @@ def main() -> int:
                 "belief_w2": policy_belief.w2,
                 "belief_b2": policy_belief.b2,
             }
-        np.savez(
+        if is_checkpoint or trained_games < num_games:
+            extra_arrays.update(
+                {
+                    "resume_st_w1_m": st_w1.m,
+                    "resume_st_w1_v": st_w1.v,
+                    "resume_st_b1_m": st_b1.m,
+                    "resume_st_b1_v": st_b1.v,
+                    "resume_st_w2_m": st_w2.m,
+                    "resume_st_w2_v": st_w2.v,
+                    "resume_st_b2_m": st_b2.m,
+                    "resume_st_b2_v": st_b2.v,
+                    "resume_st_wv_m": st_wv.m,
+                    "resume_st_wv_v": st_wv.v,
+                    "resume_st_bv_m": st_bv.m,
+                    "resume_st_bv_v": st_bv.v,
+                    "resume_state_json": canonical_json(_build_resume_state(trained_games=trained_games)),
+                }
+            )
+        atomic_savez(
             path,
             w1=policy.w1,
             b1=policy.b1,
@@ -2212,7 +2567,7 @@ def main() -> int:
         """Salva la telemetria passiva dopo che il modello finale esiste."""
         if diagnostics_path is None:
             return
-        assert initial_parameter_groups is not None
+        assert diagnostic_initial_parameter_l2 is not None
         report = {
             "schema": "briscola.a2c_training_diagnostics.v1",
             "method": {
@@ -2222,10 +2577,15 @@ def main() -> int:
                 "trunk_gradient": "combined actor and critic contribution in the shared trunk",
                 "update_scope": "actual parameter delta produced by Adam",
                 "anti_cheat": "diagnostics aggregate tensors derived from legal observations; no hidden cards stored",
+                "sampling": (
+                    "first, every N updates, checkpoints and last update of each resumed segment; "
+                    "unsampled updates are not retained"
+                ),
             },
             "config": {
                 "seed": int(args.seed),
-                "num_games": int(args.num_games),
+                "num_games": num_games,
+                "games_completed": stop_after_games,
                 "update_every": int(args.update_every),
                 "rollout_engine": rollout_engine,
                 "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
@@ -2233,7 +2593,8 @@ def main() -> int:
                 "feature_dim": int(policy.feature_dim),
                 "hidden_dim": int(policy.hidden_dim),
                 "training_schedule": training_schedule_mode,
-                "training_schedule_sha256": training_schedule_digest,
+                "training_schedule_sha256": training_schedule.sha256,
+                "diagnostics_every": int(args.diagnostics_every),
                 "opponent": str(args.opponent) if not opponent_mix_raw else None,
                 "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
                 "lr": float(args.lr),
@@ -2246,22 +2607,19 @@ def main() -> int:
                 "overkill_penalty_beta": float(args.overkill_penalty_beta),
             },
             "initialization": {
-                "critic_mode": "reset_zero",
+                "critic_mode": "reset_zero_then_resumed" if resume_state is not None else "reset_zero",
                 "init_contains_critic": init_contains_critic,
                 "init_critic_shapes": init_critic_shapes,
                 "init_critic_used": False,
                 "note_it": (
-                    "Il trainer corrente reinizializza sempre il critic; "
-                    "la diagnostica non cambia questo comportamento."
+                    "Il warm-start iniziale reinizializza il critic; i segmenti successivi "
+                    "ripristinano esattamente critic e optimizer dal checkpoint."
                 ),
-                "parameter_l2": {
-                    "trunk": array_group_l2(initial_parameter_groups.trunk),
-                    "actor_head": array_group_l2(initial_parameter_groups.actor_head),
-                    "critic_head": array_group_l2(initial_parameter_groups.critic_head),
-                },
+                "parameter_l2": diagnostic_initial_parameter_l2,
             },
             "artifacts": {
-                "init": _artifact(init_path) if init_path is not None else None,
+                "init": original_init_artifact,
+                "resume_from": _artifact(resume_path) if resume_path is not None else None,
                 "model_out": _artifact(out_path),
             },
             "updates": [row.to_json() for row in update_diagnostics],
@@ -2285,22 +2643,30 @@ def main() -> int:
         suffix = _format_checkpoint_suffix(trained_games)
         return checkpoint_dir / f"{checkpoint_prefix}_{suffix}.npz"
 
-    for game_idx in range(1, num_games + 1):
-        scheduled_game = training_schedule[game_idx - 1]
+    for game_idx in range(resume_games + 1, stop_after_games + 1):
+        if schedule_batch_offset >= len(schedule_batch):
+            games_until_update = update_every - ((game_idx - 1) % update_every)
+            batch_size = min(games_until_update, stop_after_games - game_idx + 1)
+            schedule_batch = training_schedule.take(batch_size)
+            schedule_batch_offset = 0
+        scheduled_game = schedule_batch[schedule_batch_offset]
+        schedule_batch_offset += 1
+        if scheduled_game.ordinal != game_idx:
+            raise AssertionError(f"Ordinal schedule {scheduled_game.ordinal}, atteso {game_idx}")
         policy_seat = scheduled_game.policy_seat
         game_seed = scheduled_game.game_seed
         current_opponent = (
             opponent_pool.agents_by_name[scheduled_game.opponent_name] if opponent_pool is not None else opponent
         )
         numba_traj_for_backprop = None
+        traj: list[StepRecord]
 
         if rollout_engine == "fast":
             if fast_rollout == "numba":
                 if use_numba_batch_rollout:
                     if numba_batch is None or numba_batch_offset >= int(numba_batch.step_counts.shape[0]):
-                        games_until_update = update_every - ((game_idx - 1) % update_every)
-                        batch_size = min(games_until_update, num_games - game_idx + 1)
-                        batch_schedule = training_schedule[game_idx - 1 : game_idx - 1 + batch_size]
+                        batch_schedule = schedule_batch
+                        batch_size = len(batch_schedule)
                         game_seeds = np.asarray([game.game_seed for game in batch_schedule], dtype=np.int64)
                         policy_seats = np.asarray([game.policy_seat for game in batch_schedule], dtype=np.int64)
                         opponent_codes = None
@@ -2882,7 +3248,14 @@ def main() -> int:
             diagnostic_signal_snapshot = None
             diagnostic_gradient_groups = None
             diagnostic_parameters_before = None
-            if signal_diagnostics is not None:
+            should_sample_diagnostics = signal_diagnostics is not None and (
+                t == 1
+                or t % int(args.diagnostics_every) == 0
+                or game_idx in checkpoint_games
+                or game_idx == stop_after_games
+            )
+            if should_sample_diagnostics:
+                assert signal_diagnostics is not None
                 diagnostic_signal_snapshot = signal_diagnostics.snapshot()
                 diagnostic_gradient_groups = A2CArrayGroups(
                     trunk=(gw1, gb1),
@@ -2902,7 +3275,8 @@ def main() -> int:
             _adam_update(bv_arr, np.asarray([gbv], dtype=np.float32), state=st_bv, lr=float(args.lr), t=t)
             policy.bv = float(bv_arr[0])
 
-            if signal_diagnostics is not None:
+            if should_sample_diagnostics:
+                assert signal_diagnostics is not None
                 assert diagnostic_signal_snapshot is not None
                 assert diagnostic_gradient_groups is not None
                 assert diagnostic_parameters_before is not None
@@ -2916,6 +3290,7 @@ def main() -> int:
                         parameters_after=_policy_parameter_groups(),
                     )
                 )
+            if signal_diagnostics is not None:
                 signal_diagnostics.reset()
 
             gw1.fill(0.0)
@@ -2957,7 +3332,7 @@ def main() -> int:
                 value_loss=vloss,
                 avg_anchor_ce=avg_anchor_ce,
             )
-            metrics.append(row)
+            metrics.append(asdict(row))
             if suit_consistency_beta > 0.0:
                 suit_consistency_metrics.append(
                     {
@@ -2993,9 +3368,6 @@ def main() -> int:
                     f"{anchor_hint}{consistency_hint}{margin_hint}"
                 )
 
-            if game_idx in checkpoint_games:
-                _save_model(_checkpoint_path(game_idx), trained_games=game_idx, is_checkpoint=True)
-
             returns_buf.clear()
             wins = 0
             draws = 0
@@ -3012,7 +3384,10 @@ def main() -> int:
             suit_margin_teacher_sum = 0.0
             suit_margin_student_sum = 0.0
 
-    _save_model(out_path, trained_games=num_games, is_checkpoint=False)
+            if game_idx in checkpoint_games:
+                _save_model(_checkpoint_path(game_idx), trained_games=game_idx, is_checkpoint=True)
+
+    _save_model(out_path, trained_games=stop_after_games, is_checkpoint=False)
     _write_diagnostics_report()
     return 0
 

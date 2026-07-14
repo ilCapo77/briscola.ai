@@ -468,6 +468,15 @@ bit-per-bit dei pesi con sonda accesa/spenta è coperta dai test. Il protocollo 
 ablation successiva; soglie e limiti sono in
 `docs/plans/a2c-health-diagnostic-v0-2026-07-14.md`.
 
+I run A2C multi-milione possono dichiarare l'orizzonte totale con `--num-games` e fermare
+il processo a un confine intermedio con `--stop-after-games`. I checkpoint allineati agli
+update incorporano policy, critic, momenti Adam, RNG, cursore e digest della schedule e
+storico delle metriche; `--resume checkpoint.npz` continua quindi lo stesso training,
+non un nuovo warm-start. Il resume rifiuta cambi di flag, asset o codice. Per mantenere
+la memoria limitata usare `--metrics-mode summary` e campionare la telemetria con
+`--diagnostics-every N`. Schedule, metriche e test bit-identico sono descritti nel
+protocollo [`a2c-super-training-50m-2026-07-14.md`](docs/plans/a2c-super-training-50m-2026-07-14.md).
+
 Gli errori residui di una policy si possono cercare con
 `scripts/probe_policy_regret.py`: la sonda prova tutte le carte su determinizzazioni
 compatibili, sceglie l'alternativa su meta' campioni e la giudica sull'altra meta', usa

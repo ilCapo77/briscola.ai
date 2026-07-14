@@ -80,3 +80,16 @@ confronto. I protocolli completi sono:
 
 La release `0.37.0` conserva v14 come campione. Non chiude il progetto: chiude la pretesa
 che basti continuare a girare le stesse manopole per ottenere automaticamente v15.
+
+## Addendum: un ultimo test della scala
+
+Dopo la release, la disponibilita' di calcolo a costo monetario nullo ha cambiato il
+rapporto costo/informazione di un esperimento, non l'evidenza strategica. E' stato quindi
+pianificato uno scouting A2C seriale da 50 milioni di partite con checkpoint e gate
+preregistrati. Un singolo seed non potra' essere promosso e la distillazione restera'
+condizionata a un vantaggio prima misurato.
+
+Il trainer e' stato quindi reso adatto a un job di circa due giorni: schedule e metriche
+a memoria costante, telemetria campionata, checkpoint atomico e resume bit-identico. Il
+primo blocco da 10 milioni resta una prova controllata, non una promozione anticipata.
+Protocollo: [`a2c-super-training-50m-2026-07-14.md`](../plans/a2c-super-training-50m-2026-07-14.md).
