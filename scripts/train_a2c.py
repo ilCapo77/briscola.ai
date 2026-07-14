@@ -88,6 +88,11 @@ from briscola_ai.ai.training.a2c_diagnostics import (
     build_update_diagnostics,
     summarize_update_diagnostics,
 )
+from briscola_ai.ai.training.game_schedule import (
+    TrainingScheduleMode,
+    build_training_game_schedule,
+    training_schedule_sha256,
+)
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
@@ -1562,6 +1567,15 @@ def main() -> int:
             "Vuoto disabilita la sonda; non modifica il training."
         ),
     )
+    parser.add_argument(
+        "--training-schedule",
+        choices=["serial", "paired"],
+        default="serial",
+        help=(
+            "Schedule degli ambienti. `serial` mantiene un seed/opponent per partita; "
+            "`paired` ripete seed e opponent su seat 0/1 dentro lo stesso update."
+        ),
+    )
     parser.add_argument("--seat-fair", action="store_true", help="Alterna la seat della policy (riduce bias player0).")
     args = parser.parse_args()
 
@@ -1573,6 +1587,17 @@ def main() -> int:
         raise ValueError("--update-every deve essere > 0")
     if args.log_every <= 0:
         raise ValueError("--log-every deve essere > 0")
+    training_schedule_mode: TrainingScheduleMode = str(args.training_schedule)
+    if training_schedule_mode == "paired":
+        if int(args.num_games) % 2 != 0:
+            raise ValueError("--training-schedule paired richiede --num-games pari")
+        if int(args.update_every) % 2 != 0:
+            raise ValueError("--training-schedule paired richiede --update-every pari")
+        if int(args.num_games) % int(args.update_every) != 0:
+            raise ValueError(
+                "--training-schedule paired richiede --num-games multiplo di --update-every, "
+                "per evitare update parziali"
+            )
     if float(args.gamma) <= 0.0 or float(args.gamma) > 1.0:
         raise ValueError("--gamma deve essere in (0,1]")
     if float(args.overkill_penalty_beta) < 0.0:
@@ -1827,6 +1852,19 @@ def main() -> int:
         else:
             opponent = build_agent(opponent_name)
 
+    training_schedule = build_training_game_schedule(
+        num_games=int(args.num_games),
+        update_every=int(args.update_every),
+        mode=training_schedule_mode,
+        seat_fair=bool(args.seat_fair),
+        default_opponent_name=opponent.name,
+        opponent_mix=opponent_pool.items if opponent_pool is not None else None,
+        rng_game=rng_game,
+        rng_opponent=rng_opponent_select,
+    )
+    training_schedule_digest = training_schedule_sha256(training_schedule)
+    effective_seat_fair = bool(args.seat_fair) or training_schedule_mode == "paired"
+
     # Inizializzazione policy/critic.
     policy_belief = None
     policy_belief_path = str(args.policy_belief_model).strip()
@@ -2002,6 +2040,7 @@ def main() -> int:
 
     def _build_metadata(*, trained_games: int, is_checkpoint: bool) -> dict[str, object]:
         """Build metadata for a final model or an intermediate training checkpoint."""
+        trained_schedule = training_schedule[: int(trained_games)]
         observation_note = (
             "Osservazione anti-cheat: Fast2PState numerico con feature equivalenti a PlayerObservation."
             if rollout_engine == "fast"
@@ -2055,7 +2094,20 @@ def main() -> int:
                 "value_coef": float(args.value_coef),
                 "gamma": float(args.gamma),
                 "update_every": int(args.update_every),
-                "seat_fair": bool(args.seat_fair),
+                "seat_fair": effective_seat_fair,
+                "seat_fair_requested": bool(args.seat_fair),
+                "training_schedule": {
+                    "mode": training_schedule_mode,
+                    "pair_size": 2 if training_schedule_mode == "paired" else 1,
+                    "scheduled_environment_draws": (
+                        int(trained_games) // 2 if training_schedule_mode == "paired" else int(trained_games)
+                    ),
+                    "opponent_sampling_scope": "pair" if training_schedule_mode == "paired" else "game",
+                    "seat_order": [0, 1] if training_schedule_mode == "paired" else None,
+                    "sha256": training_schedule_sha256(trained_schedule),
+                    "game_rng_seed": int(args.seed ^ 0x9E3779B9),
+                    "opponent_rng_seed": int(args.seed ^ 0xA5A5A5A5),
+                },
                 "num_games": int(trained_games),
                 "requested_num_games": int(args.num_games),
             },
@@ -2180,6 +2232,8 @@ def main() -> int:
                 "encoder_version": encoder_version,
                 "feature_dim": int(policy.feature_dim),
                 "hidden_dim": int(policy.hidden_dim),
+                "training_schedule": training_schedule_mode,
+                "training_schedule_sha256": training_schedule_digest,
                 "opponent": str(args.opponent) if not opponent_mix_raw else None,
                 "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
                 "lr": float(args.lr),
@@ -2232,12 +2286,11 @@ def main() -> int:
         return checkpoint_dir / f"{checkpoint_prefix}_{suffix}.npz"
 
     for game_idx in range(1, num_games + 1):
-        policy_seat = (game_idx % 2) if args.seat_fair else 0
-        game_seed = 0 if use_numba_batch_rollout else int(rng_game.integers(0, 2**32))
+        scheduled_game = training_schedule[game_idx - 1]
+        policy_seat = scheduled_game.policy_seat
+        game_seed = scheduled_game.game_seed
         current_opponent = (
-            opponent
-            if use_numba_batch_rollout
-            else (opponent_pool.sample(rng=rng_opponent_select) if opponent_pool is not None else opponent)
+            opponent_pool.agents_by_name[scheduled_game.opponent_name] if opponent_pool is not None else opponent
         )
         numba_traj_for_backprop = None
 
@@ -2247,19 +2300,14 @@ def main() -> int:
                     if numba_batch is None or numba_batch_offset >= int(numba_batch.step_counts.shape[0]):
                         games_until_update = update_every - ((game_idx - 1) % update_every)
                         batch_size = min(games_until_update, num_games - game_idx + 1)
-                        game_seeds = rng_game.integers(0, 2**32, size=batch_size, dtype=np.int64)
-                        policy_seats = np.asarray(
-                            [((game_idx + offset) % 2) if args.seat_fair else 0 for offset in range(batch_size)],
-                            dtype=np.int64,
-                        )
+                        batch_schedule = training_schedule[game_idx - 1 : game_idx - 1 + batch_size]
+                        game_seeds = np.asarray([game.game_seed for game in batch_schedule], dtype=np.int64)
+                        policy_seats = np.asarray([game.policy_seat for game in batch_schedule], dtype=np.int64)
                         opponent_codes = None
                         opponent_model_enabled_flags = None
                         opponent_modes = None
                         if opponent_pool is not None:
-                            sampled_names = [
-                                sample_opponent_name(opponent_pool.items, rng=rng_opponent_select)
-                                for _ in range(batch_size)
-                            ]
+                            sampled_names = [game.opponent_name for game in batch_schedule]
                             if use_value_lookahead_numba_rollout:
                                 opponent_modes = np.asarray(
                                     [

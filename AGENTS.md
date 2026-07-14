@@ -96,6 +96,8 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
   leave-one-opponent-out, stop automatico prima del candidato se le metriche offline falliscono)
 - Diagnostica salute A2C: `python scripts/run_a2c_health_probe.py --resume` (tre seed brevi, telemetria passiva e
   instradamento preregistrato verso una sola ablation; non promuove modelli)
+- Confronto schedule A2C: `python scripts/run_a2c_paired_schedule_probe.py --resume` (seriale vs paired su tre seed,
+  sia a pari partite sia a pari mazzi; job lungo da affidare al maintainer)
 - Diagnostica simmetria semi: `scripts/probe_suit_symmetry.py` (24 rinomine complete di `PlayerObservation`,
   mosse forzate escluse, report JSON riproducibile)
 - Benchmark throughput: `python scripts/benchmark_perf.py`

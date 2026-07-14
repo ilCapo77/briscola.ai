@@ -309,7 +309,7 @@ numerico nel trainer.
 Il flag attuale `train_a2c.py --seat-fair` alterna il posto della policy, ma genera un
 mazzo diverso per ogni partita. Non è quindi paired come l'evaluation.
 
-### Da implementare — prossima decisione attiva
+### Implementazione completata — run multi-seed in attesa
 
 Una schedule pura e riproducibile `(game_seed, policy_seat, opponent)` in cui ogni coppia:
 
@@ -335,6 +335,13 @@ ridurre bias e rumore, ma non è garantito che migliori il modello.
 
 Test richiesti: seed/opponent uguali e seat `{0,1}` in ogni coppia, schedule deterministica,
 nessuna coppia spezzata da un update e rifiuto esplicito di configurazioni dispari.
+
+Questi vincoli sono ora implementati da `--training-schedule paired` e coperti nei path
+dominio, fast Python e Numba. Flag omesso e `serial` esplicito producono pesi bit-per-bit
+uguali. Il runner
+riprendibile confronta tre seed a pari partite e a pari mazzi; soglie, comando lungo e
+limiti sono congelati in `a2c-paired-schedule-v0-2026-07-14.md`. Nessun risultato è
+ancora disponibile, quindi non va anticipato un verdetto.
 
 ## 8. Pista 6: belief v1 multi-stile
 
