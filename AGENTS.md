@@ -94,6 +94,8 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
 - Audit appaiato su observation live: `scripts/audit_live_policy_replay.py`
 - Gate belief multi-stile riprendibile: `python scripts/run_belief_v1_gate.py --resume` (dataset da roster, fold
   leave-one-opponent-out, stop automatico prima del candidato se le metriche offline falliscono)
+- Diagnostica salute A2C: `python scripts/run_a2c_health_probe.py --resume` (tre seed brevi, telemetria passiva e
+  instradamento preregistrato verso una sola ablation; non promuove modelli)
 - Diagnostica simmetria semi: `scripts/probe_suit_symmetry.py` (24 rinomine complete di `PlayerObservation`,
   mosse forzate escluse, report JSON riproducibile)
 - Benchmark throughput: `python scripts/benchmark_perf.py`

@@ -39,8 +39,11 @@ Come per REINFORCE, conviene partire da un BC MLP teacher-only:
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
+import platform
 import random
+import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
@@ -77,6 +80,14 @@ from briscola_ai.ai.numba.value_lookahead import (
     collect_a2c_batch_numba_value_lookahead_2p,
     collect_a2c_trajectory_numba_value_lookahead_2p,
 )
+from briscola_ai.ai.training.a2c_diagnostics import (
+    A2CArrayGroups,
+    A2CSignalAccumulator,
+    A2CUpdateDiagnostics,
+    array_group_l2,
+    build_update_diagnostics,
+    summarize_update_diagnostics,
+)
 from briscola_ai.ai.training.opponent_mix import OpponentMixItem, parse_opponent_mix, sample_opponent_name
 from briscola_ai.ai.training.policy_regularization import cross_entropy_from_probs, grad_ce_wrt_logits_from_probs
 from briscola_ai.ai.training.reward_shaping import trump_overkill_penalty, trump_overkill_penalty_gap
@@ -91,6 +102,29 @@ from briscola_ai.ai.training.suit_augmentation import (
 from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import make_player_observation
 from briscola_ai.domain.state import GameState, new_game_state
+from briscola_ai.versioning import get_code_version, get_rules_version
+
+
+def _sha256(path: Path) -> str:
+    """SHA-256 streaming per rendere auditabili init, modello e report diagnostico."""
+    digest = hashlib.sha256()
+    with path.open("rb") as handle:
+        for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _artifact(path: Path) -> dict[str, str | int]:
+    """Descrive un artefatto locale senza incorporarne i pesi."""
+    return {"path": str(path), "sha256": _sha256(path), "size_bytes": path.stat().st_size}
+
+
+def _git_commit() -> str | None:
+    """Commit corrente best-effort per la riproducibilita' del report."""
+    try:
+        return subprocess.check_output(["git", "rev-parse", "HEAD"], text=True).strip()
+    except OSError, subprocess.SubprocessError:
+        return None
 
 
 def _masked_logits_1d(logits: np.ndarray, mask: np.ndarray) -> np.ndarray:
@@ -808,6 +842,7 @@ def _accumulate_numba_trajectory_grads(
     gw2: np.ndarray,
     gb2: np.ndarray,
     gwv: np.ndarray,
+    signal_diagnostics: A2CSignalAccumulator | None = None,
 ) -> GradientStats:
     """
     Accumula i gradienti di una traiettoria Numba usando batch matrix multiply.
@@ -823,6 +858,13 @@ def _accumulate_numba_trajectory_grads(
     steps = int(returns_to_go.shape[0])
     if steps == 0:
         return GradientStats(steps=0, value_loss_sum=0.0, anchor_ce_sum=0.0, anchor_ce_count=0, gbv=0.0)
+
+    if signal_diagnostics is not None:
+        signal_diagnostics.observe(
+            returns_to_go=returns_to_go,
+            value_preds=value_preds,
+            hidden=hs,
+        )
 
     adv = returns_to_go.astype(np.float32, copy=False) - value_preds.astype(np.float32, copy=False)
     dlogits = probs.astype(np.float32, copy=True)
@@ -1139,6 +1181,7 @@ def _accumulate_numba_batch_grads(
     suit_margin_beta: float = 0.0,
     suit_margin_cap: float = 2.0,
     encoder_version: EncoderVersion | None = None,
+    signal_diagnostics: A2CSignalAccumulator | None = None,
 ) -> GradientStats:
     """
     Appiattisce un batch Numba e accumula i gradienti in una sola chiamata batch.
@@ -1199,6 +1242,7 @@ def _accumulate_numba_batch_grads(
         gw2=gw2,
         gb2=gb2,
         gwv=gwv,
+        signal_diagnostics=signal_diagnostics,
     )
     if suit_augmentation_rng is None and suit_consistency_rng is None and suit_margin_rng is None:
         return stats
@@ -1510,6 +1554,14 @@ def main() -> int:
             "`summary` salva solo conteggio/prima/ultima riga, utile per run multi-milione."
         ),
     )
+    parser.add_argument(
+        "--diagnostics-json",
+        default="",
+        help=(
+            "Report JSON passivo per update: advantage, critic, attivazioni, gradienti e passo Adam. "
+            "Vuoto disabilita la sonda; non modifica il training."
+        ),
+    )
     parser.add_argument("--seat-fair", action="store_true", help="Alterna la seat della policy (riduce bias player0).")
     args = parser.parse_args()
 
@@ -1562,6 +1614,9 @@ def main() -> int:
         )
 
     out_path = Path(args.out)
+    diagnostics_path = Path(str(args.diagnostics_json).strip()) if str(args.diagnostics_json).strip() else None
+    if diagnostics_path is not None and diagnostics_path.resolve() == out_path.resolve():
+        raise ValueError("--diagnostics-json deve essere diverso da --out")
     raw_checkpoint_games = str(args.checkpoint_games).strip()
     checkpoint_games: set[int] = set()
     if raw_checkpoint_games:
@@ -1789,8 +1844,18 @@ def main() -> int:
     if policy_belief is not None:
         # Iterazione 1b: l'input della policy e' encoder v4 + 40 probabilita' belief.
         target_feature_dim += 40
-    if args.init.strip():
-        loaded = load_bc_model_npz(Path(args.init))
+    init_path = Path(args.init.strip()) if args.init.strip() else None
+    init_contains_critic = False
+    init_critic_shapes: dict[str, list[int]] | None = None
+    if init_path is not None:
+        with np.load(init_path, allow_pickle=False) as init_archive:
+            init_contains_critic = "wv" in init_archive and "bv" in init_archive
+            if init_contains_critic:
+                init_critic_shapes = {
+                    "wv": list(np.asarray(init_archive["wv"]).shape),
+                    "bv": list(np.asarray(init_archive["bv"]).shape),
+                }
+        loaded = load_bc_model_npz(init_path)
         if not isinstance(loaded, MLPBCModel):
             raise ValueError("--init deve puntare a un modello MLP (w1/b1/w2/b2).")
         w1 = loaded.w1.copy()
@@ -1831,6 +1896,18 @@ def main() -> int:
     bv = np.float32(0.0)
 
     policy = A2CPolicy(w1=w1, b1=b1, w2=w2, b2=b2, wv=wv, bv=float(bv))
+
+    def _policy_parameter_groups() -> A2CArrayGroups:
+        """Vista corrente dei parametri, raggruppata per responsabilita' A2C."""
+        return A2CArrayGroups(
+            trunk=(policy.w1, policy.b1),
+            actor_head=(policy.w2, policy.b2),
+            critic_head=(policy.wv, np.asarray([policy.bv], dtype=np.float32)),
+        )
+
+    signal_diagnostics = A2CSignalAccumulator(policy.hidden_dim) if diagnostics_path is not None else None
+    update_diagnostics: list[A2CUpdateDiagnostics] = []
+    initial_parameter_groups = _policy_parameter_groups().copied() if diagnostics_path is not None else None
 
     # Anchor BC (teacher) opzionale: deve avere stessa feature_dim dell'encoder corrente.
     bc_anchor: LoadedBCModel | None = None
@@ -1983,6 +2060,14 @@ def main() -> int:
                 "requested_num_games": int(args.num_games),
             },
         }
+        if diagnostics_path is not None:
+            payload["a2c_diagnostics"] = {
+                "schema": "briscola.a2c_training_diagnostics.v1",
+                "report_path": str(diagnostics_path),
+                "passive": True,
+                "critic_initialization": "reset_zero",
+                "init_contains_critic": init_contains_critic,
+            }
         if suit_augmentation == "paired":
             payload["suit_augmentation"] = {
                 "mode": "paired",
@@ -2070,6 +2155,77 @@ def main() -> int:
         )
         kind = "checkpoint" if is_checkpoint else "model"
         print(f"Saved {kind}: {path}")
+
+    def _write_diagnostics_report() -> None:
+        """Salva la telemetria passiva dopo che il modello finale esiste."""
+        if diagnostics_path is None:
+            return
+        assert initial_parameter_groups is not None
+        report = {
+            "schema": "briscola.a2c_training_diagnostics.v1",
+            "method": {
+                "passive": True,
+                "signal_scope": "original on-policy steps; suit copies excluded",
+                "gradient_scope": "mean per policy step plus configured weight decay, immediately before Adam",
+                "trunk_gradient": "combined actor and critic contribution in the shared trunk",
+                "update_scope": "actual parameter delta produced by Adam",
+                "anti_cheat": "diagnostics aggregate tensors derived from legal observations; no hidden cards stored",
+            },
+            "config": {
+                "seed": int(args.seed),
+                "num_games": int(args.num_games),
+                "update_every": int(args.update_every),
+                "rollout_engine": rollout_engine,
+                "fast_rollout": fast_rollout if rollout_engine == "fast" else None,
+                "encoder_version": encoder_version,
+                "feature_dim": int(policy.feature_dim),
+                "hidden_dim": int(policy.hidden_dim),
+                "opponent": str(args.opponent) if not opponent_mix_raw else None,
+                "opponent_mix": opponent_pool.to_metadata() if opponent_pool is not None else None,
+                "lr": float(args.lr),
+                "value_coef": float(args.value_coef),
+                "entropy_beta": float(args.entropy_beta),
+                "gamma": float(args.gamma),
+                "weight_decay": float(args.weight_decay),
+                "bc_anchor_beta": float(args.bc_anchor_beta),
+                "overkill_penalty_mode": str(args.overkill_penalty_mode),
+                "overkill_penalty_beta": float(args.overkill_penalty_beta),
+            },
+            "initialization": {
+                "critic_mode": "reset_zero",
+                "init_contains_critic": init_contains_critic,
+                "init_critic_shapes": init_critic_shapes,
+                "init_critic_used": False,
+                "note_it": (
+                    "Il trainer corrente reinizializza sempre il critic; "
+                    "la diagnostica non cambia questo comportamento."
+                ),
+                "parameter_l2": {
+                    "trunk": array_group_l2(initial_parameter_groups.trunk),
+                    "actor_head": array_group_l2(initial_parameter_groups.actor_head),
+                    "critic_head": array_group_l2(initial_parameter_groups.critic_head),
+                },
+            },
+            "artifacts": {
+                "init": _artifact(init_path) if init_path is not None else None,
+                "model_out": _artifact(out_path),
+            },
+            "updates": [row.to_json() for row in update_diagnostics],
+            "summary": summarize_update_diagnostics(update_diagnostics),
+            "versions": {
+                "code": get_code_version(),
+                "rules": get_rules_version(),
+                "python": platform.python_version(),
+                "numpy": np.__version__,
+                "git_commit": _git_commit(),
+            },
+        }
+        diagnostics_path.parent.mkdir(parents=True, exist_ok=True)
+        diagnostics_path.write_text(
+            json.dumps(report, ensure_ascii=False, indent=2, sort_keys=True, allow_nan=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"Saved diagnostics: {diagnostics_path}")
 
     def _checkpoint_path(trained_games: int) -> Path:
         suffix = _format_checkpoint_suffix(trained_games)
@@ -2279,6 +2435,7 @@ def main() -> int:
                                 )
                                 else None
                             ),
+                            signal_diagnostics=signal_diagnostics,
                         )
                         gbv += batch_grad_stats.gbv
                         grad_step_count += batch_grad_stats.steps
@@ -2465,6 +2622,7 @@ def main() -> int:
                 gw2=gw2,
                 gb2=gb2,
                 gwv=gwv,
+                signal_diagnostics=signal_diagnostics,
             )
             if rng_suit_augmentation is not None:
                 paired_stats = _accumulate_paired_suit_trajectory_grads(
@@ -2532,6 +2690,13 @@ def main() -> int:
         else:
             rewards = [step_rec.reward for step_rec in traj]
             returns_to_go = _compute_returns(rewards, gamma=float(args.gamma))
+
+            if signal_diagnostics is not None and traj:
+                signal_diagnostics.observe(
+                    returns_to_go=np.asarray(returns_to_go, dtype=np.float32),
+                    value_preds=np.asarray([step_rec.value_pred for step_rec in traj], dtype=np.float32),
+                    hidden=np.stack([step_rec.h for step_rec in traj]).astype(np.float32, copy=False),
+                )
 
             # Backprop per ogni step della traiettoria (Monte Carlo A2C).
             for step_rec, g in zip(traj, returns_to_go, strict=True):
@@ -2666,6 +2831,18 @@ def main() -> int:
                 gw2 += wd * policy.w2
                 gwv += wd * policy.wv
 
+            diagnostic_signal_snapshot = None
+            diagnostic_gradient_groups = None
+            diagnostic_parameters_before = None
+            if signal_diagnostics is not None:
+                diagnostic_signal_snapshot = signal_diagnostics.snapshot()
+                diagnostic_gradient_groups = A2CArrayGroups(
+                    trunk=(gw1, gb1),
+                    actor_head=(gw2, gb2),
+                    critic_head=(gwv, np.asarray([gbv], dtype=np.float32)),
+                )
+                diagnostic_parameters_before = _policy_parameter_groups().copied()
+
             _adam_update(policy.w1, gw1, state=st_w1, lr=float(args.lr), t=t)
             _adam_update(policy.b1, gb1, state=st_b1, lr=float(args.lr), t=t)
             _adam_update(policy.w2, gw2, state=st_w2, lr=float(args.lr), t=t)
@@ -2676,6 +2853,22 @@ def main() -> int:
             bv_arr = np.asarray([policy.bv], dtype=np.float32)
             _adam_update(bv_arr, np.asarray([gbv], dtype=np.float32), state=st_bv, lr=float(args.lr), t=t)
             policy.bv = float(bv_arr[0])
+
+            if signal_diagnostics is not None:
+                assert diagnostic_signal_snapshot is not None
+                assert diagnostic_gradient_groups is not None
+                assert diagnostic_parameters_before is not None
+                update_diagnostics.append(
+                    build_update_diagnostics(
+                        iteration=t,
+                        games=game_idx,
+                        signals=diagnostic_signal_snapshot,
+                        gradients=diagnostic_gradient_groups,
+                        parameters_before=diagnostic_parameters_before,
+                        parameters_after=_policy_parameter_groups(),
+                    )
+                )
+                signal_diagnostics.reset()
 
             gw1.fill(0.0)
             gb1.fill(0.0)
@@ -2772,6 +2965,7 @@ def main() -> int:
             suit_margin_student_sum = 0.0
 
     _save_model(out_path, trained_games=num_games, is_checkpoint=False)
+    _write_diagnostics_report()
     return 0
 
 

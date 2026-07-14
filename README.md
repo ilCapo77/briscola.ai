@@ -453,6 +453,14 @@ comandi per rigenerare gli esperimenti storici; l'attuale best v14 deriva invece
 - **REINFORCE** (`scripts/train_pg.py`): policy gradient sul return finale. È corretto ma rumoroso.
 - **A2C** (`scripts/train_a2c.py`, consigliato): aggiunge un *critic* `V(s)` e usa l’**advantage** `A = G − V(s)` come baseline appresa, con un reward più denso (delta `punti_policy − punti_opp` per turno della policy, senza barare).
 
+La salute numerica di A2C si può osservare senza cambiare il training con
+`--diagnostics-json report.json`: il file separato riassume critic, advantage,
+attivazioni, gradienti e passi Adam per update, senza salvare osservazioni. La parità
+bit-per-bit dei pesi con sonda accesa/spenta è coperta dai test. Il protocollo multi-seed
+`scripts/run_a2c_health_probe.py` usa questi dati soltanto per scegliere una singola
+ablation successiva; soglie e limiti sono in
+`docs/plans/a2c-health-diagnostic-v0-2026-07-14.md`.
+
 Tecniche utili (tutte come flag, vedi `--help`):
 - **opponent mix** (`--opponent-mix name:peso,...`) per robustezza (evita overfitting su un avversario);
 - **warm‑start** da un BC (`--init`) e **BC‑anchor** (`--bc-anchor ... --bc-anchor-beta`) per restare vicino allo stile del teacher;
