@@ -88,6 +88,7 @@ def test_dashboard_chart_range_tracks_homogeneous_rows_only() -> None:
         ["best_a2c_v10", 20.52, 100_000, "same", "bc_model", True],
         ["best_a2c_v11", 20.80, 100_000, "same", "bc_model", False],
         ["best_a2c_v14", 21.76, 100_000, "same", "bc_model", False],
+        ["best_a2c_v15", 21.87, 100_000, "same", "bc_model", False],
         [],
         ["Current conclusion"],
     ]
@@ -95,15 +96,15 @@ def test_dashboard_chart_range_tracks_homogeneous_rows_only() -> None:
     count = build_model_report.dashboard_progress_row_count(dashboard_rows)
     chart = build_model_report.chart_xml(count)
 
-    assert count == 5
-    assert "Dashboard!$A$6:$A$10" in chart
-    assert "Dashboard!$B$6:$B$10" in chart
+    assert count == 6
+    assert "Dashboard!$A$6:$A$11" in chart
+    assert "Dashboard!$B$6:$B$11" in chart
     assert "cumul" not in chart.lower()
     assert "Dashboard!$E$" not in chart
 
 
-def test_dashboard_uses_one_explicit_protocol_and_ends_with_v14() -> None:
-    """The chart includes v14's matching big gate while leaving v13's medium gates separate."""
+def test_dashboard_uses_one_explicit_protocol_and_ends_with_v15() -> None:
+    """The chart includes v15's matching big gate while leaving v13's medium gates separate."""
     sheets = build_model_report.build_workbook_data()
     dashboard = sheets["Dashboard"]
     count = build_model_report.dashboard_progress_row_count(dashboard)
@@ -112,17 +113,17 @@ def test_dashboard_uses_one_explicit_protocol_and_ends_with_v14() -> None:
     assert [row[0] for row in chart_rows] == list(build_model_report.HOMOGENEOUS_CHART_MODEL_IDS)
     assert all(row[2] == 100_000 for row in chart_rows)
     assert all("standard seeds 0..49,999" in row[3] for row in chart_rows)
-    assert [row[5] for row in chart_rows] == [True, True, True, False, False]
+    assert [row[5] for row in chart_rows] == [True, True, True, False, False, False]
     assert "best_a2c_v13" not in {row[0] for row in chart_rows}
-    assert chart_rows[-1][0] == "best_a2c_v14"
+    assert chart_rows[-1][0] == "best_a2c_v15"
 
     conclusion_index = dashboard.index(["Current conclusion"])
     conclusion = dashboard[conclusion_index + 1][0]
-    assert "best_a2c_v14" in conclusion
+    assert "best_a2c_v15" in conclusion
     assert f"current v{build_model_report.project_version()}" in conclusion
     assert "last chart row" in conclusion
-    assert "policy-only +0.66" in conclusion
-    assert "PIMC 16x8 +0.43" in conclusion
+    assert "Policy-only v15 is +0.18" in conclusion
+    assert "12x8 gate is +0.11" in conclusion
 
 
 def test_v13_policy_and_pimc_evidence_are_separate() -> None:
@@ -155,6 +156,21 @@ def test_v14_policy_and_pimc_evidence_are_separate() -> None:
     assert {row["engine"] for row in evidence} == {"numba", "domain"}
 
 
+def test_v15_policy_and_runtime_evidence_are_separate() -> None:
+    """v15's policy gain and the cheaper 12x8 runtime gate must remain distinct facts."""
+    model = next(row for row in build_model_report.model_rows() if row["model_id"] == "best_a2c_v15")
+    evidence = [row for row in build_model_report.promotion_rows() if row["model_id"] == "best_a2c_v15"]
+
+    assert model["reference_h2h"] == 0.18046
+    assert "100k" in model["reference_h2h_protocol"]
+    assert "policy" in model["reference_h2h_protocol"]
+    assert {row["wrapper"] for row in evidence} == {
+        "bc_model (direct policy)",
+        "bc_model_pimc_belief_12x8",
+    }
+    assert {row["engine"] for row in evidence} == {"numba", "domain", None}
+
+
 def test_quality_rows_expose_wrapper_and_guard() -> None:
     """Historical zero-overkill rows must disclose that the runtime guard was active."""
     rows = {row["model_id"]: row for row in build_model_report.decision_quality_rows()}
@@ -164,6 +180,7 @@ def test_quality_rows_expose_wrapper_and_guard() -> None:
     assert rows["best_a2c_v11"]["guard"] is False
     assert rows["best_a2c_v13"]["guard"] is False
     assert rows["best_a2c_v14"]["guard"] is False
+    assert rows["best_a2c_v15"]["guard"] is False
 
 
 def test_recent_decisions_and_stable_sources_are_present() -> None:
@@ -175,6 +192,7 @@ def test_recent_decisions_and_stable_sources_are_present() -> None:
     assert ("best_a2c_v11", "promoted") in milestones
     assert ("best_a2c_v12", "rejected") in milestones
     assert ("best_a2c_v14", "promoted") in milestones
+    assert ("best_a2c_v15", "promoted") in milestones
     assert {
         "pimc_distillation_v7",
         "exit_iter1b_belief_input",

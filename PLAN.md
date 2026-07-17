@@ -6,17 +6,17 @@
 
 ## Stato Corrente
 
-- Release corrente del repository: `0.37.0`. Il push di `master` attiva automaticamente il deploy su
+- Release corrente del repository: `0.38.0`. Il push di `master` attiva automaticamente il deploy su
   <https://ai.briscola.dev>; dopo ogni release verificare `/version`, asset ausiliari ed event log Postgres.
-- Il default effettivo della UI è `bc_model_pimc_belief_16x8` su `best_a2c_v14.npz`, senza guard runtime
-  anti-overkill. Il probe v14 32×8 vs 16×8 fa solo `+0,298` punti (CI95 `-0,025..+0,621`) a costo search
-  `1,995×`: **STOP dose, 64×8 e budget adattivo; confermato 16×8**. La 64×10 resta solo variante selezionabile.
-- `best_a2c_v14.npz` usa encoder v4 (`feature_dim=369`, hidden 256) e un solo forward normale. È distillata dalla
-  media esatta dei logits v13 sulle 24 rinomine dei semi, su 50.000 partite e 1,9 milioni di decisioni. Il flip
-  dell'argmax scende da `18,19%` a **`6,04%`** e l'overkill sui piatti poveri da `8,01%` a **`4,17%`**.
-- I gate di promozione v14 sono positivi: policy-only vs v13 **`+0,66`** punti/partita (CI `+0,24..+1,09`) e default
-  PIMC belief 16×8 vs v13 **`+0,43`** (CI `+0,03..+0,84`) su 10.000 partite seat-fair. Il controllo omogeneo big
-  100k Numba contro `heuristic_v1` fa `+21,76` (CI `+21,59..+21,93`) ed è l'ultima riga del grafico del report.
+- Il default effettivo della UI è `bc_model_pimc_belief_12x8` su `best_a2c_v15.npz`, senza guard runtime
+  anti-overkill. V14 con 16×8 resta selezionabile, insieme a v13/v11/v10; 64×10 resta la variante massima.
+- `best_a2c_v15.npz` usa encoder v4 (`feature_dim=369`, hidden 256) e un solo forward normale. È distillata dalla
+  media esatta dei logits del checkpoint 20M sulle 24 rinomine dei semi, su 250.000 partite e 9,5 milioni di
+  decisioni. Il flip dell'argmax scende al **`2,9456%`** e l'overkill sui piatti poveri al **`1,0637%`**.
+- I gate v15 separano forza ed efficienza: policy-only vs v14 **`+0,18046`** (CI95 `+0,08..+0,28`) su 100.000
+  partite; PIMC belief 12×8 vs v14 16×8 **`+0,1052`** (CI95 `-0,1126..+0,3230`) su 20.000, con latenza media e p95
+  circa `0,75x`. È una promozione di non inferiorità/costo, non una prova di forza runtime superiore. Il controllo
+  omogeneo big Numba contro `heuristic_v1` fa `+21,86688` ed è l'ultima riga del grafico del report.
 - I tentativi precedenti paired-RL, forward-KL e margin hinge restano chiusi: non hanno raggiunto insieme il gate di
   simmetria e quello di forza. Cronologia, criteri e artefatti sono in `docs/plans/suit-*.md`; il resoconto completo
   della policy promossa è `docs/plans/suit-distillation-v0-2026-07-11.md`.
@@ -26,8 +26,8 @@
   `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md` e `docs/plans/dormant-reinitialization-screen-v0-2026-07-12.md`.
 - Runtime web zero-Numba: dominio, search PIMC e solver usano Python nel processo web; Numba resta per training,
   valutazioni e benchmark. In produzione: FastAPI Cloud, Redis per stato/pub-sub, Postgres in modalità `dataset`.
-- Il catalogo modelli espone v14 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
-  che sono asset interni. Policy v10/v11/v13/v14, value e belief necessari al runtime sono tracciati in Git; gli altri
+- Il catalogo modelli espone v15 come policy compatibile e non espone value/belief (`value_mlp_v1`/`belief_mlp_v1`),
+  che sono asset interni. Policy v10/v11/v13/v14/v15, value e belief necessari al runtime sono tracciati in Git; gli altri
   `.npz`, dataset e benchmark restano locali e gitignored.
 - L'event log live contiene `human_action`, `ai_action`, `game_finished`, consenso e metadati modello.
   `export_live_actions.py` produce la sequenza unica umano+IA e può filtrare versione, agente, modello e bot.
@@ -58,35 +58,50 @@
 - `decision_quality` assegna ora lo stesso stream RNG a ogni coppia seat-fair nel percorso seriale e parallelo:
   `--workers` cambia solo la velocita', anche con agenti stocastici. Riproduzione e compatibilita':
   `docs/plans/decision-quality-rng-2026-07-14.md`.
-- E' pronto un ultimo scouting A2C seriale da 50M partite, partendo e restando ancorato a v14. Schedule e metriche
-  sono ora a memoria costante; checkpoint atomico, Adam/critic/RNG e digest riprendono bit per bit. Test continuo
-  contro interrotto e smoke sul roster reale passano; il primo blocco 0-10M non e' ancora stato avviato. Protocollo,
-  comando e gate: `docs/plans/a2c-super-training-50m-2026-07-14.md`.
-- Il diario pubblico arriva al capitolo 20 e distingue il plateau dell'attuale ricetta dal limite strategico del
-  gioco. L'approfondimento e' `docs/diario/22-il-limite-della-strada.md`.
+- Lo scouting A2C seriale da 50M e' concluso con **STOP scaling**. Nessuno dei checkpoint 10/20/30/40/50M supera
+  insieme forza e simmetria sulla suite preregistrata; il gate finale resta sigillato. Un audit esplorativo separato
+  da 400k partite seleziona 20M, ma la conferma indipendente lo trova pari a v14 (`+0,0286`, CI95
+  `-0,0741..+0,1313`) e nettamente sopra v13 (`+0,8918`, CI95 `+0,7568..+1,0268`). Quindi la scala conserva v14
+  ma non aggiunge forza misurabile; niente repliche o promozione del checkpoint grezzo. Protocollo e ricevute:
+  `docs/plans/a2c-super-training-50m-2026-07-14.md`.
+- Il percorso teacher 20M -> corpus sharded 250k -> student è concluso e promosso. Il corpus contiene 9.500.000
+  esempi; sul test separato la KL cala dell'`85,9%`, l'accordo argmax arriva al `97,86%` e l'asset ufficiale compatto
+  `best_a2c_v15.npz` ha SHA-256 `2f2dca3d4e77a363783124feeb30f482a85a740077222936b025b37b865f2eb6`.
+  Protocollo: `docs/plans/suit-distillation-20m-250k-2026-07-17.md`.
+- Il gate PIMC 16×8 dello student era neutro e ha chiuso la pretesa di maggiore forza. Il follow-up separato 8×8 è
+  fallito; 12×8 ha invece superato screen, conferma 20k e audit browser. La decisione finale è quindi v15 12×8 come
+  miglior compromesso costo/forza, con v14 16×8 conservato. Ricevute:
+  `docs/plans/suit-student-12x8-efficiency-2026-07-17.md` e
+  `docs/plans/suit-student-12x8-release-audit-2026-07-17.md`.
+- Il diario pubblico arriva al capitolo 21: dopo il plateau della forza racconta perche' v15 e' una promozione di
+  efficienza, non la prova di un giocatore piu' forte. Approfondimento: `docs/diario/23-dodici-mondi-bastano.md`.
 - La produzione ha attualmente l'override `BRISCOLA_DEBUG_STATE_ENDPOINT=unsafe-full-state`: il tasto `S` funziona,
   ma chi conosce un game id può leggere mani e prossima carta. Il codice resta chiuso per default; rimuovere l'override
   quando il debug pubblico non serve più.
 
 ## Prossima Decisione
 
-Le sette piste e l'audit degli errori residui hanno un esito chiuso. Il costo monetario nullo autorizza una sola
-eccezione controllata: falsificare l'ipotesi del plateau con il protocollo 50M, senza chiamarne automaticamente
-l'output v15. Rami precedenti e motivazioni complete in `docs/plans/prossima-iterazione-modello.md`.
+Le sette piste, l'audit degli errori residui e l'eccezione 50M hanno un esito chiuso. La semplice continuazione A2C
+non e' una leva di forza oltre v14; v15 migliora il compromesso di esecuzione tramite distillazione e search ridotta.
+Rami precedenti e motivazioni complete in
+`docs/plans/prossima-iterazione-modello.md`.
 
-1. **Avviare soltanto il blocco 0-10M.** Il launcher validato
-   `scripts/run_a2c_super_training_50m.sh start 10` gestisce `nohup`, PID e log; checkpoint tecnico a 5M,
-   strategico a 10M, heartbeat ogni 20k. Non concatenare automaticamente altri blocchi.
-2. **Eseguire lo scouting restante in blocchi da 10M.** Init/anchor v14 e roster congelato; pause decisionali a
-   10/20/30/40/50M sulla stessa suite da 4k. I checkpoint tecnici a meta' blocco servono solo al resume e non sono
-   candidati selezionabili; il test finale da 10k resta sigillato.
-3. **Replicare solo un successo.** Un singolo seed non puo' essere promosso: due ulteriori seed allo stesso orizzonte
-   precedono l'eventuale teacher a 24 viste e la distillazione simmetrica.
-4. **Aggiornare periodicamente il replay live.** Le nuove partite v14 aumentano la confidenza comportamentale, ma il
-   basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualità.
-5. **Per altre linee di forza, misurare prima il soffitto.** Serve un cluster di errori ripetibile oppure un benchmark
-   ridotto a informazione nascosta con riferimento piu' forte di PIMC. Solo un gap dimostrato autorizza a progettare
-   ricerca sull'information set/regret; non partire direttamente da v15 o da un training piu' lungo.
+1. **Verificare la release 0.38.0 dopo il push.** `/version` deve riportare v15 presente; il catalogo deve mostrare
+   v15 compatibile, nascondere value/belief e mantenere selezionabili v14/v13/v11/v10. Una partita reale deve usare
+   `bc_model_pimc_belief_12x8` senza errori client o server.
+2. **Monitorare v15 senza riaprire il gate.** Raccogliere latenza, errori e replay live; non interpretare il piccolo
+   `+0,1052` come prova di forza superiore e non ripetere la stessa suite finché non emerge un segnale indipendente.
+3. **Non ridurre PIMC a 8x8.** Lo screen student 8x8 contro v14 16x8 dimezza latenza media e p95 (`~0,51x`) senza
+   errori, ma perde `-0,742` punti/partita con CI95 interamente negativa (`-1,457..-0,027`). **STOP** prima della
+   conferma 20k: il risparmio non mantiene la forza quasi equivalente. Protocollo:
+   `docs/plans/suit-student-8x8-efficiency-2026-07-17.md`.
+4. **Chiarire la divergenza Numba/domain.** Sullo stesso screen 50M da 4k, Numba non riproduce gli aggregati domain.
+   Fino a una parita' policy end-to-end, i confronti di forza sotto il punto usano il dominio canonico.
+5. **Aggiornare periodicamente il replay live.** Le nuove partite v15 aumentano la confidenza comportamentale, ma il
+   basso volume previsto non blocca la diagnostica e non diventa training senza una nuova decisione su privacy e qualita'.
+6. **Per altre linee di forza, misurare prima il soffitto.** Serve un cluster di errori ripetibile oppure un benchmark
+   ridotto a informazione nascosta con riferimento piu' forte di PIMC. Solo un gap dimostrato autorizza ricerca su
+   information set/regret; niente altro training massivo della ricetta corrente.
 
 Critic reuse, normalizzazione, clipping, nuove architetture e Q Monte Carlo restano sospesi finché una misura non
 mostra il problema specifico che dovrebbero risolvere.
@@ -110,8 +125,8 @@ mostra il problema specifico che dovrebbero risolvere.
 - Confrontare varianti search a pari CPU media e p95, non soltanto a pari numero di determinizzazioni.
 - I job oltre ~5 minuti vanno preparati per il maintainer con `nohup`, log e path artefatti; non vanno avviati
   dall'agente restando in attesa.
-- Durante i cinque segmenti 50M non cambiare commit, flag o asset: il fingerprint del resume rifiuta variazioni per
-  impedire continuazioni solo apparenti. Le valutazioni intermedie devono scrivere soltanto artefatti gitignored.
+- Gli artefatti e le ricevute del run 50M restano immutabili. Per confronti policy sotto il punto usare `domain` finche'
+  la divergenza osservata con il percorso Numba non e' spiegata e coperta da un test end-to-end su modelli reali.
 - Ogni bump richiede `pyproject.toml` + `uv.lock`, tag annotato e rigenerazione/verifica di
   `docs/reports/model_progress.xlsx`; il catalogo deve mostrare la policy compatibile e nascondere value/belief.
 
@@ -139,23 +154,23 @@ curl -sS https://ai.briscola.dev/version
 curl -sS https://ai.briscola.dev/api/ai/models
 ```
 
-Export live v14 per il prossimo audit:
+Export live v15 per il prossimo audit:
 
 ```bash
 DATABASE_URL=... uv run python scripts/export_live_actions.py \
-  --code-version 0.37.0 \
-  --ai-agent bc_model_pimc_belief_16x8 \
-  --ai-model-id best_a2c_v14.npz \
+  --code-version 0.38.0 \
+  --ai-agent bc_model_pimc_belief_12x8 \
+  --ai-model-id best_a2c_v15.npz \
   --exclude-client-id loadtest-bot \
-  --out data/prod_live_actions_v14.jsonl
+  --out data/prod_live_actions_v15.jsonl
 ```
 
 Gate locale e report:
 
 ```bash
 uv run python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model data/models/best_a2c_v14.npz \
-  --agent1 bc_model --agent1-model data/models/best_a2c_v13.npz
+  --agent0 bc_model --agent0-model data/models/best_a2c_v15.npz \
+  --agent1 bc_model --agent1-model data/models/best_a2c_v14.npz
 uv run python scripts/build_model_report.py
 ```
 
@@ -163,8 +178,8 @@ Sonda riproducibile di simmetria dei semi:
 
 ```bash
 uv run python scripts/probe_suit_symmetry.py \
-  --model data/models/best_a2c_v14.npz \
-  --out-json data/suit_symmetry_v14.json
+  --model data/models/best_a2c_v15.npz \
+  --out-json data/suit_symmetry_v15.json
 ```
 
 Avvio locale:

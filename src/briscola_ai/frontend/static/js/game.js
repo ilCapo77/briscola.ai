@@ -21,7 +21,7 @@ document.addEventListener('DOMContentLoaded', () => {
      */
     const REVEAL_DURATION_MS = 1400;
     const AI_PLAYER_DISPLAY_NAME = 'Giocatore AI';
-    const STARTUP_MIN_VISIBLE_MS = 1800;
+    const STARTUP_MIN_VISIBLE_MS = 2500;
     const INITIAL_AI_START_MESSAGE_HOLD_MS = 1400;
 
     /**

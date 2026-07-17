@@ -108,6 +108,9 @@ provisioning è un fallback/override opzionale. Il sito è live su `https://ai.b
   sia a pari partite sia a pari mazzi; job lungo da affidare al maintainer)
 - Diagnostica simmetria semi: `scripts/probe_suit_symmetry.py` (24 rinomine complete di `PlayerObservation`,
   mosse forzate escluse, report JSON riproducibile)
+- Distillazione simmetrica sharded: `generate_suit_distillation_shards.py` crea manifest + NPZ riprendibili con
+  split globale per `game_id`; `train_suit_distillation_shards.py` apre un solo shard alla volta. Il run teacher
+  20M da 250k usa `scripts/run_suit_distillation_20m_250k.sh` e separa obbligatoriamente raccolta e training.
 - Diagnostica errori policy: `scripts/probe_policy_regret.py` (controfattuali PIMC cross-fitted, endgame esatto,
   contesto pubblico e routing automatico per cluster)
 - Benchmark throughput: `python scripts/benchmark_perf.py`

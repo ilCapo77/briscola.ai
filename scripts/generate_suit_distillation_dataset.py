@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Genera il dataset numerico per distillare la media simmetrica di v13."""
+"""Genera un dataset numerico per distillare la media simmetrica di una policy v4."""
 
 from __future__ import annotations
 
@@ -68,18 +68,27 @@ def generate_suit_distillation_dataset(
     base_agent: BCModelAgent,
     opponents: dict[str, Agent],
     teacher_model_sha256: str | None = None,
+    game_id_offset: int = 0,
+    split_by_game: np.ndarray | None = None,
+    metadata_overrides: dict[str, object] | None = None,
 ) -> tuple[SuitDistillationDataset, dict[str, int | float | dict[str, int]]]:
     """
-    Gioca partite con v13 e un roster, etichettando ogni decisione non forzata col teacher 24x.
+    Gioca partite con la policy base e un roster, etichettando ogni decisione non forzata col teacher 24x.
 
     Tutte le osservazioni sono `PlayerObservation`: il generatore non espone mai mazzo o
     mano avversaria al teacher. Una partita produce esattamente 38 esempi utili; le due
     mosse con una sola carta legale non forniscono gradiente e vengono escluse.
+
+    ``game_id_offset`` e ``split_by_game`` permettono al generatore sharded di assegnare
+    prima lo split globale e poi produrre shard indipendenti e riprendibili. I default
+    preservano la semantica del formato monolitico storico.
     """
     if config.num_games < 3:
         raise ValueError("num_games deve essere >= 3")
     if config.temperature <= 0.0:
         raise ValueError("temperature deve essere > 0")
+    if game_id_offset < 0:
+        raise ValueError("game_id_offset deve essere >= 0")
     if base_agent.encoder_version != "v4":
         raise ValueError("Lo screening distilla una policy v4")
     teacher = SuitSymmetrizedBCModelAgent(base_agent)
@@ -95,12 +104,19 @@ def generate_suit_distillation_dataset(
     target_ids = np.empty(max_examples, dtype=np.int16)
     game_ids = np.empty(max_examples, dtype=np.int32)
     split_ids = np.empty(max_examples, dtype=np.uint8)
-    split_by_game = make_game_split_ids(
-        config.num_games,
-        seed=config.seed ^ 0x51A17,
-        train_fraction=config.train_fraction,
-        validation_fraction=config.validation_fraction,
-    )
+    if split_by_game is None:
+        assigned_splits = make_game_split_ids(
+            config.num_games,
+            seed=config.seed ^ 0x51A17,
+            train_fraction=config.train_fraction,
+            validation_fraction=config.validation_fraction,
+        )
+    else:
+        assigned_splits = np.asarray(split_by_game, dtype=np.uint8)
+        if assigned_splits.shape != (config.num_games,):
+            raise ValueError(f"split_by_game deve avere shape ({config.num_games},), ottenuto {assigned_splits.shape}")
+        if not set(np.unique(assigned_splits).tolist()).issubset({0, 1, 2}):
+            raise ValueError("split_by_game contiene valori diversi da train/validation/test")
 
     rng_games = random.Random(config.seed)
     rng_opponents = np.random.default_rng(config.seed ^ 0x0BADC0DE)
@@ -135,8 +151,8 @@ def generate_suit_distillation_dataset(
                 masks[example_index] = mask
                 target_probs[example_index] = probs
                 target_ids[example_index] = int(np.argmax(probs))
-                game_ids[example_index] = game_index
-                split_ids[example_index] = split_by_game[game_index]
+                game_ids[example_index] = game_id_offset + game_index
+                split_ids[example_index] = assigned_splits[game_index]
                 example_index += 1
                 game_examples += 1
 
@@ -158,9 +174,9 @@ def generate_suit_distillation_dataset(
     if example_index != max_examples:
         raise AssertionError(f"Esempi raccolti {example_index}, attesi {max_examples}")
     split_game_counts = {
-        "train": int(np.sum(split_by_game == 0)),
-        "validation": int(np.sum(split_by_game == 1)),
-        "test": int(np.sum(split_by_game == 2)),
+        "train": int(np.sum(assigned_splits == 0)),
+        "validation": int(np.sum(assigned_splits == 1)),
+        "test": int(np.sum(assigned_splits == 2)),
     }
     metadata = {
         "format": DATASET_FORMAT,
@@ -170,6 +186,8 @@ def generate_suit_distillation_dataset(
         "action_dim": 40,
         "num_games": config.num_games,
         "num_examples": example_index,
+        "game_id_start": game_id_offset,
+        "game_id_stop": game_id_offset + config.num_games,
         "seed": config.seed,
         "teacher": teacher.name,
         "teacher_model_path": str(base_agent.model_path),
@@ -182,6 +200,12 @@ def generate_suit_distillation_dataset(
         "split_game_counts": split_game_counts,
         "forced_decisions_excluded_per_game": 2,
     }
+    if metadata_overrides:
+        protected = {"format", "encoder_version", "feature_dim", "action_dim", "num_games", "num_examples"}
+        overlap = protected & set(metadata_overrides)
+        if overlap:
+            raise ValueError(f"metadata_overrides non può sostituire campi strutturali: {sorted(overlap)}")
+        metadata.update(metadata_overrides)
     dataset = SuitDistillationDataset(
         features=features,
         action_masks=masks,

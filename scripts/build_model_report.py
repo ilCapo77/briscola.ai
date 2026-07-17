@@ -30,7 +30,7 @@ ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_OUT = ROOT / "docs" / "reports" / "model_progress.xlsx"
 EVIDENCE_PATH = ROOT / "docs" / "reports" / "evidence" / "model_progress.v1.json"
 EVIDENCE_SCHEMA_VERSION = 1
-EVIDENCE_SNAPSHOT_DATE = "2026-07-12"
+EVIDENCE_SNAPSHOT_DATE = "2026-07-17"
 _XLSX_ZIP_TIMESTAMP = (2026, 1, 1, 0, 0, 0)
 
 
@@ -276,6 +276,30 @@ MODEL_SPECS: list[ModelSpec] = [
             "(CI +0.03..+0.84). The homogeneous big 100k control vs heuristic_v1 reaches +21.76."
         ),
     ),
+    ModelSpec(
+        model_id="best_a2c_v15",
+        path=_rel("data/models/best_a2c_v15.npz"),
+        role="official best",
+        status="promoted",
+        order=13,
+        progress_source=(
+            "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/"
+            "eval_v15_vs_heuristic_v1_big_numba.json"
+        ),
+        progress_score=21.86688,
+        h2h_source=(
+            "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/confirm_student_vs_v14_100k.json"
+        ),
+        h2h_score=0.18046,
+        decision="Promoted as the recommended model and 12x8 runtime for the v0.38.0 release.",
+        notes=(
+            "A 250k-game, 9.5M-decision student distilled from the exact 24-view suit average of the strongest "
+            "20M checkpoint. Policy-only it beats v14 by +0.18 on 100k paired games and reaches +21.87 in the "
+            "homogeneous big control vs heuristic_v1. The release promotion is an efficiency decision: the real "
+            "PIMC belief 12x8 stack is non-inferior to v14 16x8 (+0.11, CI -0.11..+0.32 on 20k games) while its "
+            "mean and p95 search latency are about 25% lower. v14 16x8 remains selectable."
+        ),
+    ),
 ]
 
 
@@ -333,6 +357,10 @@ METRIC_PROTOCOLS: dict[str, dict[str, str]] = {
         "progress": "policy, guard off; big 100k; standard seeds; Numba; vs heuristic_v1",
         "h2h": "policy, guard off; medium 10k; suite medium; domain; vs best_a2c_v13",
     },
+    "best_a2c_v15": {
+        "progress": "policy, guard off; big 100k; standard seeds; Numba; vs heuristic_v1",
+        "h2h": "policy, guard off; 100k; seed range 11,000,000; domain; vs best_a2c_v14",
+    },
 }
 
 # Only these rows share the same benchmark/engine/seed protocol and therefore form the
@@ -347,6 +375,7 @@ HOMOGENEOUS_CHART_MODEL_IDS = (
     "best_a2c_v10",
     "best_a2c_v11",
     "best_a2c_v14",
+    "best_a2c_v15",
 )
 
 
@@ -737,6 +766,26 @@ MILESTONES: list[dict[str, Any]] = [
         ),
         "source": "docs/plans/suit-distillation-v0-2026-07-11.md + suit_distillation_v0_50k_seed20260712 gates",
     },
+    {
+        "order": 20,
+        "date": "2026-07-17",
+        "model_id": "best_a2c_v15",
+        "type": "promoted",
+        "decision": "Promote the teacher-20M student with PIMC belief 12x8 as the v0.38.0 default.",
+        "why": (
+            "The larger suit-distillation transfers the 20M teacher into one compact policy, while 12x8 preserves "
+            "the measured runtime strength of v14 16x8 at lower search cost."
+        ),
+        "evidence": (
+            "Policy-only +0.18 vs v14 on 100k and +21.87 vs heuristic_v1 on the homogeneous big gate; "
+            "runtime 12x8 vs v14 16x8 +0.11 (CI -0.11..+0.32) on 20k, with mean/p95 latency about 25% lower."
+        ),
+        "impact": (
+            "The default becomes bc_model_pimc_belief_12x8(best_a2c_v15.npz). v14 16x8 and the older official "
+            "models remain selectable; 64x10 remains the maximum-search option."
+        ),
+        "source": "docs/diario/23-dodici-mondi-bastano.md + teacher20M 250k distillation and 12x8 gates",
+    },
 ]
 
 
@@ -912,6 +961,12 @@ def _decision_quality_rows_from_local_sources() -> list[dict[str, Any]]:
             "Best A2C v14",
             "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/quality_vs_heuristic_v1_medium.json",
         ),
+        (
+            "best_a2c_v15",
+            "Best A2C v15",
+            "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/"
+            "decision_quality_student_vs_heuristic_v1_medium.json",
+        ),
     ]
     rows = []
     for model_id, label, source in sources:
@@ -955,12 +1010,16 @@ _PROMOTED_GUARD_BY_MODEL = {
     "best_a2c_v12": False,
     "best_a2c_v13": False,
     "best_a2c_v14": False,
+    "best_a2c_v15": False,
 }
 
 
 def _runtime_fields(row: dict[str, Any]) -> tuple[str, bool]:
     """Describe the evaluated inference stack, including post-policy wrappers."""
-    if "PIMC 16x8" in str(row.get("label", "")):
+    label = str(row.get("label", ""))
+    if "PIMC 12x8" in label:
+        return "bc_model_pimc_belief_12x8", False
+    if "PIMC 16x8" in label:
         return "bc_model_pimc_belief_16x8", False
     model_id = str(row["model_id"])
     return "bc_model (direct policy)", _PROMOTED_GUARD_BY_MODEL[model_id]
@@ -1306,6 +1365,39 @@ def _promotion_rows_from_local_sources() -> list[dict[str, Any]]:
             opponent="best_a2c_v13_pimc16x8",
         )
     )
+    rows.extend(
+        h2h_rows(
+            (
+                "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/"
+                "eval_v15_vs_heuristic_v1_big_numba.json"
+            ),
+            model_id="best_a2c_v15",
+            label="Best A2C v15 policy",
+            opponent="heuristic_v1",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            (
+                "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/"
+                "confirm_student_vs_v14_100k.json"
+            ),
+            model_id="best_a2c_v15",
+            label="Best A2C v15 policy",
+            opponent="best_a2c_v14_policy",
+        )
+    )
+    rows.extend(
+        h2h_rows(
+            (
+                "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/"
+                "efficiency_12x8/confirm_student12_vs_v14_16_20k.json"
+            ),
+            model_id="best_a2c_v15",
+            label="Best A2C v15 PIMC 12x8",
+            opponent="best_a2c_v14_pimc16x8",
+        )
+    )
     return rows
 
 
@@ -1390,6 +1482,13 @@ def sources_rows() -> list[dict[str, Any]]:
             "path": "docs/plans/suit-distillation-v0-2026-07-11.md",
             "data_quality": "curated_experiment_log",
             "note": "v14 suit-distillation pipeline, policy/PIMC gates, and promotion decision.",
+        },
+        {
+            "kind": "stable_narrative",
+            "id": "v15",
+            "path": "docs/diario/23-dodici-mondi-bastano.md",
+            "data_quality": "curated_experiment_log",
+            "note": "v15 teacher-20M distillation, 12x8 efficiency gate, release audit, and promotion decision.",
         },
     ]
     for spec in MODEL_SPECS:
@@ -1543,13 +1642,14 @@ def build_workbook_data() -> dict[str, list[list[Any]]]:
             [],
             ["Current conclusion"],
             [
-                "best_a2c_v14 was promoted in v0.36.0 and remains the recommended .npz policy in current "
-                f"v{project_version()}; it backs the default "
-                "bc_model_pimc_belief_16x8 stack without an overkill guard. Distillation reduces suit-name "
-                "argmax flips from 18.19% on v13 to 6.04%. Medium 10k gates show a small strength gain: "
-                "policy-only +0.66 (CI +0.24..+1.09) and PIMC 16x8 +0.43 (CI +0.03..+0.84) against v13. "
-                "The homogeneous big 100k control vs heuristic_v1 is +21.76, so v14 is included as the "
-                "last chart row. v13 remains outside that chart because it has no big 100k result."
+                "best_a2c_v15 is the recommended .npz policy in current "
+                f"v{project_version()}; it backs the default bc_model_pimc_belief_12x8 stack without an "
+                "overkill guard. The 250k-game distillation transfers the exact 24-view average of the strongest "
+                "20M teacher into one compact policy. Policy-only v15 is +0.18 vs v14 on 100k paired games and "
+                "+21.87 vs heuristic_v1 on the homogeneous big gate, so v15 is the last chart row. The runtime "
+                "12x8 gate is +0.11 vs v14 16x8 (CI -0.11..+0.32) on 20k games while mean and p95 search latency "
+                "fall by about 25%. This is an efficiency/non-inferiority promotion, not a claim that 12x8 is "
+                "statistically stronger. v13 remains outside the chart because it has no big 100k result."
             ],
             [],
             ["Quick comparison"],

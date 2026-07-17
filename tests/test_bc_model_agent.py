@@ -9,6 +9,7 @@ Obiettivo didattico:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import random
@@ -261,6 +262,27 @@ def test_catalog_excludes_belief_and_value_assets(tmp_path: Path) -> None:
         )
 
     assert list_local_models(tmp_path) == []
+
+
+def test_official_v15_asset_is_compact_compatible_and_has_public_metadata() -> None:
+    """L'asset della release deve essere giocabile, immutabile e privo di path locali."""
+    from briscola_ai.ai.models.catalog import list_local_models, validate_model_compatible_for_ui
+
+    root = Path(__file__).resolve().parents[1]
+    model_path = root / "data/models/best_a2c_v15.npz"
+
+    assert hashlib.sha256(model_path.read_bytes()).hexdigest() == (
+        "2f2dca3d4e77a363783124feeb30f482a85a740077222936b025b37b865f2eb6"
+    )
+    assert model_path.stat().st_size < 500_000
+    validate_model_compatible_for_ui(model_path)
+
+    spec = next(model for model in list_local_models(model_path.parent) if model.id == model_path.name)
+    assert spec.is_compatible is True
+    assert spec.metadata["label"] == "Briscola AI v15"
+    assert spec.metadata["release"]["version"] == "0.38.0"
+    assert spec.metadata["release"]["runtime_agent"] == "bc_model_pimc_belief_12x8"
+    assert str(root) not in json.dumps(spec.metadata)
 
 
 def test_validate_for_ui_accepts_v4_and_v4_belief_models(tmp_path: Path) -> None:

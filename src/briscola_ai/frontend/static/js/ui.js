@@ -12,7 +12,7 @@ const UI = (() => {
     const AI_MODEL_STORAGE_KEY = 'briscola_last_ai_model';
     const ADVANCED_OPTIONS_STORAGE_KEY = 'briscola_advanced_options_open';
     const DEFAULT_PLAYER_NAME = 'Giocatore';
-    const DEFAULT_AI_AGENT_NAME = 'bc_model_pimc_belief_16x8';
+    const DEFAULT_AI_AGENT_NAME = 'bc_model_pimc_belief_12x8';
 
     // Avviso non bloccante per il cold start del server cloud (scale-to-zero).
     // Il testo del dettaglio overlay deve combaciare con quello in index.html.
@@ -622,8 +622,7 @@ const UI = (() => {
         });
 
         // Default: l'ultima scelta dell'utente (localStorage) se ancora disponibile;
-        // altrimenti il PIMC belief in config agile 16x8 (quasi tutto l'edge della search
-        // a ~1/5 della CPU del 64x10: piu' capacita' per replica), con fallback a scendere.
+        // altrimenti il PIMC belief 12x8 promosso con v15, con fallback a scendere.
         const isAvail = (name) => !!(name && aiAgentMetaByName[name] && aiAgentMetaByName[name].available !== false);
         const firstAvailable = agents.find((a) => a?.name && a.available !== false)?.name;
         const stored = advancedOptionsOpen ? _readStoredSelection(AI_AGENT_STORAGE_KEY) : '';

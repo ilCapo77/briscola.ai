@@ -1,14 +1,15 @@
 # Piano di ricerca: prossima iterazione del modello
 
-> Stato: esiti aggiornati al 2026-07-14; le sette piste hanno un esito e nessun
-> training v15 e' attualmente autorizzato.
+> Stato finale: esiti aggiornati al 2026-07-17; le sette piste e lo scaling 50M sono chiusi.
+> Il ramo teacher 20M e' proseguito in una distillazione 250k e nel profilo 12x8,
+> promosso come v15 nella release 0.38.0 per efficienza/non inferiorita'.
 > Questo documento approfondisce le sette piste sintetizzate in `PLAN.md`; non autorizza
 > automaticamente training lunghi né promozioni. `PLAN.md` resta la fonte di verità su
 > quale fase eseguire adesso.
 
 ## 1. Obiettivo e baseline
 
-La baseline da preservare è:
+La baseline da preservare durante gli esperimenti descritti in questo documento era:
 
 - policy `best_a2c_v14.npz`, encoder v4, `369 -> 256 -> 40`, senza guard runtime;
 - default prodotto `bc_model_pimc_belief_16x8` con belief v0 e solver finale;
@@ -461,6 +462,14 @@ segnale oppure se il widening controllato non mostra alcun limite di capacità.
 | fatto: sano | Strumentazione/A2C | medio | gradienti, critic, tre ablation separate | nessun difetto numerico |
 | fatto: inconcludente | Training paired | medio | schedule + confronto multi-seed | varianza/forza non migliori |
 | fatto: STOP | Belief v1 | medio-alto | fold multi-stile + A/B PIMC | solo metriche offline migliori |
+| fatto: STOP | Scaling A2C 50M | alto | 5 checkpoint + audit domain 400k | nessun vantaggio replicato su v14 |
+| fatto: GO corpus | Teacher 20M 24x | medio | equivarianza + 200k domain | `+0,3293` vs v14 e `+0,2606` vs raw |
+| fatto: corpus PASS | Distillazione teacher 20M | alto | 10 shard da 25k, 9,5M esempi | manifest e contenuti verificati |
+| fatto: imitation PASS | Student 20M 250k | medio | streaming 5 epoche + test separato | KL `-85,9%`, agreement `+3,51 pp` |
+| fatto: pre-PIMC PASS | Student vs v14 | medio | simmetria + 20k/100k domain + stile | `+0,1805`, CI95 `+0,08..+0,28` |
+| fatto: STOP | Student live 16x8 | alto | 10k domain, belief/solver identici | `-0,0184`, CI95 `-0,33..+0,30` |
+| fatto: STOP | Student PIMC 8x8 | basso | screen efficienza 2k vs v14 16x8 | costo `0,51x`, forza `-0,742` |
+| fatto: efficienza PASS | Student PIMC 12x8 | basso | screen 4k + conferma 20k vs v14 16x8 | costo `0,75x`, conferma `+0,1052` |
 | sospeso | Nuova architettura | alto | prototipo esportabile e gate completi | nessun limite di rappresentazione isolato |
 
 Non avviare la fase successiva per inerzia. Ogni fase deve produrre un artefatto piccolo
@@ -492,12 +501,41 @@ uv run python scripts/probe_suit_symmetry.py \
 Sonda MLP, simmetria, dose, roster belief, diagnostica A2C e schedule paired hanno script
 ed evidenze stabili. Critic reuse, normalizzazione, clipping e una nuova architettura non
 sono lavoro mancante: sono ipotesi sospese perche' i test non hanno mostrato il difetto
-che dovrebbero correggere. Prima di un nuovo training serve un audit offline degli errori
-residui di v14 che individui una classe ripetibile, non un'altra ricetta lunga scelta a
-priori. La sonda 192x64 non trova errori affidabili nelle 96 decisioni policy-only; i 14
-casi confermati sono tutti nelle finestre PIMC/solver. Verdetto
-`no_policy_error_signal`: nessun training autorizzato. Metodo e numeri sono in
-`policy-regret-audit-v14-2026-07-14.md`.
+che dovrebbero correggere. Anche l'audit 192x64 degli errori residui e lo scaling A2C da
+50M sono chiusi senza autorizzare altro reinforcement learning.
+
+L'unico ramo attivo nasce dal gate separato del teacher 20M a 24 viste: su 200.000 nuove
+partite domain supera v14 di `+0,3293` punti e il 20M grezzo di `+0,2606`, con entrambi i
+limiti CI95 positivi. Il corpus reale da 250.000 partite e 9,5 milioni di esempi e'
+completo: hash e contenuti dei dieci shard sono verificati, con split globale
+`200k/25k/25k`. Lo student ha completato le cinque epoche congelate: sul test separato la
+KL scende dell'`85,9%` e l'accordo sale di `3,51` punti percentuali rispetto al raw 20M.
+Anche i gate successivi sono completati: flip `2,9456%`, conferma policy-only
+`+0,18046` punti contro v14 (CI95 `+0,08..+0,28`) e decision quality migliore. Resta
+pero' neutro il confronto live PIMC belief 16x8 da 10.000 partite: `-0,0184` punti,
+CI95 `-0,33..+0,30`. Come preregistrato, la parita' chiude la promozione **di forza** e
+vieta repliche della stessa prova. Protocollo e ricevute sono in
+`suit-distillation-20m-250k-2026-07-17.md`.
+
+Il follow-up di efficienza student 8x8 contro v14 16x8 dimezza davvero media e p95 della
+search, ma perde `-0,742` punti con CI95 `-1,457..-0,027`. Lo screen fallisce prima della
+conferma 20k: quel profilo non e' stato promosso. Protocollo in
+`suit-student-8x8-efficiency-2026-07-17.md`.
+
+Il punto intermedio student 12x8 passa sia lo screen da 4.000 sia la conferma indipendente
+da 20.000 partite. La conferma misura `+0,1052` punti (CI95 `-0,1126..+0,3230`) con media
+e p95 di latenza a circa `0,75x`, zero fallimenti e zero mosse corrette. E' un PASS di
+non inferiorita' ed efficienza, non evidenza di forza superiore. Anche l'audit di
+integrazione con asset reali passa:
+catalogo, API, WebSocket, browser desktop/mobile e una partita completa esercitano
+fallback, search e solver senza errori. Ricevute in
+`suit-student-12x8-efficiency-2026-07-17.md` e
+`suit-student-12x8-release-audit-2026-07-17.md`.
+
+La decisione esplicita successiva ha confezionato lo student come `best_a2c_v15.npz` e
+promosso `bc_model_pimc_belief_12x8` come default della release 0.38.0. V14 16x8 resta
+selezionabile: la conclusione e' un miglior compromesso costo/forza, non una vittoria
+statisticamente certa del nuovo runtime.
 
 ## 12. Prerequisito dati BC/value (completato 2026-07-14)
 
@@ -508,5 +546,5 @@ dataset NPZ value e leaf PIMC hanno formato v2 con `game_ids`; quelli storici pr
 confine fra partite vengono rifiutati e vanno rigenerati.
 
 Questo chiude un rischio di validation ottimistica, ma non costituisce un segnale per
-riaprire il training: v14 e lo stack runtime corrente restano congelati. Dettagli e
+riaprire il training o usare automaticamente i dati live. Dettagli e
 migrazione: `dataset-split-per-partita-2026-07-14.md`.

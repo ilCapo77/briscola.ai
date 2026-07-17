@@ -65,7 +65,7 @@ BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC = AgentSpec(
         "Usa il modello `.npz` scelto dalla UI come policy base, il solver esatto a mazzo vuoto e una lookahead "
         "depth-1 guidata da una rete di valore quando restano al massimo 8 carte vive ignote. Resta una variante "
         "storica utile per confronti e ablation: è più forte del solo modello `.npz`, ma il default corrente usa "
-        "PIMC belief 16×8."
+        "PIMC belief 12×8."
     ),
     requires_model_id=VALUE_LOOKAHEAD_MODEL_ID,
 )
@@ -88,20 +88,29 @@ BC_MODEL_PIMC_BELIEF_64X10_SPEC = AgentSpec(
         "esatto a mazzo vuoto e una search PIMC con 64 determinizzazioni PESATE dalla belief network "
         "(stima di quali carte ha in mano l'avversario, dedotta dal suo comportamento) quando restano al "
         "massimo 10 carte vive ignote. Nei benchmark storici batte il modello puro di circa 4 punti/partita; "
-        "è più costosa del default 16×8 e resta selezionabile per chi privilegia la forza alla capacità server."
+        "è più costosa del default 12×8 e resta selezionabile per chi privilegia la forza alla capacità server."
     ),
     requires_model_id=PIMC_BELIEF_MODEL_ID,
 )
 
 BC_MODEL_PIMC_BELIEF_16X8_SPEC = AgentSpec(
     name="bc_model_pimc_belief_16x8",
-    label="Modello locale + PIMC belief",
+    label="Modello locale + PIMC belief 16x8",
     description_it=(
-        "L'avversario consigliato: stessa architettura del PIMC belief massimo (search con determinizzazioni "
-        "pesate dalla belief network + solver esatto a mazzo vuoto) in configurazione agile: 16 determinizzazioni, "
-        "finestra 8. Tiene quasi tutto l'edge della search (+3.4 punti/partita vs modello puro, contro +3.9 del "
-        "64×10) a ~1/5 del costo CPU (~15 ms per mossa pensata): più partite simultanee e niente compilazione "
-        "JIT al risveglio delle repliche."
+        "La precedente configurazione consigliata: 16 determinizzazioni pesate dalla belief network, finestra 8 "
+        "e solver esatto a mazzo vuoto. Resta selezionabile per confrontare v15 col runtime di v14 o per usare "
+        "quattro campioni in più rispetto al nuovo default 12×8."
+    ),
+    requires_model_id=PIMC_BELIEF_MODEL_ID,
+)
+
+BC_MODEL_PIMC_BELIEF_12X8_SPEC = AgentSpec(
+    name="bc_model_pimc_belief_12x8",
+    label="IA consigliata (PIMC belief 12x8)",
+    description_it=(
+        "L'avversario consigliato per Briscola AI v15: 12 determinizzazioni pesate dalla belief network, "
+        "finestra 8 e solver esatto a mazzo vuoto. Nel gate appaiato da 20.000 partite non perde forza "
+        "misurabile rispetto al precedente 16×8 e riduce di circa il 25% il tempo della search."
     ),
     requires_model_id=PIMC_BELIEF_MODEL_ID,
 )
@@ -125,6 +134,8 @@ _PIMC_BELIEF_64X10_DETERMINIZATIONS = 64
 _PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS = 10
 _PIMC_BELIEF_16X8_DETERMINIZATIONS = 16
 _PIMC_BELIEF_16X8_MAX_UNKNOWN_CARDS = 8
+_PIMC_BELIEF_12X8_DETERMINIZATIONS = 12
+_PIMC_BELIEF_12X8_MAX_UNKNOWN_CARDS = 8
 # Variante eval-only per testare il confine della finestra PIMC senza esporre un'altra
 # scelta in UI: stessa dose agile della 16x8, ma search attiva fino a 10 carte vive ignote.
 BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME = "bc_model_pimc_belief_16x10"
@@ -136,6 +147,7 @@ _SELECTED_MODEL_AGENT_NAMES = frozenset(
         BC_MODEL_PIMC_16X8_SPEC.name,
         BC_MODEL_PIMC_BELIEF_64X10_SPEC.name,
         BC_MODEL_PIMC_BELIEF_16X8_SPEC.name,
+        BC_MODEL_PIMC_BELIEF_12X8_SPEC.name,
         BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME,
     }
 )
@@ -158,7 +170,7 @@ AI_AGENTS_COMMON_NOTE_IT = (
 
 
 def list_agent_specs() -> list[AgentSpec]:
-    """Ritorna la lista di agenti disponibili con metadati (ordine stabile)."""
+    """Ritorna la lista di agenti disponibili con metadati in ordine stabile."""
     return [
         RandomAgent.spec,
         GreedyPointsAgent.spec,
@@ -170,6 +182,7 @@ def list_agent_specs() -> list[AgentSpec]:
         BC_MODEL_VALUE_LOOKAHEAD_8X8_SPEC,
         BC_MODEL_HYBRID_ENDGAME_SPEC,
         BC_MODEL_PIMC_16X8_SPEC,
+        BC_MODEL_PIMC_BELIEF_12X8_SPEC,
         BC_MODEL_PIMC_BELIEF_16X8_SPEC,
         BC_MODEL_PIMC_BELIEF_64X10_SPEC,
     ]
@@ -280,7 +293,12 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
             name="bc_model_pimc_16x8",
         )
 
-    if name in ("bc_model_pimc_belief_64x10", "bc_model_pimc_belief_16x8", BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME):
+    if name in (
+        "bc_model_pimc_belief_64x10",
+        "bc_model_pimc_belief_16x8",
+        BC_MODEL_PIMC_BELIEF_12X8_SPEC.name,
+        BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME,
+    ):
         if model_path is None:
             raise ValueError(f"Agente {name!r} richiede `model_path` (file .npz)")
         models_dir = get_models_dir_from_env()
@@ -294,24 +312,33 @@ def build_agent(name: str, *, model_path: Path | None = None) -> Agent:
         belief_model = load_belief_model_npz(belief_model_path)
         model_agent = BCModelAgent.from_npz(model_path)
         is_max = name == "bc_model_pimc_belief_64x10"
+        is_12x8 = name == BC_MODEL_PIMC_BELIEF_12X8_SPEC.name
         is_eval_16x10 = name == BC_MODEL_PIMC_BELIEF_16X10_EVAL_NAME
         max_unknown_cards = (
-            _PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS if is_max or is_eval_16x10 else _PIMC_BELIEF_16X8_MAX_UNKNOWN_CARDS
+            _PIMC_BELIEF_64X10_MAX_UNKNOWN_CARDS
+            if is_max or is_eval_16x10
+            else _PIMC_BELIEF_12X8_MAX_UNKNOWN_CARDS
+            if is_12x8
+            else _PIMC_BELIEF_16X8_MAX_UNKNOWN_CARDS
         )
         return PIMCAgent(
             rollout_agent=model_agent,
             fallback=model_agent,
             num_determinizations=(
-                _PIMC_BELIEF_64X10_DETERMINIZATIONS if is_max else _PIMC_BELIEF_16X8_DETERMINIZATIONS
+                _PIMC_BELIEF_64X10_DETERMINIZATIONS
+                if is_max
+                else _PIMC_BELIEF_12X8_DETERMINIZATIONS
+                if is_12x8
+                else _PIMC_BELIEF_16X8_DETERMINIZATIONS
             ),
             max_unknown_cards=max_unknown_cards,
             use_endgame_solver=True,
             belief_model=belief_model,
-            # Search PYTHON per entrambe le config (2026-07-07): la search JIT valeva ~2x di CPU
+            # Search Python per tutte le config pubbliche: la search JIT valeva ~2x di CPU
             # per mossa ma costava ~8s di compilazione a ogni cold start delle repliche
             # (scale-to-zero dopo ~90s!). Forza equivalente verificata nei due versi
             # (numba vs python: CI sovrapposte; 16x8 python su v11: +3.36, CI +3.05..+3.66);
-            # il risparmio CPU oggi arriva dalla config agile 16x8 (~15 ms/mossa), non dal JIT.
+            # il risparmio CPU oggi arriva dalla configurazione 12x8, non dal JIT.
             # I kernel numba della search restano per training/benchmark offline.
             use_numba_search=False,
             name=name,

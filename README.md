@@ -21,7 +21,7 @@ Obiettivo: arrivare a un’IA (rete neurale) che impari a giocare in modo riprod
 - Interfaccia web con aggiornamenti in tempo reale via WebSocket.
 - IA selezionabile, server‑driven (il backend avanza la partita quando tocca all’IA):
   - baseline: `random`, `greedy_points`, `heuristic_v1`, `heuristic_v2`;
-  - ibridi endgame e search PIMC/value-lookahead, incluso il default agile `bc_model_pimc_belief_16x8`;
+  - ibridi endgame e search PIMC/value-lookahead, incluso il default agile `bc_model_pimc_belief_12x8`;
   - policy `.npz` scelta dalla UI da un catalogo server‑side (nessun path arbitrario dal browser).
 - Encoder osservazione **v1 / v2 / v3 / v4** (vedi sotto) e fast path numerico Python/Numba per training ed
   evaluation veloci.
@@ -232,11 +232,11 @@ Lo stesso stato lecito può essere codificato a livelli crescenti di “memoria/
 - **v3** (`310`): v2 + 22 feature **strategiche aggregate**, leggibili: briscole/carichi ignoti, assi/tre usciti per seme, fase partita (`deck_size`, carte in mano, endgame flag), e info sulla presa corrente. Usa `out_of_play_cards_onehot` per distinguere “visto” da “fuori gioco”.
 - **v4** (`369`): v3 + 59 feature di **memoria delle prese** (`trick_history`): aggregati sul comportamento avversario
   (semi giocati, tagli, risposte, uscite con briscola/carichi) + dettaglio delle ultime 4 prese. È l'encoder della linea
-  promossa da v8 fino all'attuale `best_a2c_v14`; quando fu introdotto, il suo contributo isolato fu +0.27
+  promossa da v8 fino all'attuale `best_a2c_v15`; quando fu introdotto, il suo contributo isolato fu +0.27
   punti/partita (CI +0.12..+0.42).
 - **v4+belief** (`409`, solo policy sperimentali): v4 + 40 probabilità della belief network embedded. Come input
   diretto della policy è risultato negativo (−0.56: informazione ridondante); la belief resta invece utile per pesare
-  le determinizzazioni della search del default `bc_model_pimc_belief_16x8` e della variante massima 64×10.
+  le determinizzazioni della search del default `bc_model_pimc_belief_12x8` e della variante massima 64×10.
 
 L’encoder canonico vive in `ai/encoding/observation_encoder.py`; esiste in versione **domain** (oggetto), **fast**
 (Python) e **Numba**, con test di **parità** che garantiscono lo stesso vettore. In partita (`ai_agent=bc_model`) il
@@ -254,16 +254,19 @@ Il catalogo della UI espone:
 - `bc_model_hybrid_endgame` – policy scelta + solver esatto nel finale;
 - `bc_model_value_lookahead_8x8` – policy scelta + solver + lookahead depth-1 guidata dal value model interno;
 - `bc_model_pimc_16x8` – policy scelta + PIMC uniforme 16×8 + solver;
-- `bc_model_pimc_belief_16x8` – **default consigliato**: PIMC con 16 determinizzazioni pesate dalla belief network
-  nella finestra delle ultime 8 carte ignote + solver; nel gate su v10 conserva l'87% del vantaggio della search a
-  circa un sesto del costo della configurazione massima;
+- `bc_model_pimc_belief_12x8` – **default consigliato** con v15: PIMC con 12 determinizzazioni pesate dalla belief
+  network, finestra 8 e solver; nel gate appaiato da 20.000 partite è non inferiore a v14 16×8 e riduce di circa il
+  25% la latenza media e p95 della search;
+- `bc_model_pimc_belief_16x8` – precedente default, ancora selezionabile per confronti storici e per usare quattro
+  determinizzazioni in più;
 - `bc_model_pimc_belief_64x10` – variante **massima** con 64 determinizzazioni e finestra 10: è la più forte nei
   benchmark storici a parità di policy, ma è sensibilmente più costosa, resta una scelta avanzata e non è stata
   nuovamente confrontata con 16×8 sulla policy v14.
 
 Factory e strumenti offline supportano inoltre nomi diagnostici non mostrati nella UI: `heuristic_trump_saver`
 (sonda di exploitability), l'alias locale `best_a2c` e `bc_model_pimc_belief_16x10` (ablation eval-only della
-finestra). Gli agenti belief richiedono `belief_v0_h128_50k_seed20260702.npz`; il value-lookahead richiede
+finestra). Gli agenti belief richiedono
+`belief_v0_h128_50k_seed20260702.npz`; il value-lookahead richiede
 `value_v0_h128_clean50k_seed20260701.npz`. Sono asset interni e non policy selezionabili nel catalogo modelli.
 
 Il **solver endgame** calcola la mossa ottima esatta con minimax a mazzo vuoto. `ai/endgame/solver.py` resta
@@ -318,8 +321,8 @@ Audit aggregato delle partite per versione/agente/modello, utile per capire se l
 log contiene anche eventi IA auditabili:
 
 ```bash
-DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.36.0 --show-games
-DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_belief_16x8 --json
+DATABASE_URL=... python scripts/audit_event_log_games.py --code-version 0.38.0 --show-games
+DATABASE_URL=... python scripts/audit_event_log_games.py --ai-agent bc_model_pimc_belief_12x8 --json
 ```
 
 Export dettagliato delle singole mosse IA/PIMC auditabili, con `decision_trace`, observation lecita e
@@ -327,7 +330,7 @@ Export dettagliato delle singole mosse IA/PIMC auditabili, con `decision_trace`,
 
 ```bash
 DATABASE_URL=... python scripts/export_ai_actions.py \
-  --ai-agent bc_model_pimc_belief_16x8 \
+  --ai-agent bc_model_pimc_belief_12x8 \
   --out ./data/prod_pimc_ai_actions.jsonl
 ```
 
@@ -336,10 +339,10 @@ Export unico action-by-action per audit di campo (mosse umane + IA nello stesso 
 
 ```bash
 DATABASE_URL=... python scripts/export_live_actions.py \
-  --ai-agent bc_model_pimc_belief_16x8 \
-  --ai-model-id best_a2c_v14.npz \
+  --ai-agent bc_model_pimc_belief_12x8 \
+  --ai-model-id best_a2c_v15.npz \
   --exclude-client-id loadtest-bot \
-  --out ./data/prod_live_actions_v14.jsonl
+  --out ./data/prod_live_actions_v15.jsonl
 ```
 
 `scripts/audit_live_policy_replay.py` mostra poi due policy e i rispettivi stack PIMC sulle **stesse** observation
@@ -371,12 +374,12 @@ Confronti riproducibili senza UI/server:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v14.npz --agent1 heuristic_v1
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v15.npz --agent1 heuristic_v1
 
 # Diagnostica: la policy cambia se rinominiamo coerentemente i quattro semi?
 python scripts/probe_suit_symmetry.py \
-  --model ./data/models/best_a2c_v14.npz \
-  --out-json ./data/suit_symmetry_v14.json
+  --model ./data/models/best_a2c_v15.npz \
+  --out-json ./data/suit_symmetry_v15.json
 ```
 
 Concetti chiave:
@@ -392,9 +395,10 @@ Strumenti aggiuntivi:
   - `trump_overkill_rate`: quando vince con briscola, usa una briscola più costosa del necessario;
   - a parità di seed, `--workers` cambia solo la velocità anche con agenti stocastici. Contratto e riproduzione del
     difetto corretto: `docs/plans/decision-quality-rng-2026-07-14.md`.
-- `scripts/evaluate_pimc.py` – harness offline PIMC/determinizzazione sopra una policy `.npz`: confronta search,
-  modello puro, solver-control o un'altra configurazione PIMC, con CI su score/avg diff e metriche di costo per mossa.
-  È lo strumento per ablation della search; la distillazione PIMC→policy è invece un ramo storico chiuso.
+- `scripts/evaluate_pimc.py` – harness offline PIMC/determinizzazione sopra policy `.npz`: confronta search, modello
+  puro, solver-control o un'altra configurazione PIMC, anche con policy distinte sui due lati. Registra CI su
+  score/avg diff, integrita' e latenza search media/p50/p95. È lo strumento per ablation della search; la
+  distillazione PIMC→policy è invece un ramo storico chiuso.
 - `scripts/run_belief_v1_gate.py` – pipeline riprendibile per belief multi-stile: genera il dataset da roster
   versionato, esegue i fold leave-one-opponent-out e crea il candidato all-styles solo dopo un GO offline. Il pilot
   non può autorizzare una promozione; soglie e comando lungo sono in `docs/plans/belief-v1-multistile-2026-07-14.md`.
@@ -403,6 +407,11 @@ Strumenti aggiuntivi:
   `PlayerObservation`: sulla v13 la sonda trovava **18,19% di flip dell'argmax**; la distillazione v14 li porta al
   **6,04%**. La JS usa il softmax dei logits grezzi a temperatura 1 e non è una probabilità calibrata di vittoria.
   Metodo e limiti sono in `docs/plans/sonda-simmetria-semi-2026-07-11.md` e nel report della distillazione v0.
+- `scripts/generate_suit_distillation_shards.py` / `scripts/train_suit_distillation_shards.py` – estensione per
+  corpus di teacher simmetrici grandi: split globale per partita, manifest JSON rigoroso, shard NPZ atomici con
+  SHA-256, resume della raccolta e training con un solo shard in RAM. Il launcher congelato del teacher 20M da
+  250k e' `scripts/run_suit_distillation_20m_250k.sh`; protocollo e gate sono in
+  `docs/plans/suit-distillation-20m-250k-2026-07-17.md`.
 - `scripts/diagnose_hidden_units.py` – confronta v14 e v13 sugli stessi 4.096 stati e misura attivazioni, rango
   effettivo, correlazioni e ablation esatta di ogni unità ReLU. Il primo audit trova 123/256 unità v14 quasi inattive
   e non giustifica il widening 320/384; protocollo e limiti in `docs/plans/hidden-unit-diagnostic-v0-2026-07-12.md`.
@@ -431,7 +440,7 @@ cross-entropy su mosse-argmax è un operatore lossy (una MLP hidden=512 memorizz
 e resta al 56–57% in validation). Gli script (`generate_pimc_teacher_dataset.py`, i flag
 `--filter-disagree-with-model`, `--soft-labels`) restano utilizzabili per esperimenti, ma la strada
 consigliata per sfruttare la search è usarla come **avversario di training** (è così che sono nati
-v7 e v8) o direttamente a runtime (`bc_model_pimc_belief_16x8` come default, 64×10 come massimo). Dettagli e numeri:
+v7 e v8) o direttamente a runtime (`bc_model_pimc_belief_12x8` come default, 64×10 come massimo). Dettagli e numeri:
 `docs/plans/belief-expert-iteration.md` e `docs/diario/06-search-endgame.md`.
 
 **Value learning / V-lookahead — ramo storico chiuso.** Questo ramo ha provato ad apprendere un valore scalare
@@ -511,11 +520,11 @@ Tecniche utili (tutte come flag, vedi `--help`):
   `14,42%` di flip, sopra il gate `<12%`; ramo chiuso senza run lungo. Report:
   `docs/plans/suit-margin-v0-2026-07-11.md`;
 - **league**: allenare contro un campione congelato. L'alias `best_a2c` carica il file locale **legacy**
-  `best_a2c.npz`, non il campione ufficiale corrente. Per usare v14 indica `bc_model` nel mix e passa esplicitamente
-  `--opponent-model ./data/models/best_a2c_v14.npz` (il fast rollout Numba supporta al più un tipo di
+  `best_a2c.npz`, non il campione ufficiale corrente. Per usare v15 indica `bc_model` nel mix e passa esplicitamente
+  `--opponent-model ./data/models/best_a2c_v15.npz` (il fast rollout Numba supporta al più un tipo di
   opponent-modello per mix);
 - **value-lookahead opponent**: nel fast rollout Numba puoi allenare contro `bc_model_value_lookahead_8x8` passando sia
-  `--opponent-model ./data/models/best_a2c_v14.npz` sia
+  `--opponent-model ./data/models/best_a2c_v15.npz` sia
   `--opponent-value-model ./data/models/value_v0_h128_clean50k_seed20260701.npz`. Questo path usa lo stato numerico
   già determinizzato del rollout come singola determinizzazione: è un avversario di training forte, non una replica
   bit-a-bit dell'agente UI che campiona information set da `PlayerObservation`.
@@ -528,20 +537,19 @@ Tecniche utili (tutte come flag, vedi `--help`):
 
 ### Baseline AI ufficiale
 
-La policy ufficiale è **`data/models/best_a2c_v14.npz`** (encoder v4, hidden 256). È una singola MLP distillata
-dalla media dei logits di v13 sulle 24 rinomine coerenti dei semi, usando 50.000 partite e 1,9 milioni di decisioni
-etichettate. Rispetto a v13 riduce il flip dell'argmax sotto rinomina dal `18,19%` al `6,04%`; nei gate medium da
-10.000 partite ottiene `+0,66` punti/partita come policy diretta (CI `+0,24..+1,09`) e `+0,43` nello stack PIMC
-belief 16×8 (CI `+0,03..+0,84`). L'overkill di briscola sui piatti poveri scende ulteriormente al `4,17%`.
+La policy ufficiale è **`data/models/best_a2c_v15.npz`** (encoder v4, hidden 256). È una singola MLP distillata
+dalla media esatta delle risposte del checkpoint 20M sulle 24 rinomine coerenti dei semi, usando 250.000 partite e
+9,5 milioni di decisioni. Il flip dell'argmax sotto rinomina scende al `2,9456%` e l'overkill sui piatti poveri al
+`1,0637%`. Come policy diretta batte v14 di `+0,18046` punti su 100.000 partite (CI `+0,08..+0,28`) e ottiene
+`+21,86688` nel controllo omogeneo big contro `heuristic_v1`.
 
-Il default effettivo della UI è **`bc_model_pimc_belief_16x8` su `best_a2c_v14.npz`**, senza guard runtime. Nel gate
-di scelta della configurazione, eseguito su v10, la 16×8 conservava l'87% del vantaggio della search (+3.37
-punti/partita rispetto alla policy pura) a circa 1/6 del costo CPU della 64×10. La
-`bc_model_pimc_belief_64x10` resta selezionabile come variante massima: nei gate storici a parità di policy aveva il
-miglior risultato grezzo, ma non è stata nuovamente confrontata sulla v14 e non è il default per ragioni di capacità
-e latenza. Anche `bc_model_value_lookahead_8x8` resta selezionabile come ramo storico più leggero.
+Il default effettivo della UI è **`bc_model_pimc_belief_12x8` su `best_a2c_v15.npz`**, senza guard runtime. Nel gate
+da 20.000 partite contro v14 16×8 il delta è `+0,1052` (CI `-0,1126..+0,3230`): non dimostra forza superiore, ma
+supera il margine preregistrato di non inferiorità. La latenza media e p95 della search scendono entrambe a circa
+`0,75x`. V14 16×8 resta selezionabile; anche `bc_model_pimc_belief_64x10` resta la variante a search massima e
+`bc_model_value_lookahead_8x8` il ramo storico guidato dal value model.
 
-Gli asset runtime necessari al sito sono **tracciati in Git**: policy v10, v11, v13 e v14, value model e belief network.
+Gli asset runtime necessari al sito sono **tracciati in Git**: policy v10, v11, v13, v14 e v15, value model e belief network.
 Gli altri `.npz` in `data/models/`, i dataset e gli artefatti in `benchmarks/experiments/` restano locali e
 gitignored. Questa distinzione è intenzionale: il repository contiene ciò che serve a riprodurre il runtime e le
 milestone ufficiali, non l'intera storia dei run.
@@ -553,9 +561,9 @@ Gli asset versionati sono già inclusi nell'immagine di deploy. Il provisioning 
 se un file manca, può riscaricarlo dai Release asset configurati tramite env:
 
 ```text
-BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v14.npz
-BRISCOLA_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.36.0/best_a2c_v14.npz
-BRISCOLA_MODEL_SHA256=a67ed1d7f01ba1019f157134ade23fa9f822e442b671c83684bd4500e97695a8
+BRISCOLA_DEFAULT_MODEL_ID=best_a2c_v15.npz
+BRISCOLA_MODEL_URL=https://raw.githubusercontent.com/ilCapo77/briscola.ai/v0.38.0/data/models/best_a2c_v15.npz
+BRISCOLA_MODEL_SHA256=2f2dca3d4e77a363783124feeb30f482a85a740077222936b025b37b865f2eb6
 BRISCOLA_VALUE_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.16.0/value_v0_h128_clean50k_seed20260701.npz
 BRISCOLA_VALUE_MODEL_SHA256=5f93f1c5f2bf2869a575abf91ceba8a3e9aeb4ada48ba4ffac8d0f5507fb34f0
 BRISCOLA_BELIEF_MODEL_URL=https://github.com/ilCapo77/briscola.ai/releases/download/v0.23.0/belief_v0_h128_50k_seed20260702.npz
@@ -576,7 +584,7 @@ uv run python scripts/build_model_report.py
 ```
 
 Serve a tracciare solo i modelli **significativi**: best ufficiali, teacher/anchor importanti e candidati scartati
-che spiegano una decisione. La Dashboard traccia la serie confrontabile v8-v11 e v14 (big 100k, stessi seed e
+che spiegano una decisione. La Dashboard traccia la serie confrontabile v8-v11, v14 e v15 (big 100k, stessi seed e
 configurazione promossa); v13 resta fuori dal grafico perché dispone soltanto dei gate medium, riportati nelle tabelle
 di evidenza. Le altre tab contengono milestone, dettagli modello, prove di promozione, decision quality e fonti.
 
@@ -603,21 +611,21 @@ Esempio di confronto testa-a-testa tra policy ufficiale e anchor precedente:
 
 ```bash
 python scripts/evaluate_agents.py --benchmark medium --engine domain \
-  --agent0 bc_model --agent0-model ./data/models/best_a2c_v14.npz \
-  --agent1 bc_model --agent1-model ./data/models/best_a2c_v13.npz
+  --agent0 bc_model --agent0-model ./data/models/best_a2c_v15.npz \
+  --agent1 bc_model --agent1-model ./data/models/best_a2c_v14.npz
 ```
 
 ## Stato e roadmap
 
-La release corrente del repository è `0.37.0`; ogni push di `master` viene distribuito automaticamente su
+La release corrente del repository è `0.38.0`; ogni push di `master` viene distribuito automaticamente su
 <https://ai.briscola.dev> tramite FastAPI Cloud, con stato partita su Redis, realtime via pub/sub ed event log
 Postgres in modalità `dataset`. Il deploy effettivo va controllato tramite `/version`. Stato corrente, invarianti da
 non rompere e prossime azioni sono in **`PLAN.md`**.
 
 La storia del progetto — scelte, errori e svolte, raccontati in tono divulgativo — è il **diario di
 bordo**: <https://ai.briscola.dev/diario> (fonte: `src/briscola_ai/frontend/static/diario.md`). Il racconto arriva al
-**capitolo 20, “Il limite della strada che conosciamo”**; gli approfondimenti tecnici delle singole tappe, incluso il
-bilancio del plateau in `docs/diario/22-il-limite-della-strada.md`, vivono in `docs/diario/`.
+**capitolo 21, “Dodici mondi bastano”**; gli approfondimenti tecnici delle singole tappe, incluso il percorso verso
+v15 in `docs/diario/23-dodici-mondi-bastano.md`, vivono in `docs/diario/`.
 
 ## Licenza
 

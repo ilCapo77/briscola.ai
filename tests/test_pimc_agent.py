@@ -91,6 +91,8 @@ def test_bc_model_pimc_belief_64x10_variant_builds_with_belief(tmp_path: Path, m
         build_agent("bc_model_pimc_belief_64x10", model_path=model_path)
     with pytest.raises(ValueError, match="belief"):
         build_agent("bc_model_pimc_belief_16x10", model_path=model_path)
+    with pytest.raises(ValueError, match="belief"):
+        build_agent("bc_model_pimc_belief_12x8", model_path=model_path)
 
     # Belief minimale valida (formato belief_mlp_v1, encoder v4 = 369 input).
     from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
@@ -121,6 +123,18 @@ def test_bc_model_pimc_belief_64x10_variant_builds_with_belief(tmp_path: Path, m
     assert eval_agent.max_unknown_cards == 10
     assert eval_agent.belief_model is not None
     assert eval_agent.use_endgame_solver is True
+
+    recommended_agent = build_agent("bc_model_pimc_belief_12x8", model_path=model_path)
+    public_specs = {spec.name for spec in list_agent_specs()}
+    assert "bc_model_pimc_belief_12x8" in public_specs
+    assert isinstance(recommended_agent, PIMCAgent)
+    assert recommended_agent.name == "bc_model_pimc_belief_12x8"
+    assert recommended_agent.num_determinizations == 12
+    assert recommended_agent.max_unknown_cards == 8
+    assert recommended_agent.belief_uniform_mix == pytest.approx(0.10)
+    assert recommended_agent.belief_model is not None
+    assert recommended_agent.use_endgame_solver is True
+    assert recommended_agent.use_numba_search is False
 
 
 def _play_with_heuristics_until(*, seed: int, max_deck_size: int) -> GameState:

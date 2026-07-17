@@ -310,6 +310,32 @@ La release 0.37.0 lascia v14 al tavolo e congela la ricerca del modello finché 
 
 <small>🔬 *Per chi vuole i numeri, i tentativi chiusi e le condizioni per riaprire la ricerca: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/22-il-limite-della-strada.md)*</small>
 
+## Capitolo 21 — Dodici mondi bastano <small>(14–17 luglio 2026)</small>
+
+Dopo aver dichiarato il limite della strada conosciuta, abbiamo concesso all'allenamento un'ultima prova molto grande: 50 milioni di partite, controllando il risultato ogni 10 milioni. Nessuno dei cinque traguardi ha prodotto un giocatore chiaramente più forte di v14. Più allenamento, da solo, non aveva risolto il problema.
+
+Il checkpoint dei 20 milioni, però, poteva ancora essere utile come maestro. Gli abbiamo fatto esaminare ogni posizione attraverso tutte le 24 possibili rinomine dei semi e abbiamo condensato le sue risposte in un nuovo allievo. Per farlo sono servite 250.000 partite e 9,5 milioni di decisioni.
+
+L'allievo era più regolare di v14: cambiava meno spesso idea quando venivano rinominati i semi e sprecava meno carte importanti. Usato da solo guadagnava anche un piccolo vantaggio. Ma inserito nel giocatore completo del sito, con lo stesso PIMC belief 16×8, tornava sostanzialmente alla pari con v14.
+
+A quel punto la domanda è cambiata. Se non era chiaramente più forte, poteva almeno ottenere la stessa qualità immaginando meno mondi possibili?
+
+Il primo tentativo, PIMC 8×8, dimezzava il tempo della ricerca ma perdeva 0,74 punti a partita. Era un risparmio reale, pagato però con una perdita altrettanto reale. Otto mondi non bastavano.
+
+Con 12×8 il risultato è stato diverso. Nella conferma da 20.000 partite lo student ha ottenuto 9.689 vittorie contro 9.621 di v14, con 690 pareggi. Il piccolo vantaggio di 0,11 punti resta troppo incerto per dire che sia più forte, ma esclude la perdita significativa che avevamo visto con 8×8.
+
+Il tempo necessario per ogni mossa affidata alla ricerca scende invece da circa 14,7 a 11 millisecondi: quasi il **25% in meno**. In altre parole, dodici mondi conservano la forza misurata dei sedici, mentre otto erano troppo pochi.
+
+Questa è la quindicesima generazione. **V15 non viene promossa come giocatore certamente più forte di v14, ma come giocatore più efficiente:** nuovi pesi, maggiore simmetria, meno sprechi e una ricerca più leggera.
+
+La release 0.38.0 la rende il nuovo avversario consigliato del sito con il nome `best_a2c_v15.npz`.
+
+Le 24 viste non vengono usate durante la partita. Appartenevano soltanto al maestro che ha preparato gli esempi. Nel sito v15 usa una singola rete dentro un PIMC 12×8. V14 con 16×8, insieme a v13, v11 e v10, rimane selezionabile; resta disponibile anche la configurazione massima 64×10.
+
+Il progresso di un sistema non consiste sempre nell'aumentare il punteggio. A volte significa ottenere lo stesso risultato con meno lavoro, dopo aver verificato con attenzione quanto si può togliere senza rompere ciò che funzionava.
+
+<small>🔬 *Per chi vuole ricostruire esperimenti, soglie e audit di rilascio: [approfondimento tecnico](https://github.com/ilCapo77/briscola.ai/blob/master/docs/diario/23-dodici-mondi-bastano.md)*</small>
+
 ## Epilogo
 
 Se c'è un filo comune, non è la serie dei campioni promossi. È il numero di idee respinte: penalità che peggioravano il comportamento, quaderni di esempi imparati a memoria, reti più grandi che non servivano, stime di carte avversarie utili in un punto e dannose in un altro, giudici di posizione troppo rumorosi a inizio partita. Ogni bocciatura ha tolto un'ipotesi dal tavolo e ha reso più chiaro il passo successivo.

@@ -20,7 +20,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V3, FEATURE_DIM_2P_V4
 from briscola_ai.backend import server
 from briscola_ai.backend.event_log import EventLog, EventLogConfig
 from briscola_ai.backend.game_store import GameSession, InMemoryGameSessionStore
@@ -160,6 +160,28 @@ def _write_dummy_value_model_npz(path: Path) -> None:
         w2=np.zeros((h,), dtype=np.float32),
         b2=np.asarray([0.0], dtype=np.float32),
         metadata_json=json.dumps(metadata, ensure_ascii=False),
+    )
+
+
+def _write_dummy_belief_model_npz(path: Path) -> None:
+    """Crea la belief minima richiesta dalle varianti PIMC belief dell'API."""
+    d = int(FEATURE_DIM_2P_V4)
+    h = 4
+    np.savez(
+        path,
+        w1=np.zeros((d, h), dtype=np.float32),
+        b1=np.zeros((h,), dtype=np.float32),
+        w2=np.zeros((h, 40), dtype=np.float32),
+        b2=np.zeros((40,), dtype=np.float32),
+        metadata_json=json.dumps(
+            {
+                "format": "belief_mlp_v1",
+                "feature_dim": d,
+                "hidden_dim": h,
+                "encoder_version": "v4",
+            },
+            ensure_ascii=False,
+        ),
     )
 
 
@@ -311,6 +333,7 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert "bc_model_hybrid_endgame" in by_name
     assert "bc_model_value_lookahead_8x8" in by_name
     assert "bc_model_pimc_16x8" in by_name
+    assert "bc_model_pimc_belief_12x8" in by_name
 
     assert isinstance(by_name["heuristic_v1"].get("description_it"), str)
     assert by_name["heuristic_v1"]["description_it"]
@@ -320,6 +343,47 @@ def test_list_ai_agents_exposes_metadata_in_italian() -> None:
     assert by_name["bc_model_value_lookahead_8x8"]["requires_model_selection"] is True
     assert by_name["bc_model_value_lookahead_8x8"]["requires_model_id"] == "value_v0_h128_clean50k_seed20260701.npz"
     assert by_name["bc_model_pimc_16x8"]["requires_model_selection"] is True
+
+
+def test_recommended_12x8_requires_belief_and_can_create_a_game(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    """Il 12x8 ufficiale attraversa catalogo e API quando la belief richiesta è presente."""
+    monkeypatch.setenv("BRISCOLA_MODELS_DIR", str(tmp_path))
+    _write_dummy_bc_model_npz_with_feature_dim(tmp_path / "student.npz", feature_dim=int(FEATURE_DIM_2P_V4))
+    client = TestClient(server.app)
+
+    recommended_without_belief = {a["name"]: a for a in client.get("/ai/agents").json()["agents"]}[
+        "bc_model_pimc_belief_12x8"
+    ]
+    assert recommended_without_belief["available"] is False
+    assert recommended_without_belief["requires_model_present"] is False
+
+    _write_dummy_belief_model_npz(tmp_path / "belief_v0_h128_50k_seed20260702.npz")
+    by_name = {a["name"]: a for a in client.get("/ai/agents").json()["agents"]}
+    recommended = by_name["bc_model_pimc_belief_12x8"]
+    assert recommended["available"] is True
+    assert recommended["requires_model_selection"] is True
+    assert recommended["requires_model_id"] == "belief_v0_h128_50k_seed20260702.npz"
+
+    created = client.post(
+        "/games",
+        json={
+            "num_players": 2,
+            "player_names": ["A", "B"],
+            "ai_agent": "bc_model_pimc_belief_12x8",
+            "ai_model_id": "student.npz",
+        },
+    )
+    assert created.status_code == 200
+    payload = created.json()
+    assert payload["ai_agent"] == "bc_model_pimc_belief_12x8"
+    assert payload["ai_model_id"] == "student.npz"
+    session = _get_session(payload["game_id"])
+    assert session is not None
+    assert session.ai_seats[1].agent_name == "bc_model_pimc_belief_12x8"
+    assert session.ai_seats[1].model_id == "student.npz"
 
 
 def test_list_ai_agents_reports_availability(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -384,7 +448,7 @@ def test_list_ai_models_returns_model_catalog(monkeypatch: pytest.MonkeyPatch, t
     assert models
 
     assert "models_dir" not in payload  # non vogliamo esporre path server-side
-    assert payload["recommended_model"] == "best_a2c_v14.npz"
+    assert payload["recommended_model"] == "best_a2c_v15.npz"
     by_id = {m["id"]: m for m in models}
     assert "compatible_v1.npz" in by_id
     assert "compatible_v2.npz" in by_id
@@ -1386,7 +1450,7 @@ def test_version_endpoint_reports_versions_and_model_presence() -> None:
         body = resp.json()
         assert "code_version" in body
         assert "rules_version" in body
-        assert body["recommended_model"] == "best_a2c_v14.npz"
+        assert body["recommended_model"] == "best_a2c_v15.npz"
         assert isinstance(body["recommended_model_present"], bool)
         assert body["value_lookahead_model"] == "value_v0_h128_clean50k_seed20260701.npz"
         assert isinstance(body["value_lookahead_model_present"], bool)

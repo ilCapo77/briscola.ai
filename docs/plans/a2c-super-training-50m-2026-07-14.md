@@ -1,7 +1,7 @@
 # Super training A2C seriale da 50 milioni di partite
 
-Data: 2026-07-14  
-Stato: **trainer validato; primo blocco da 10M non ancora avviato**  
+Data: 2026-07-14; esito aggiornato 2026-07-17
+Stato: **50M completati; STOP scaling; teacher esplorativo positivo**
 Modello live invariato: `best_a2c_v14.npz`
 
 ## Decisione
@@ -19,6 +19,86 @@ mai svolto una continuazione A2C lunga; in passato la scala 20M/30M ha prodotto 
 fra v8, v9 e v10.
 
 Il primo run e' uno **scouting**, non v15. Un singolo seed non puo' essere promosso.
+
+## Esito finale (2026-07-17)
+
+Il seed `20260723` ha completato tutte le 50.000.000 partite in cinque segmenti bit-identici
+a un run continuo. Checkpoint, modello finale, Adam, critic, RNG, schedule e diagnostica
+arrivano a 2.500.000 update senza valori non finiti; commit e fingerprint restano invariati.
+
+Sulla suite preregistrata da 4.000 partite nessun checkpoint supera insieme i gate di forza
+e simmetria. I delta policy-only oscillano attorno alla parita' (`-0,326..+0,167` punti),
+il flip dei semi resta `8,22..8,81%` contro il tetto `8,0%`, mentre l'overkill sui piatti
+poveri e' sempre sano (`1,17..1,44%`). Il gate finale da 10.000 partite con seed da
+`6.000.000` non e' stato aperto; repliche, promozione e distillazione della fase 5 non sono
+autorizzate dal protocollo originale.
+
+### Audit di potenza separato
+
+Poiche' 4.000 game corrispondono a sole 2.000 unita' indipendenti seat-fair, dopo la
+chiusura formale e' stato preregistrato un audit **esplorativo**, incapace per definizione
+di cambiare retroattivamente l'eleggibilita':
+
+1. ranking dei cinque checkpoint contro v14 su 40.000 partite ciascuno, nuovi seed da
+   `7.000.000`;
+2. conferma del solo vincitore contro v14 e v13 su 100.000 partite per confronto, seed
+   indipendenti da `8.000.000`.
+
+| checkpoint | delta vs v14 | CI95 a coppie | esito ranking |
+|---:|---:|---:|---|
+| 10M | `+0,1376` | `-0,0233..+0,2985` | pari |
+| 20M | `+0,2221` | `+0,0590..+0,3852` | selezionato |
+| 30M | `+0,1283` | `-0,0323..+0,2889` | pari |
+| 40M | `+0,0684` | `-0,0970..+0,2338` | pari |
+| 50M | `+0,0707` | `-0,0918..+0,2332` | pari |
+
+La suite indipendente elimina il vantaggio apparente del 20M contro v14: `+0,0286` punti
+su 100.000 partite, CI95 `-0,0741..+0,1313`. Lo stesso checkpoint batte invece v13 in
+modo netto: `+0,8918`, CI95 `+0,7568..+1,0268`. Il risultato risponde a entrambe le
+domande senza confonderle:
+
+- la famiglia post-v14 e' realmente piu' forte di v13;
+- proseguire la stessa A2C fino a 50M non aggiunge forza misurabile a v14;
+- il picco del ranking 20M non si replica e non giustifica v15.
+
+I 17 JSON rigorosi, 7 ricevute e 37 hash verificati vivono localmente in
+`benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/power_audit/results/`.
+L'audit usa il dominio canonico: uno smoke sugli stessi 4.000 game del checkpoint 50M ha
+dato aggregati diversi con Numba (`-0,05` anziche' `-0,326` punti), quindi il percorso JIT
+non e' stato usato per misure sotto il punto.
+
+**Decisione scaling:** `STOP`. V14 resta live; 20M e' un artefatto di ricerca e non viene
+promosso o replicato.
+
+### Gate teacher a 24 viste (esperimento separato)
+
+Dopo la chiusura dello scaling e' stato preregistrato un nuovo gate esplorativo. Il
+teacher applica il checkpoint 20M alle 24 rinomine complete dei semi, riallinea i logits
+e ne calcola la media. I confronti usano il dominio canonico, 100.000 partite seat-fair
+ciascuno e seed mai usati prima, a partire da `9.000.000`.
+
+| confronto | delta teacher | CI95 a coppie | esito |
+|---|---:|---:|---|
+| teacher 20M vs v14 | `+0,3293` | `+0,2295..+0,4291` | teacher piu' forte |
+| teacher 20M vs raw 20M | `+0,2606` | `+0,1532..+0,3680` | teacher piu' forte |
+
+Entrambi i limiti inferiori sono sopra zero. L'audit numerico registra inoltre zero
+flip dell'azione e delta massimo dei logits pari a zero su 3.680 confronti non identita'.
+Il batch delle 24 viste costa `1,398x` il forward singolo, con throughput `0,715x`: e'
+un teacher praticabile per produrre etichette, non ancora una policy ufficiale.
+
+I 9 JSON rigorosi, le 3 ricevute di esecuzione e gli 11 riferimenti unici con hash
+verificato vivono in
+`benchmarks/experiments/a2c_v14_serial_scale50m_seed20260723/power_audit/teacher_probe/results/`.
+Il report finale conserva `formal_scaling_verdict_unchanged=true`: il risultato non
+riqualifica retroattivamente il checkpoint 20M.
+
+**Decisione teacher:** `GO` al solo corpus deterministico da 250.000 partite, diviso in
+10 shard da 25.000, per tentare di comprimere il vantaggio in una singola MLP. Nessun
+modello viene chiamato v15 prima dei gate policy-only, simmetria e PIMC.
+
+Implementazione, configurazione congelata e gate dello student sono nel protocollo
+separato `suit-distillation-20m-250k-2026-07-17.md`.
 
 ## Una sola variabile
 
@@ -292,11 +372,15 @@ Solo allora esiste evidenza che la ricetta, e non un checkpoint fortunato, migli
 
 ## Fase 5 - Distillazione condizionata
 
-La distillazione non e' automatica e non usa le vecchie etichette argmax PIMC, ramo gia'
-chiuso. Per il candidato replicato si costruisce prima il teacher esatto sulle 24
-rinomine dei semi. Il corpus finale usa **250.000 partite indipendenti**, cinque volte il
-corpus con cui e' stata prodotta v14. Non si genera un corpus per ogni checkpoint da 10M:
-la spesa e' autorizzata soltanto dopo selezione, gate finale e repliche della ricetta.
+Nel protocollo originale la distillazione era subordinata a un candidato replicato. Lo
+scaling non ha soddisfatto quel requisito e questa fase non e' stata aperta come parte
+del run 50M. Il gate teacher separato documentato sopra ha pero' isolato un'altra ipotesi:
+la media esatta sulle 24 rinomine migliora sia v14 sia il 20M grezzo. Questo autorizza una
+distillazione **esplorativa del teacher**, senza promuovere la ricetta A2C o il checkpoint.
+
+La distillazione non usa le vecchie etichette argmax PIMC, ramo gia' chiuso. Il corpus usa
+**250.000 partite indipendenti**, cinque volte quello con cui e' stata prodotta v14, e i
+target sono i logits medi del solo teacher 20M a 24 viste.
 
 La proiezione lineare dall'esperimento v14 e' circa 30-35 minuti per raccolta, teacher 24x
 e compressione. Il formato monolitico corrente non e' pero' adatto: 50.000 partite
@@ -306,15 +390,35 @@ supportare shard deterministici, indicativamente 10 shard da 25.000 partite, let
 alla volta e con split sempre per partita. Seed, roster, assegnazione agli split e ordine
 degli shard vanno registrati nel manifest.
 
-- Se il candidato e' gia' simmetrico e il teacher non migliora il gioco, si conserva la
-  policy grezza.
-- Se il candidato e' piu' forte ma meno simmetrico, oppure il teacher a 24 viste lo
-  migliora, si distillano i logits medi in una singola MLP.
-- Il distillato deve battere o pareggiare il candidato grezzo e superare nuovamente v14
-  sia policy-only sia nel PIMC 16x8.
+- Prima della raccolta completa, uno smoke piccolo deve verificare shard, resume,
+  assegnazione per `game_id`, memoria limitata e manifest riproducibile.
+- Lo student viene confrontato nel dominio canonico con teacher, v14 e raw 20M su seed
+  nuovi; la simmetria viene misurata separatamente sulle 24 rinomine.
+- Solo uno student con vantaggio confermato su v14 passa al confronto PIMC belief 16x8.
+  Neutralita' o regressione chiudono il ramo senza promozione.
 
-La distillazione trasferisce e ripulisce la strategia trovata dal super training; non e'
-considerata una fonte autonoma di nuova strategia.
+### Esito della distillazione esplorativa (2026-07-17)
+
+Il corpus sharded da 250.000 partite e lo student hanno completato tutti i gate. La
+policy singola migliora v14 sui 100.000 game indipendenti (`+0,18046`, CI95
+`+0,08..+0,28`), dimezza abbondantemente il flip dei semi e riduce overkill e trump
+waste. Nel runtime PIMC belief 16x8 da 10.000 game e' pero' neutra: `-0,0184` punti,
+CI95 `-0,33..+0,30`. Si realizza quindi l'esito preregistrato "raw forte, PIMC neutro":
+**nessuna promozione live di forza e nessuna v15 da questo gate 16x8**. Ricevute complete in
+`suit-distillation-20m-250k-2026-07-17.md`.
+
+La distillazione tenta di trasferire in un solo forward la strategia implicita resa
+visibile dall'ensemble dei semi. Il teacher dimostra che il segnale esiste; non dimostra
+ancora che una singola MLP riesca a conservarlo.
+
+### Follow-up di efficienza e release
+
+Un esperimento successivo, dichiarato come domanda diversa, ha ridotto la search dello
+student. Il profilo 8x8 e' stato respinto; il 12x8 ha superato screen, conferma da 20.000
+partite e audit browser: `+0,1052` punti contro v14 16x8 (CI95
+`-0,1126..+0,3230`) con latenza media/p95 circa `0,75x`. La release 0.38.0 ha quindi
+promosso lo student come v15 per efficienza/non inferiorita', non come risultato diretto
+del super training né come prova di forza statisticamente superiore.
 
 ## Esiti interpretabili
 

@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "snapshot_date": "2026-07-12",
+  "snapshot_date": "2026-07-17",
   "description": "Canonical compact inputs for docs/reports/model_progress.xlsx. raw_source paths are optional audit references; normal report builds use only this file.",
   "models": {
     "bc_v3": {
@@ -383,6 +383,21 @@
       "inference_overkill_guard": false,
       "train": {
         "num_games": 50000
+      }
+    },
+    "best_a2c_v15": {
+      "label": "Briscola AI v15",
+      "format": "mlp_bc_v1",
+      "encoder_version": "v4",
+      "feature_dim": 369,
+      "seed": 20260724,
+      "init": null,
+      "opponent_mix": null,
+      "bc_anchor_path": null,
+      "bc_anchor_beta": null,
+      "inference_overkill_guard": false,
+      "train": {
+        "num_games": 250000
       }
     }
   },
@@ -1184,6 +1199,63 @@
       "raw_source": "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/pimc16x8_vs_v13_medium.json",
       "wrapper": "bc_model_pimc_belief_16x8",
       "guard": false
+    },
+    {
+      "model_id": "best_a2c_v15",
+      "label": "Best A2C v15 policy",
+      "benchmark": "big",
+      "engine": "numba",
+      "suite": "standard",
+      "seed_range_start": 0,
+      "seat_fair": true,
+      "opponent": "heuristic_v1",
+      "avg_diff": 21.86688,
+      "wins_model": 77404,
+      "wins_opponent": 20522,
+      "draws": 2074,
+      "eval_games": 100000,
+      "data_quality": "exact",
+      "raw_source": "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/eval_v15_vs_heuristic_v1_big_numba.json",
+      "wrapper": "bc_model (direct policy)",
+      "guard": false
+    },
+    {
+      "model_id": "best_a2c_v15",
+      "label": "Best A2C v15 policy",
+      "benchmark": null,
+      "engine": "domain",
+      "suite": "standard",
+      "seed_range_start": 11000000,
+      "seat_fair": true,
+      "opponent": "best_a2c_v14_policy",
+      "avg_diff": 0.18046,
+      "wins_model": 48798,
+      "wins_opponent": 48317,
+      "draws": 2885,
+      "eval_games": 100000,
+      "data_quality": "exact",
+      "raw_source": "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/confirm_student_vs_v14_100k.json",
+      "wrapper": "bc_model (direct policy)",
+      "guard": false
+    },
+    {
+      "model_id": "best_a2c_v15",
+      "label": "Best A2C v15 PIMC 12x8",
+      "benchmark": null,
+      "engine": null,
+      "suite": "standard",
+      "seed_range_start": null,
+      "seat_fair": true,
+      "opponent": "best_a2c_v14_pimc16x8",
+      "avg_diff": 0.1052,
+      "wins_model": 9689,
+      "wins_opponent": 9621,
+      "draws": 690,
+      "eval_games": 20000,
+      "data_quality": "exact",
+      "raw_source": "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/efficiency_12x8/confirm_student12_vs_v14_16_20k.json",
+      "wrapper": "bc_model_pimc_belief_12x8",
+      "guard": false
     }
   ],
   "decision_quality": [
@@ -1317,6 +1389,25 @@
       "eval_games": 10000,
       "data_quality": "exact",
       "raw_source": "benchmarks/experiments/suit_distillation_v0_50k_seed20260712/quality_vs_heuristic_v1_medium.json",
+      "wrapper": "bc_model (direct policy)",
+      "guard": false
+    },
+    {
+      "model_id": "best_a2c_v15",
+      "label": "Best A2C v15",
+      "benchmark": "medium",
+      "engine": "domain",
+      "suite": "seat_fair",
+      "seed_range_start": null,
+      "seat_fair": true,
+      "opponent": "heuristic_v1",
+      "avg_diff": 22.493,
+      "trump_waste_rate": 0.00040925888031585154,
+      "trump_overkill_rate": 0.21035865974516282,
+      "trump_overkill_low_rate": 0.010636847129414973,
+      "eval_games": 10000,
+      "data_quality": "exact",
+      "raw_source": "benchmarks/experiments/suit_distillation_20m_teacher24_250k_seed20260724/decision_quality_student_vs_heuristic_v1_medium.json",
       "wrapper": "bc_model (direct policy)",
       "guard": false
     }
