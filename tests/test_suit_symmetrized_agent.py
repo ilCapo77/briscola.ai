@@ -22,6 +22,9 @@ from briscola_ai.domain.engine import PlayCardAction, step
 from briscola_ai.domain.observation import PlayerObservation, make_player_observation
 from briscola_ai.domain.state import new_game_state
 
+_FLOAT32_RTOL = 1e-5
+_FLOAT32_ATOL = 1e-7
+
 
 def _observation_with_history() -> PlayerObservation:
     """Costruisce uno stato reale avanzato, così il test esercita tutto l'encoder v4."""
@@ -59,7 +62,7 @@ def _random_agent(*, overkill_guard: bool = False) -> BCModelAgent:
 
 
 def test_batched_orbit_matches_24_semantic_forwards_and_identity() -> None:
-    """La scorciatoia numerica deve coincidere con il riferimento semantico, inclusa l'identità."""
+    """La scorciatoia batch deve coincidere numericamente con i 24 forward semantici."""
     observation = _observation_with_history()
     base_agent = _random_agent()
     agent = SuitSymmetrizedBCModelAgent(base_agent)
@@ -67,7 +70,9 @@ def test_batched_orbit_matches_24_semantic_forwards_and_identity() -> None:
 
     encoded = encode_player_observation_2p(observation, version="v4")
     identity_logits = base_agent.model.logits(np.asarray(encoded.features, dtype=np.float32))
-    np.testing.assert_array_equal(orbit[0], identity_logits)
+    # BLAS può accumulare i prodotti float32 in un ordine diverso fra un vettore e
+    # un batch. Il contratto è l'equivalenza numerica, non l'identità bit per bit.
+    np.testing.assert_allclose(orbit[0], identity_logits, rtol=_FLOAT32_RTOL, atol=_FLOAT32_ATOL)
 
     for row, permutation in zip(orbit, all_suit_permutations(), strict=True):
         transformed = permute_player_observation(observation, permutation)
@@ -77,7 +82,12 @@ def test_batched_orbit_matches_24_semantic_forwards_and_identity() -> None:
         )
         transformed_logits = base_agent.model.logits(transformed_features)
         expected = permute_action_vector(transformed_logits, inverse_suit_permutation(permutation))
-        np.testing.assert_array_equal(row, np.asarray(expected))
+        np.testing.assert_allclose(
+            row,
+            np.asarray(expected),
+            rtol=_FLOAT32_RTOL,
+            atol=_FLOAT32_ATOL,
+        )
 
 
 def test_group_average_is_numerically_equivariant_for_all_24_renamings() -> None:

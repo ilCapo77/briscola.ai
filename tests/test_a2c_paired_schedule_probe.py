@@ -9,7 +9,10 @@ import sys
 from pathlib import Path
 from typing import Any
 
+import numpy as np
 import pytest
+
+from briscola_ai.ai.encoding.observation_encoder import FEATURE_DIM_2P_V4
 
 
 def _load_module():
@@ -24,6 +27,45 @@ def _load_module():
 
 
 module = _load_module()
+
+
+def _write_zero_value_model(path: Path) -> None:
+    """Crea l'asset v4 minimo richiesto dall'opponent value-lookahead dello smoke."""
+    feature_dim = int(FEATURE_DIM_2P_V4)
+    np.savez(
+        path,
+        w1=np.zeros((feature_dim, 1), dtype=np.float32),
+        b1=np.zeros(1, dtype=np.float32),
+        w2=np.zeros(1, dtype=np.float32),
+        b2=np.zeros(1, dtype=np.float32),
+        metadata_json=json.dumps(
+            {
+                "format": "value_mlp_v1",
+                "feature_dim": feature_dim,
+                "hidden_dim": 1,
+                "encoder_version": "v4",
+                "target": "residual",
+                "target_scale": 120.0,
+            }
+        ),
+    )
+
+
+def _run_cli(command: list[str], *, root: Path) -> None:
+    """Esegue lo smoke mostrando l'output del figlio quando il comando fallisce."""
+    completed = subprocess.run(
+        command,
+        cwd=root,
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    if completed.returncode != 0:
+        pytest.fail(
+            f"Comando terminato con exit {completed.returncode}: {' '.join(command)}\n"
+            f"--- stdout ---\n{completed.stdout}\n"
+            f"--- stderr ---\n{completed.stderr}"
+        )
 
 
 def _regime_summaries(
@@ -118,6 +160,8 @@ def test_decision_stops_on_material_strength_regression() -> None:
 def test_cli_smoke_runs_all_regimes_and_direct_matches(tmp_path: Path) -> None:
     """Lo smoke attraversa nove training, suite comune, resume metadata e aggregazione."""
     root = Path(__file__).resolve().parents[1]
+    value_model = tmp_path / "value_v4_zero.npz"
+    _write_zero_value_model(value_model)
     command = [
         sys.executable,
         str(root / "scripts/run_a2c_paired_schedule_probe.py"),
@@ -131,21 +175,11 @@ def test_cli_smoke_runs_all_regimes_and_direct_matches(tmp_path: Path) -> None:
         "4",
         "--seeds",
         "17,18,19",
+        "--value-model",
+        str(value_model),
     ]
-    subprocess.run(
-        command,
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
-    subprocess.run(
-        [*command, "--resume"],
-        cwd=root,
-        check=True,
-        capture_output=True,
-        text=True,
-    )
+    _run_cli(command, root=root)
+    _run_cli([*command, "--resume"], root=root)
 
     report_path = tmp_path / "a2c_paired_schedule_g4_3seeds.json"
     report = json.loads(report_path.read_text(encoding="utf-8"))
